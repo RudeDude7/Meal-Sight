@@ -1,0 +1,4 @@
+photo_id,item_name,reason
+photo_01,beef,"not visible in frame; aicook labels fridge contents, not per-frame contents"
+photo_01,ham,"not visible in frame; aicook labels fridge contents, not per-frame contents"
+photo_01,shrimp,"not visible in frame; aicook labels fridge contents, not per-frame contents"

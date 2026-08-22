@@ -1,0 +1,14 @@
+.env
+__pycache__/
+*.pyc
+*.db
+*.db-journal
+node_modules/
+.venv/
+.DS_Store
+eval/results/*.json
+!eval/results/.gitkeep
+dist/
+build/
+*.egg-info/
+.cache/

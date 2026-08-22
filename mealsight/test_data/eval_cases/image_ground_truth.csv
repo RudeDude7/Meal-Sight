@@ -1,0 +1,567 @@
+photo_id,item_name,source_class,category
+photo_01,banana,banana,fruit
+photo_01,beef,beef,protein
+photo_01,blueberries,blueberries,fruit
+photo_01,butter,butter,dairy
+photo_01,corn,corn,vegetable
+photo_01,flour,flour,grain
+photo_01,goat cheese,goat_cheese,dairy
+photo_01,ham,ham,protein
+photo_01,heavy cream,heavy_cream,dairy
+photo_01,lime,lime,fruit
+photo_01,milk,milk,dairy
+photo_01,onion,onion,vegetable
+photo_01,potato,potato,vegetable
+photo_01,shrimp,shrimp,protein
+photo_01,sugar,sugar,other
+photo_01,sweet potato,sweet_potato,vegetable
+photo_02,banana,banana,fruit
+photo_02,beef,beef,protein
+photo_02,blueberries,blueberries,fruit
+photo_02,corn,corn,vegetable
+photo_02,flour,flour,grain
+photo_02,goat cheese,goat_cheese,dairy
+photo_02,ham,ham,protein
+photo_02,heavy cream,heavy_cream,dairy
+photo_02,lime,lime,fruit
+photo_02,milk,milk,dairy
+photo_02,onion,onion,vegetable
+photo_02,potato,potato,vegetable
+photo_02,shrimp,shrimp,protein
+photo_02,sugar,sugar,other
+photo_02,sweet potato,sweet_potato,vegetable
+photo_03,banana,banana,fruit
+photo_03,butter,butter,dairy
+photo_03,carrot,carrot,vegetable
+photo_03,cheese,cheese,dairy
+photo_03,corn,corn,vegetable
+photo_03,goat cheese,goat_cheese,dairy
+photo_03,green beans,green_beans,vegetable
+photo_03,heavy cream,heavy_cream,dairy
+photo_03,onion,onion,vegetable
+photo_03,potato,potato,vegetable
+photo_03,shrimp,shrimp,protein
+photo_03,spinach,spinach,vegetable
+photo_03,strawberries,strawberries,fruit
+photo_03,sweet potato,sweet_potato,vegetable
+photo_03,tomato,tomato,vegetable
+photo_04,banana,banana,fruit
+photo_04,butter,butter,dairy
+photo_04,carrot,carrot,vegetable
+photo_04,cheese,cheese,dairy
+photo_04,corn,corn,vegetable
+photo_04,goat cheese,goat_cheese,dairy
+photo_04,green beans,green_beans,vegetable
+photo_04,heavy cream,heavy_cream,dairy
+photo_04,milk,milk,dairy
+photo_04,potato,potato,vegetable
+photo_04,shrimp,shrimp,protein
+photo_04,spinach,spinach,vegetable
+photo_04,strawberries,strawberries,fruit
+photo_04,sweet potato,sweet_potato,vegetable
+photo_04,tomato,tomato,vegetable
+photo_05,banana,banana,fruit
+photo_05,blueberries,blueberries,fruit
+photo_05,butter,butter,dairy
+photo_05,carrot,carrot,vegetable
+photo_05,chicken,chicken,protein
+photo_05,corn,corn,vegetable
+photo_05,flour,flour,grain
+photo_05,goat cheese,goat_cheese,dairy
+photo_05,green beans,green_beans,vegetable
+photo_05,heavy cream,heavy_cream,dairy
+photo_05,milk,milk,dairy
+photo_05,onion,onion,vegetable
+photo_05,potato,potato,vegetable
+photo_05,spinach,spinach,vegetable
+photo_05,strawberries,strawberries,fruit
+photo_05,sugar,sugar,other
+photo_05,sweet potato,sweet_potato,vegetable
+photo_05,tomato,tomato,vegetable
+photo_06,apple,apple,fruit
+photo_06,banana,banana,fruit
+photo_06,beef,beef,protein
+photo_06,blueberries,blueberries,fruit
+photo_06,butter,butter,dairy
+photo_06,carrot,carrot,vegetable
+photo_06,chicken,chicken,protein
+photo_06,corn,corn,vegetable
+photo_06,flour,flour,grain
+photo_06,goat cheese,goat_cheese,dairy
+photo_06,green beans,green_beans,vegetable
+photo_06,heavy cream,heavy_cream,dairy
+photo_06,milk,milk,dairy
+photo_06,onion,onion,vegetable
+photo_06,potato,potato,vegetable
+photo_06,spinach,spinach,vegetable
+photo_06,strawberries,strawberries,fruit
+photo_06,sugar,sugar,other
+photo_06,sweet potato,sweet_potato,vegetable
+photo_07,apple,apple,fruit
+photo_07,banana,banana,fruit
+photo_07,beef,beef,protein
+photo_07,blueberries,blueberries,fruit
+photo_07,butter,butter,dairy
+photo_07,carrot,carrot,vegetable
+photo_07,chicken,chicken,protein
+photo_07,corn,corn,vegetable
+photo_07,flour,flour,grain
+photo_07,goat cheese,goat_cheese,dairy
+photo_07,green beans,green_beans,vegetable
+photo_07,heavy cream,heavy_cream,dairy
+photo_07,milk,milk,dairy
+photo_07,onion,onion,vegetable
+photo_07,potato,potato,vegetable
+photo_07,spinach,spinach,vegetable
+photo_07,strawberries,strawberries,fruit
+photo_07,sugar,sugar,other
+photo_07,sweet potato,sweet_potato,vegetable
+photo_07,tomato,tomato,vegetable
+photo_08,apple,apple,fruit
+photo_08,banana,banana,fruit
+photo_08,beef,beef,protein
+photo_08,blueberries,blueberries,fruit
+photo_08,butter,butter,dairy
+photo_08,carrot,carrot,vegetable
+photo_08,chicken,chicken,protein
+photo_08,corn,corn,vegetable
+photo_08,flour,flour,grain
+photo_08,goat cheese,goat_cheese,dairy
+photo_08,green beans,green_beans,vegetable
+photo_08,ground beef,ground_beef,protein
+photo_08,heavy cream,heavy_cream,dairy
+photo_08,lime,lime,fruit
+photo_08,milk,milk,dairy
+photo_08,onion,onion,vegetable
+photo_08,potato,potato,vegetable
+photo_08,spinach,spinach,vegetable
+photo_08,strawberries,strawberries,fruit
+photo_08,sugar,sugar,other
+photo_08,sweet potato,sweet_potato,vegetable
+photo_08,tomato,tomato,vegetable
+photo_09,apple,apple,fruit
+photo_09,banana,banana,fruit
+photo_09,beef,beef,protein
+photo_09,blueberries,blueberries,fruit
+photo_09,butter,butter,dairy
+photo_09,carrot,carrot,vegetable
+photo_09,chicken,chicken,protein
+photo_09,corn,corn,vegetable
+photo_09,flour,flour,grain
+photo_09,goat cheese,goat_cheese,dairy
+photo_09,green beans,green_beans,vegetable
+photo_09,ground beef,ground_beef,protein
+photo_09,ham,ham,protein
+photo_09,heavy cream,heavy_cream,dairy
+photo_09,lime,lime,fruit
+photo_09,milk,milk,dairy
+photo_09,onion,onion,vegetable
+photo_09,potato,potato,vegetable
+photo_09,spinach,spinach,vegetable
+photo_09,strawberries,strawberries,fruit
+photo_09,sugar,sugar,other
+photo_09,sweet potato,sweet_potato,vegetable
+photo_09,tomato,tomato,vegetable
+photo_10,apple,apple,fruit
+photo_10,banana,banana,fruit
+photo_10,blueberries,blueberries,fruit
+photo_10,butter,butter,dairy
+photo_10,carrot,carrot,vegetable
+photo_10,chicken,chicken,protein
+photo_10,corn,corn,vegetable
+photo_10,flour,flour,grain
+photo_10,goat cheese,goat_cheese,dairy
+photo_10,green beans,green_beans,vegetable
+photo_10,ground beef,ground_beef,protein
+photo_10,heavy cream,heavy_cream,dairy
+photo_10,lime,lime,fruit
+photo_10,milk,milk,dairy
+photo_10,mushrooms,mushrooms,vegetable
+photo_10,onion,onion,vegetable
+photo_10,potato,potato,vegetable
+photo_10,spinach,spinach,vegetable
+photo_10,strawberries,strawberries,fruit
+photo_10,sugar,sugar,other
+photo_10,sweet potato,sweet_potato,vegetable
+photo_10,tomato,tomato,vegetable
+photo_11,apple,apple,fruit
+photo_11,banana,banana,fruit
+photo_11,butter,butter,dairy
+photo_11,carrot,carrot,vegetable
+photo_11,cheese,cheese,dairy
+photo_11,chicken,chicken,protein
+photo_11,corn,corn,vegetable
+photo_11,flour,flour,grain
+photo_11,goat cheese,goat_cheese,dairy
+photo_11,green beans,green_beans,vegetable
+photo_11,ground beef,ground_beef,protein
+photo_11,ham,ham,protein
+photo_11,heavy cream,heavy_cream,dairy
+photo_11,lime,lime,fruit
+photo_11,milk,milk,dairy
+photo_11,mushrooms,mushrooms,vegetable
+photo_11,onion,onion,vegetable
+photo_11,potato,potato,vegetable
+photo_11,spinach,spinach,vegetable
+photo_11,strawberries,strawberries,fruit
+photo_11,sugar,sugar,other
+photo_11,sweet potato,sweet_potato,vegetable
+photo_11,tomato,tomato,vegetable
+photo_12,apple,apple,fruit
+photo_12,banana,banana,fruit
+photo_12,blueberries,blueberries,fruit
+photo_12,butter,butter,dairy
+photo_12,carrot,carrot,vegetable
+photo_12,cheese,cheese,dairy
+photo_12,corn,corn,vegetable
+photo_12,flour,flour,grain
+photo_12,goat cheese,goat_cheese,dairy
+photo_12,green beans,green_beans,vegetable
+photo_12,ground beef,ground_beef,protein
+photo_12,heavy cream,heavy_cream,dairy
+photo_12,lime,lime,fruit
+photo_12,milk,milk,dairy
+photo_12,mushrooms,mushrooms,vegetable
+photo_12,onion,onion,vegetable
+photo_12,potato,potato,vegetable
+photo_12,shrimp,shrimp,protein
+photo_12,spinach,spinach,vegetable
+photo_12,strawberries,strawberries,fruit
+photo_12,sugar,sugar,other
+photo_12,sweet potato,sweet_potato,vegetable
+photo_12,tomato,tomato,vegetable
+photo_13,apple,apple,fruit
+photo_13,blueberries,blueberries,fruit
+photo_13,butter,butter,dairy
+photo_13,carrot,carrot,vegetable
+photo_13,cheese,cheese,dairy
+photo_13,corn,corn,vegetable
+photo_13,flour,flour,grain
+photo_13,goat cheese,goat_cheese,dairy
+photo_13,green beans,green_beans,vegetable
+photo_13,ground beef,ground_beef,protein
+photo_13,ham,ham,protein
+photo_13,heavy cream,heavy_cream,dairy
+photo_13,lime,lime,fruit
+photo_13,mushrooms,mushrooms,vegetable
+photo_13,onion,onion,vegetable
+photo_13,potato,potato,vegetable
+photo_13,shrimp,shrimp,protein
+photo_13,spinach,spinach,vegetable
+photo_13,strawberries,strawberries,fruit
+photo_13,sugar,sugar,other
+photo_13,sweet potato,sweet_potato,vegetable
+photo_13,tomato,tomato,vegetable
+photo_14,apple,apple,fruit
+photo_14,banana,banana,fruit
+photo_14,beef,beef,protein
+photo_14,blueberries,blueberries,fruit
+photo_14,butter,butter,dairy
+photo_14,carrot,carrot,vegetable
+photo_14,cheese,cheese,dairy
+photo_14,corn,corn,vegetable
+photo_14,flour,flour,grain
+photo_14,goat cheese,goat_cheese,dairy
+photo_14,green beans,green_beans,vegetable
+photo_14,ham,ham,protein
+photo_14,heavy cream,heavy_cream,dairy
+photo_14,lime,lime,fruit
+photo_14,milk,milk,dairy
+photo_14,mushrooms,mushrooms,vegetable
+photo_14,onion,onion,vegetable
+photo_14,potato,potato,vegetable
+photo_14,shrimp,shrimp,protein
+photo_14,spinach,spinach,vegetable
+photo_14,strawberries,strawberries,fruit
+photo_14,sugar,sugar,other
+photo_14,sweet potato,sweet_potato,vegetable
+photo_14,tomato,tomato,vegetable
+photo_15,apple,apple,fruit
+photo_15,banana,banana,fruit
+photo_15,blueberries,blueberries,fruit
+photo_15,butter,butter,dairy
+photo_15,carrot,carrot,vegetable
+photo_15,cheese,cheese,dairy
+photo_15,chicken,chicken,protein
+photo_15,corn,corn,vegetable
+photo_15,flour,flour,grain
+photo_15,goat cheese,goat_cheese,dairy
+photo_15,green beans,green_beans,vegetable
+photo_15,ham,ham,protein
+photo_15,heavy cream,heavy_cream,dairy
+photo_15,lime,lime,fruit
+photo_15,milk,milk,dairy
+photo_15,mushrooms,mushrooms,vegetable
+photo_15,onion,onion,vegetable
+photo_15,potato,potato,vegetable
+photo_15,shrimp,shrimp,protein
+photo_15,spinach,spinach,vegetable
+photo_15,strawberries,strawberries,fruit
+photo_15,sugar,sugar,other
+photo_15,sweet potato,sweet_potato,vegetable
+photo_15,tomato,tomato,vegetable
+photo_16,apple,apple,fruit
+photo_16,banana,banana,fruit
+photo_16,blueberries,blueberries,fruit
+photo_16,butter,butter,dairy
+photo_16,carrot,carrot,vegetable
+photo_16,cheese,cheese,dairy
+photo_16,chicken,chicken,protein
+photo_16,flour,flour,grain
+photo_16,goat cheese,goat_cheese,dairy
+photo_16,milk,milk,dairy
+photo_16,mushrooms,mushrooms,vegetable
+photo_16,onion,onion,vegetable
+photo_16,potato,potato,vegetable
+photo_16,shrimp,shrimp,protein
+photo_16,spinach,spinach,vegetable
+photo_16,strawberries,strawberries,fruit
+photo_16,sugar,sugar,other
+photo_16,tomato,tomato,vegetable
+photo_17,apple,apple,fruit
+photo_17,banana,banana,fruit
+photo_17,blueberries,blueberries,fruit
+photo_17,butter,butter,dairy
+photo_17,carrot,carrot,vegetable
+photo_17,cheese,cheese,dairy
+photo_17,chicken,chicken,protein
+photo_17,goat cheese,goat_cheese,dairy
+photo_17,green beans,green_beans,vegetable
+photo_17,milk,milk,dairy
+photo_17,mushrooms,mushrooms,vegetable
+photo_17,onion,onion,vegetable
+photo_17,potato,potato,vegetable
+photo_17,shrimp,shrimp,protein
+photo_17,spinach,spinach,vegetable
+photo_17,strawberries,strawberries,fruit
+photo_17,sugar,sugar,other
+photo_17,tomato,tomato,vegetable
+photo_18,banana,banana,fruit
+photo_18,blueberries,blueberries,fruit
+photo_18,butter,butter,dairy
+photo_18,carrot,carrot,vegetable
+photo_18,cheese,cheese,dairy
+photo_18,goat cheese,goat_cheese,dairy
+photo_18,green beans,green_beans,vegetable
+photo_18,ham,ham,protein
+photo_18,milk,milk,dairy
+photo_18,mushrooms,mushrooms,vegetable
+photo_18,onion,onion,vegetable
+photo_18,potato,potato,vegetable
+photo_18,shrimp,shrimp,protein
+photo_18,spinach,spinach,vegetable
+photo_18,strawberries,strawberries,fruit
+photo_18,sugar,sugar,other
+photo_18,tomato,tomato,vegetable
+photo_19,banana,banana,fruit
+photo_19,butter,butter,dairy
+photo_19,carrot,carrot,vegetable
+photo_19,cheese,cheese,dairy
+photo_19,chicken,chicken,protein
+photo_19,corn,corn,vegetable
+photo_19,goat cheese,goat_cheese,dairy
+photo_19,ground beef,ground_beef,protein
+photo_19,heavy cream,heavy_cream,dairy
+photo_19,lime,lime,fruit
+photo_19,onion,onion,vegetable
+photo_19,potato,potato,vegetable
+photo_19,shrimp,shrimp,protein
+photo_19,spinach,spinach,vegetable
+photo_19,sugar,sugar,other
+photo_19,tomato,tomato,vegetable
+photo_20,banana,banana,fruit
+photo_20,butter,butter,dairy
+photo_20,carrot,carrot,vegetable
+photo_20,cheese,cheese,dairy
+photo_20,chicken,chicken,protein
+photo_20,corn,corn,vegetable
+photo_20,goat cheese,goat_cheese,dairy
+photo_20,ham,ham,protein
+photo_20,heavy cream,heavy_cream,dairy
+photo_20,lime,lime,fruit
+photo_20,onion,onion,vegetable
+photo_20,potato,potato,vegetable
+photo_20,shrimp,shrimp,protein
+photo_20,spinach,spinach,vegetable
+photo_20,sugar,sugar,other
+photo_20,tomato,tomato,vegetable
+photo_21,banana,banana,fruit
+photo_21,carrot,carrot,vegetable
+photo_21,cheese,cheese,dairy
+photo_21,chicken,chicken,protein
+photo_21,corn,corn,vegetable
+photo_21,goat cheese,goat_cheese,dairy
+photo_21,green beans,green_beans,vegetable
+photo_21,ham,ham,protein
+photo_21,heavy cream,heavy_cream,dairy
+photo_21,lime,lime,fruit
+photo_21,onion,onion,vegetable
+photo_21,potato,potato,vegetable
+photo_21,shrimp,shrimp,protein
+photo_21,strawberries,strawberries,fruit
+photo_21,sugar,sugar,other
+photo_21,sweet potato,sweet_potato,vegetable
+photo_21,tomato,tomato,vegetable
+photo_22,banana,banana,fruit
+photo_22,cheese,cheese,dairy
+photo_22,chicken,chicken,protein
+photo_22,corn,corn,vegetable
+photo_22,goat cheese,goat_cheese,dairy
+photo_22,green beans,green_beans,vegetable
+photo_22,ham,ham,protein
+photo_22,heavy cream,heavy_cream,dairy
+photo_22,lime,lime,fruit
+photo_22,onion,onion,vegetable
+photo_22,potato,potato,vegetable
+photo_22,shrimp,shrimp,protein
+photo_22,spinach,spinach,vegetable
+photo_22,strawberries,strawberries,fruit
+photo_22,sugar,sugar,other
+photo_22,sweet potato,sweet_potato,vegetable
+photo_22,tomato,tomato,vegetable
+photo_23,banana,banana,fruit
+photo_23,butter,butter,dairy
+photo_23,cheese,cheese,dairy
+photo_23,chicken,chicken,protein
+photo_23,corn,corn,vegetable
+photo_23,goat cheese,goat_cheese,dairy
+photo_23,green beans,green_beans,vegetable
+photo_23,ham,ham,protein
+photo_23,heavy cream,heavy_cream,dairy
+photo_23,lime,lime,fruit
+photo_23,onion,onion,vegetable
+photo_23,potato,potato,vegetable
+photo_23,shrimp,shrimp,protein
+photo_23,strawberries,strawberries,fruit
+photo_23,sugar,sugar,other
+photo_23,sweet potato,sweet_potato,vegetable
+photo_23,tomato,tomato,vegetable
+photo_24,banana,banana,fruit
+photo_24,butter,butter,dairy
+photo_24,cheese,cheese,dairy
+photo_24,chicken,chicken,protein
+photo_24,corn,corn,vegetable
+photo_24,goat cheese,goat_cheese,dairy
+photo_24,green beans,green_beans,vegetable
+photo_24,ham,ham,protein
+photo_24,heavy cream,heavy_cream,dairy
+photo_24,lime,lime,fruit
+photo_24,onion,onion,vegetable
+photo_24,potato,potato,vegetable
+photo_24,strawberries,strawberries,fruit
+photo_24,sugar,sugar,other
+photo_24,sweet potato,sweet_potato,vegetable
+photo_24,tomato,tomato,vegetable
+photo_25,banana,banana,fruit
+photo_25,beef,beef,protein
+photo_25,butter,butter,dairy
+photo_25,carrot,carrot,vegetable
+photo_25,cheese,cheese,dairy
+photo_25,chicken,chicken,protein
+photo_25,corn,corn,vegetable
+photo_25,goat cheese,goat_cheese,dairy
+photo_25,green beans,green_beans,vegetable
+photo_25,heavy cream,heavy_cream,dairy
+photo_25,lime,lime,fruit
+photo_25,onion,onion,vegetable
+photo_25,potato,potato,vegetable
+photo_25,strawberries,strawberries,fruit
+photo_25,sweet potato,sweet_potato,vegetable
+photo_25,tomato,tomato,vegetable
+photo_26,banana,banana,fruit
+photo_26,butter,butter,dairy
+photo_26,carrot,carrot,vegetable
+photo_26,chicken,chicken,protein
+photo_26,flour,flour,grain
+photo_26,goat cheese,goat_cheese,dairy
+photo_26,green beans,green_beans,vegetable
+photo_26,heavy cream,heavy_cream,dairy
+photo_26,milk,milk,dairy
+photo_26,onion,onion,vegetable
+photo_26,potato,potato,vegetable
+photo_26,spinach,spinach,vegetable
+photo_26,strawberries,strawberries,fruit
+photo_26,sugar,sugar,other
+photo_26,sweet potato,sweet_potato,vegetable
+photo_26,tomato,tomato,vegetable
+photo_27,apple,apple,fruit
+photo_27,banana,banana,fruit
+photo_27,beef,beef,protein
+photo_27,blueberries,blueberries,fruit
+photo_27,butter,butter,dairy
+photo_27,carrot,carrot,vegetable
+photo_27,chicken,chicken,protein
+photo_27,corn,corn,vegetable
+photo_27,flour,flour,grain
+photo_27,goat cheese,goat_cheese,dairy
+photo_27,green beans,green_beans,vegetable
+photo_27,heavy cream,heavy_cream,dairy
+photo_27,lime,lime,fruit
+photo_27,milk,milk,dairy
+photo_27,mushrooms,mushrooms,vegetable
+photo_27,onion,onion,vegetable
+photo_27,potato,potato,vegetable
+photo_27,spinach,spinach,vegetable
+photo_27,strawberries,strawberries,fruit
+photo_27,sugar,sugar,other
+photo_27,sweet potato,sweet_potato,vegetable
+photo_27,tomato,tomato,vegetable
+photo_28,apple,apple,fruit
+photo_28,butter,butter,dairy
+photo_28,carrot,carrot,vegetable
+photo_28,cheese,cheese,dairy
+photo_28,corn,corn,vegetable
+photo_28,flour,flour,grain
+photo_28,goat cheese,goat_cheese,dairy
+photo_28,green beans,green_beans,vegetable
+photo_28,ground beef,ground_beef,protein
+photo_28,heavy cream,heavy_cream,dairy
+photo_28,lime,lime,fruit
+photo_28,milk,milk,dairy
+photo_28,mushrooms,mushrooms,vegetable
+photo_28,potato,potato,vegetable
+photo_28,shrimp,shrimp,protein
+photo_28,spinach,spinach,vegetable
+photo_28,strawberries,strawberries,fruit
+photo_28,sugar,sugar,other
+photo_28,sweet potato,sweet_potato,vegetable
+photo_28,tomato,tomato,vegetable
+photo_29,apple,apple,fruit
+photo_29,banana,banana,fruit
+photo_29,blueberries,blueberries,fruit
+photo_29,butter,butter,dairy
+photo_29,carrot,carrot,vegetable
+photo_29,cheese,cheese,dairy
+photo_29,chicken,chicken,protein
+photo_29,corn,corn,vegetable
+photo_29,flour,flour,grain
+photo_29,goat cheese,goat_cheese,dairy
+photo_29,green beans,green_beans,vegetable
+photo_29,ham,ham,protein
+photo_29,heavy cream,heavy_cream,dairy
+photo_29,lime,lime,fruit
+photo_29,milk,milk,dairy
+photo_29,mushrooms,mushrooms,vegetable
+photo_29,potato,potato,vegetable
+photo_29,shrimp,shrimp,protein
+photo_29,spinach,spinach,vegetable
+photo_29,strawberries,strawberries,fruit
+photo_29,sugar,sugar,other
+photo_29,sweet potato,sweet_potato,vegetable
+photo_29,tomato,tomato,vegetable
+photo_30,apple,apple,fruit
+photo_30,banana,banana,fruit
+photo_30,blueberries,blueberries,fruit
+photo_30,butter,butter,dairy
+photo_30,carrot,carrot,vegetable
+photo_30,cheese,cheese,dairy
+photo_30,chicken,chicken,protein
+photo_30,green beans,green_beans,vegetable
+photo_30,ham,ham,protein
+photo_30,milk,milk,dairy
+photo_30,mushrooms,mushrooms,vegetable
+photo_30,onion,onion,vegetable
+photo_30,shrimp,shrimp,protein
+photo_30,spinach,spinach,vegetable
+photo_30,strawberries,strawberries,fruit
+photo_30,sugar,sugar,other

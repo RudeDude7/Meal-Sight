@@ -1,0 +1,320 @@
+[
+  {
+    "id": "memo_01",
+    "script": "Okay so it's just me tonight, thirty minutes tops, no dairy, and I really want something high protein.",
+    "voice_used": "en-US-GuyNeural",
+    "expected_constraints": {
+      "servings": 1,
+      "max_cook_time_minutes": 30,
+      "dietary_restrictions": [
+        "dairy-free"
+      ],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": "high-protein",
+      "mood_or_preference": null
+    }
+  },
+  {
+    "id": "memo_02",
+    "script": "Cooking for four tonight, we've got about forty five minutes, and please nothing with peanuts, my daughter's allergic.",
+    "voice_used": "en-US-JennyNeural",
+    "expected_constraints": {
+      "servings": 4,
+      "max_cook_time_minutes": 45,
+      "dietary_restrictions": [
+        "peanut-free"
+      ],
+      "avoid_ingredients": [
+        "peanuts"
+      ],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": null
+    }
+  },
+  {
+    "id": "memo_03",
+    "script": "There's two of us, twenty minutes max, keep it vegetarian, and honestly I'm craving something Italian.",
+    "voice_used": "en-GB-RyanNeural",
+    "expected_constraints": {
+      "servings": 2,
+      "max_cook_time_minutes": 20,
+      "dietary_restrictions": [
+        "vegetarian"
+      ],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": "Italian",
+      "protein_preference": null,
+      "mood_or_preference": null
+    }
+  },
+  {
+    "id": "memo_04",
+    "script": "Just me tonight, no real time limit, let's say an hour to be safe, gluten free, and chicken if we've got it.",
+    "voice_used": "en-GB-SoniaNeural",
+    "expected_constraints": {
+      "servings": 1,
+      "max_cook_time_minutes": 60,
+      "dietary_restrictions": [
+        "gluten-free"
+      ],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": "chicken",
+      "mood_or_preference": null
+    }
+  },
+  {
+    "id": "memo_05",
+    "script": "It's a family of five, need it done in under thirty five minutes, low sodium for my dad, and Mexican food sounds great right about now.",
+    "voice_used": "en-AU-WilliamMultilingualNeural",
+    "expected_constraints": {
+      "servings": 5,
+      "max_cook_time_minutes": 35,
+      "dietary_restrictions": [
+        "low-sodium"
+      ],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": "Mexican",
+      "protein_preference": null,
+      "mood_or_preference": null
+    }
+  },
+  {
+    "id": "memo_06",
+    "script": "Solo dinner, fifteen minutes because I've got a call after, dairy free, and something with beef would be perfect.",
+    "voice_used": "en-AU-NatashaNeural",
+    "expected_constraints": {
+      "servings": 1,
+      "max_cook_time_minutes": 15,
+      "dietary_restrictions": [
+        "dairy-free"
+      ],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": "beef",
+      "mood_or_preference": null
+    }
+  },
+  {
+    "id": "memo_07",
+    "script": "Uh, I don't know, something easy I guess. I'm tired.",
+    "voice_used": "en-IN-PrabhatNeural",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": "tired, wants something easy"
+    }
+  },
+  {
+    "id": "memo_08",
+    "script": "Whatever's fastest honestly, I don't really care what it is at this point.",
+    "voice_used": "en-IE-EmilyNeural",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": "doesn't care, wants the fastest option"
+    }
+  },
+  {
+    "id": "memo_09",
+    "script": "Something comforting maybe? I've had a really long day.",
+    "voice_used": "en-US-GuyNeural",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": "wants comfort food after a long day"
+    }
+  },
+  {
+    "id": "memo_10",
+    "script": "I dunno... surprise me I guess.",
+    "voice_used": "en-US-JennyNeural",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": "indifferent, wants to be surprised"
+    }
+  },
+  {
+    "id": "memo_11",
+    "script": "Not picky at all, just, you know, nothing too heavy tonight.",
+    "voice_used": "en-GB-RyanNeural",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": "wants something light, otherwise not picky"
+    }
+  },
+  {
+    "id": "memo_12",
+    "script": "Something quick-ish, nothing crazy, you know what I mean.",
+    "voice_used": "en-GB-SoniaNeural",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": "wants something quick and simple, unspecific"
+    }
+  },
+  {
+    "id": "memo_13",
+    "script": "Make it for two \u2014 actually, three, my roommate's back \u2014 so three servings, and let's say thirty minutes.",
+    "voice_used": "en-AU-WilliamMultilingualNeural",
+    "expected_constraints": {
+      "servings": 3,
+      "max_cook_time_minutes": 30,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": null
+    }
+  },
+  {
+    "id": "memo_14",
+    "script": "I want tacos \u2014 no wait, actually I had those yesterday, let's do something with rice instead.",
+    "voice_used": "en-AU-NatashaNeural",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [
+        "tacos"
+      ],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": "wants variety from yesterday's meal, leaning toward a rice-based dish"
+    }
+  },
+  {
+    "id": "memo_15",
+    "script": "No dairy \u2014 oh wait, cheese is fine actually, just no milk, I don't know why I said that.",
+    "voice_used": "en-IN-PrabhatNeural",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [
+        "milk"
+      ],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": null
+    }
+  },
+  {
+    "id": "memo_16",
+    "script": "Give me like twenty minutes \u2014 actually, you know what, I've got more time tonight, call it forty five.",
+    "voice_used": "en-IE-EmilyNeural",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": 45,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": null
+    }
+  },
+  {
+    "id": "memo_17",
+    "script": "I want something healthy and light but also, like, really filling and hearty, and honestly I'm kind of craving fried chicken.",
+    "voice_used": "en-US-GuyNeural",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": "chicken",
+      "mood_or_preference": "contradictory: wants light/healthy AND hearty fried food in the same breath"
+    }
+  },
+  {
+    "id": "memo_18",
+    "script": "Quick, like ten minutes tops \u2014 but also I really want a slow braised stew, comfort food, take your time with it.",
+    "voice_used": "en-US-JennyNeural",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": 10,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": "contradictory: asks for a ten-minute meal but describes a slow-braised stew"
+    }
+  },
+  {
+    "id": "memo_19",
+    "script": "Oh, I picked up some fresh salmon at the store today, haven't put it away yet, so use that if you can, thirty minutes tops.",
+    "voice_used": "en-GB-RyanNeural",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": 30,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": "salmon",
+      "mood_or_preference": "mentions fresh salmon not yet put away \u2014 likely absent from the fridge photo, needs verification"
+    }
+  },
+  {
+    "id": "memo_20",
+    "script": "Oh, I also grabbed a bag of fresh basil and some prosciutto this morning, probably not in the fridge pictures yet, feel free to use them.",
+    "voice_used": "en-GB-SoniaNeural",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": "mentions basil and prosciutto bought this morning \u2014 likely absent from the fridge photo, needs verification"
+    }
+  }
+]

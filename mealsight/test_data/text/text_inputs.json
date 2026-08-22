@@ -1,0 +1,142 @@
+[
+  {
+    "id": "text_01",
+    "text": "2 servings, 25 min, vegetarian, no mushrooms, want Thai food",
+    "expected_constraints": {
+      "servings": 2,
+      "max_cook_time_minutes": 25,
+      "dietary_restrictions": ["vegetarian"],
+      "avoid_ingredients": ["mushrooms"],
+      "avoid_dishes": [],
+      "cuisine_preference": "Thai",
+      "protein_preference": null,
+      "mood_or_preference": null
+    }
+  },
+  {
+    "id": "text_02",
+    "text": "for one person, quick, dairy free",
+    "expected_constraints": {
+      "servings": 1,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": ["dairy-free"],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": "wants something quick"
+    }
+  },
+  {
+    "id": "text_03",
+    "text": "surprise me",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": "wants to be surprised, no constraints given"
+    }
+  },
+  {
+    "id": "text_04",
+    "text": "family dinner tonight, nothing crazy",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": "wants something familiar and simple for the family"
+    }
+  },
+  {
+    "id": "text_05",
+    "text": "keto, 4 people, 40 minutes max, no seafood",
+    "expected_constraints": {
+      "servings": 4,
+      "max_cook_time_minutes": 40,
+      "dietary_restrictions": ["keto"],
+      "avoid_ingredients": ["seafood"],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": null
+    }
+  },
+  {
+    "id": "text_06",
+    "text": "something with chicken and rice, 3 servings",
+    "expected_constraints": {
+      "servings": 3,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": "chicken",
+      "mood_or_preference": null
+    }
+  },
+  {
+    "id": "text_07",
+    "text": "idk anything",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": "no usable signal, completely open"
+    }
+  },
+  {
+    "id": "text_08",
+    "text": "avoid pork and shellfish, halal, 2 servings",
+    "expected_constraints": {
+      "servings": 2,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": ["halal"],
+      "avoid_ingredients": ["pork", "shellfish"],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": null
+    }
+  },
+  {
+    "id": "text_09",
+    "text": "not too spicy, easy cleanup, whatever's in the fridge",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": [],
+      "avoid_ingredients": ["excess spice"],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": "wants low effort cleanup, mild flavor, use what's on hand"
+    }
+  },
+  {
+    "id": "text_10",
+    "text": "food pls",
+    "expected_constraints": {
+      "servings": null,
+      "max_cook_time_minutes": null,
+      "dietary_restrictions": [],
+      "avoid_ingredients": [],
+      "avoid_dishes": [],
+      "cuisine_preference": null,
+      "protein_preference": null,
+      "mood_or_preference": "nearly no signal at all"
+    }
+  }
+]

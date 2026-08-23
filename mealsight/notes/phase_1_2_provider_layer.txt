@@ -1,0 +1,1760 @@
+PHASE 1.2 STUDY NOTES: THE LLM PROVIDER LAYER
+=============================================================
+
+These notes cover the second backend phase: the code that actually talks
+to Mistral (text, JSON extraction, vision) and Groq (audio transcription)
+over the network, plus the rate limiting, retry, and error handling
+wrapped around those calls. Everything below describes code that really
+exists in the repo right now, in backend/mealsight/providers/ and
+backend/tests/.
+
+
+1. WHY THIS LAYER EXISTS
+=============================================================
+
+Here's the real story, and it's worth sitting with for a second: two
+models named in MealSight's original spec were decommissioned by the
+vendor before development even started. Not "might change later" -
+already gone by the time anyone wrote code against them. If those model
+names had been typed directly into a dozen different files - one call
+site in the vision code, another in the recipe extraction code, another
+in the reasoning code - fixing that would have meant grepping the whole
+codebase, hoping you found every occurrence, and hoping none of them had
+slightly different request shapes that needed different fixes.
+
+An abstraction layer, in plain terms, is a layer of code that sits
+between "the thing you actually want to do" (ask an AI model to describe
+a photo) and "the specific vendor's way of doing it" (a particular JSON
+shape, a particular URL, a particular auth header). Everything above the
+layer talks to the layer's interface. Everything below the layer talks
+to the real vendor. The vendor can change, or get swapped for a
+different one, and only the code below the layer has to change.
+
+What breaks in a codebase where call sites talk to vendor APIs directly:
+the model name is a magic string copy-pasted everywhere it's needed. The
+retry logic (if any) gets rewritten slightly differently in each call
+site, so some places retry on 500 and some don't. The rate limiting (if
+any) either doesn't exist, or exists as a sleep() call bolted onto one
+function and forgotten everywhere else. And when a model gets pulled out
+from under you - as actually happened here - there's no single place to
+fix it. This phase's config module (built in phase 1.1) already put the
+model names in one place, as settings.VISION_MODEL and friends. This
+phase's providers/ package is the second half of that fix: it makes sure
+every actual network call, every retry, every rate limit check, and
+every error also lives in one place, not copy-pasted per call site.
+
+
+2. FILE MAP
+=============================================================
+
+backend/mealsight/providers/rate_limiter.py
+    The async token-bucket rate limiter. Two buckets per model - one for
+    requests per second, one for tokens per minute - plus the logic that
+    waits for both before letting a call through, and settles the token
+    estimate afterward.
+
+backend/mealsight/providers/exceptions.py
+    The exception hierarchy every provider raises: ProviderError as the
+    base, and RateLimitExceeded, ProviderUnavailable, InvalidResponse,
+    ProviderTimeout as the specific cases.
+
+backend/mealsight/providers/base.py
+    The abstract interfaces (TextProvider, VisionProvider, AudioProvider)
+    that concrete providers implement, plus the TextResponse and
+    TranscriptionResponse data shapes every provider call returns.
+
+backend/mealsight/providers/mistral.py
+    The concrete Mistral implementation: text completion, JSON-schema
+    completion, and image analysis, all over one httpx client.
+
+backend/mealsight/providers/groq.py
+    The concrete Groq implementation: audio transcription, including the
+    Cloudflare bot-block workaround.
+
+backend/mealsight/providers/retry.py
+    request_with_retry(), the shared retry policy every provider's HTTP
+    call goes through - backoff schedule, 429 handling, which errors are
+    worth retrying and which aren't.
+
+backend/mealsight/providers/__init__.py
+    The factory: get_text_provider(), get_vision_provider(),
+    get_audio_provider(), get_rate_limiter(), and close(). This is where
+    the shared httpx client and shared RateLimiter actually get built.
+
+backend/tests/test_providers/test_rate_limiter.py
+    Unit tests for the token bucket: timing, concurrent access, reconcile
+    math, and the zero-TPM edge case.
+
+backend/tests/test_providers/test_mistral.py
+    Unit tests for the Mistral provider, all mocked with respx - JSON
+    parsing, fence stripping, the repair retry, image byte detection.
+
+backend/tests/test_providers/test_groq.py
+    Unit tests for the Groq provider, including the Cloudflare 1010 case
+    and the User-Agent header.
+
+backend/tests/test_providers/test_retry.py
+    Unit tests for the retry policy in isolation, using a fake
+    make_request function instead of a real provider.
+
+backend/tests/test_providers/test_tracing.py
+    One test confirming a trace_id bound via phase 1.1's logging module
+    shows up in a provider's own log lines.
+
+backend/tests/integration/test_providers_live.py
+    Three tests that make real, billed calls to the real APIs. Marked
+    with @pytest.mark.integration so they don't run by default.
+
+backend/pyproject.toml
+    Registers the "integration" pytest marker and sets addopts to skip it
+    by default (details in section 11).
+
+
+3. THE RATE LIMITER
+=============================================================
+
+What rate limiting is, and why the provider needs it
+----------------------------------------------------------------
+Every API vendor caps how fast you're allowed to call them. Go over the
+cap and you get an error response instead of an answer - or worse, your
+account gets flagged. Rate limiting on the client side means the code
+deliberately paces its own outgoing calls to stay under that cap, instead
+of firing as fast as possible and hoping the vendor's own limiter never
+kicks in. It's defensive: you control the pacing on your end so you're
+never surprised by a rejection on the vendor's end.
+
+RPS and TPM, and why a model needs both at once
+----------------------------------------------------------------
+RPS is requests per second - how many separate API calls you're allowed
+to fire in a one-second window. TPM is tokens per minute - a token is
+roughly a word-sized chunk of text, and TPM caps the total volume of text
+(input plus output combined) you're allowed to process in a
+sixty-second window, regardless of how many separate requests that text
+was split across.
+
+Here's the concrete case where one limit is fine and the other isn't.
+Say a model allows 10 RPS and 50,000 TPM. If you send ten tiny one-line
+prompts in one second, you're right at the RPS cap but nowhere near the
+TPM cap - fine. But if you send one enormous 60,000-token prompt in that
+same second, you've used only 1 of your 10 allowed requests, but you've
+already blown past the TPM cap for the whole minute. Same call count,
+wildly different token volume, and only one of the two limits catches
+it. You need both dimensions checked independently, because either one
+alone can let you accidentally violate the other.
+
+The token bucket algorithm, from scratch
+----------------------------------------------------------------
+Picture an actual bucket that holds water, sitting under a tap that
+drips at a fixed, slow rate. The bucket has a maximum size - call it
+capacity. Every time you want to do something, you have to scoop out
+some water first. If there's enough water in the bucket, you scoop it
+out immediately and go. If there isn't enough, you wait until the tap
+has dripped in enough to cover what you need, then you scoop and go.
+
+In code terms: capacity is the most this bucket can ever hold. refill
+rate is how fast it fills back up over time (in this code, refill
+happens by tracking how much wall-clock time passed since the last check
+and multiplying that by the rate - not a background timer, just math
+done lazily whenever someone asks). When the bucket is empty and a call
+needs more than it currently holds, the caller computes exactly how long
+it needs to wait for the shortfall to refill, and waits that long.
+
+The reason this algorithm allows short bursts while still holding a
+long-run average: if the bucket has been sitting full and unused for a
+while, a call can scoop the whole thing out at once with zero wait - a
+burst. But once it's empty, the next call has to wait for the tap to
+catch up, and over any long stretch of time the total amount you can
+scoop out is capped by the tap's drip rate. Short-term bursts are
+allowed; the average over time is strictly bounded. That's exactly the
+behavior a "requests per second" or "tokens per minute" cap is meant to
+describe - it's not "never go fast," it's "don't sustain a pace faster
+than this."
+
+In this code specifically, the request bucket has capacity 1.0 - so
+there's no burst allowance for the RPS dimension at all, every call
+after the very first one has to wait its full turn. The token bucket has
+capacity equal to the model's whole TPM number, so a caller that's been
+idle for a while really can spend the model's entire minute-budget on
+one big request if nothing else has used it recently - matching how
+"tokens per minute" limits are actually enforced by real providers.
+
+Why two buckets, and how acquire waits for both
+----------------------------------------------------------------
+Since RPS and TPM are two independent constraints (see above), the code
+keeps two separate _Bucket objects per model id: one whose "amount" is
+always 1 (one request), one whose "amount" is the estimated token cost
+of this particular call. acquire() checks how long each bucket alone
+would need to wait, takes the larger of the two waits (because the call
+can't go out until BOTH would allow it), sleeps that long once, then
+consumes from both buckets. If a model's TPM limit is 0 - which happens
+for Groq's Whisper endpoint in this codebase, since that account's audio
+limit is RPS-only - the token bucket is skipped entirely rather than
+built with a zero rate, which would mean "never has enough" and the code
+would hang forever waiting on a bucket that mathematically can never
+fill.
+
+acquire(), step by step
+----------------------------------------------------------------
+Here's the actual sequence, matching the code:
+
+    1. Grab this model's lock (more on why in a moment).
+    2. Look up (or lazily create) this model's request bucket and token
+       bucket.
+    3. Ask the request bucket how long it would need to wait for one
+       more request-slot to be available.
+    4. Ask the token bucket (if there is one) how long it would need to
+       wait for the estimated token count to be available.
+    5. Take the larger of those two waits.
+    6. If that's more than zero, log it at debug level (see below for
+       why debug, not warning) and actually sleep for that long. After
+       waking up, refill both buckets again to account for however much
+       time just passed during the sleep.
+    7. Consume 1.0 from the request bucket, and the estimated token count
+       from the token bucket.
+    8. Release the lock.
+
+Every wait also gets recorded on the limiter (a WaitInfo object,
+per-model) noting the wait length, which bucket was binding - "rps",
+"tpm", "both" if they tied, or "none" if there was no wait at all - so
+something later (a test, a diagnostic script) can confirm which
+dimension actually constrained a given call instead of just trusting
+that both are wired up correctly.
+
+reconcile(): why estimate first, and what happens if you skip it
+----------------------------------------------------------------
+Here's the timing problem: acquire() has to happen BEFORE the network
+call goes out, because the whole point is to not send the call until
+there's room in the budget. But the real token count - the number the
+provider actually billed you for - only comes back AFTER the response
+arrives, in the response body's usage field. So the code has no choice
+but to acquire() against an estimate, then true it up once the real
+number is known.
+
+reconcile(model_id, actual_tokens, estimated_tokens) is that true-up
+step. If the estimate was too high (you guessed 2000 tokens, it actually
+cost 1500), the surplus of 500 gets added back to the token bucket - you
+get credit for having overestimated. If the estimate was too low (you
+guessed 2000, it actually cost 2500), the extra 500 gets taken out of the
+bucket - the bucket is now more depleted than acquire() alone accounted
+for, so the next call for this model will simply have to wait a bit
+longer than it otherwise would have.
+
+If reconcile were skipped entirely, the bucket's token count would drift
+away from reality every single call, always in the direction of "more
+generous than the estimate allowed for" if the estimate tends to run
+high, or "the account gets over-committed relative to what the provider
+actually thinks you've used" if the estimate tends to run low. Since
+this codebase's estimates are deliberately rough (see section 6), that
+drift would compound fast without reconcile pulling it back to the truth
+after every single call.
+
+asyncio.Lock: what it is, and what breaks without one
+----------------------------------------------------------------
+A lock is an object that only one piece of code can be "holding" at a
+time; anyone else that tries to grab it has to wait until the current
+holder lets go. asyncio.Lock is the async-flavored version - "waiting"
+here means the waiting coroutine (a coroutine is a chunk of async code
+that can pause and resume without blocking the whole program) gets
+suspended and something else gets to run in the meantime, rather than
+the whole program freezing.
+
+A race condition is a bug where the correctness of the code depends on
+the precise, unpredictable order two pieces of concurrent code happen to
+interleave in. Here's the concrete failure without a lock: imagine two
+coroutines both want to call the same model at nearly the same instant.
+Both check the bucket ("do I have enough tokens?") before either one has
+consumed anything - both see "yes, there's room." Both then consume from
+the bucket. Now the bucket might be negative, or two calls just went out
+back-to-back with zero wait between them even though the rate limit
+technically only allowed one. The check and the consume have to happen
+as one uninterruptible unit - that's exactly what "async with
+self._lock_for(model_id):" guarantees: nothing else touching this
+model's buckets can run in between the check and the consume, even
+though the code in between literally includes an await (the sleep). This
+is also exactly why "concurrent acquires serialize" is the intended,
+correct behavior for calls to the same model, not a performance bug to
+fix later.
+
+Why the lock is per-model, not one global lock
+----------------------------------------------------------------
+If there were a single lock shared by every model, a call waiting on
+mistral-medium-2505's slow 0.42-requests-per-second budget would be
+holding that one lock the entire time it's asleep - and since the lock
+is global, nothing else could even START checking ministral-8b-2512's
+much faster budget until that sleep finishes, even though the two
+models have nothing to do with each other and don't share any actual
+constraint. A global lock would silently drag every model down to the
+pace of whichever model happens to be sleeping longest at that moment.
+Keeping a separate asyncio.Lock per model id (created lazily the first
+time that model id shows up) means mistral-medium-2505's slow pace never
+blocks ministral-8b-2512's fast one - only two calls to the exact same
+model actually contend with each other.
+
+Why waiting is normal, not an error - and why it's logged at debug
+----------------------------------------------------------------
+0.42 RPS sounds abstract until you do the division: that's one call
+allowed roughly every 2.4 seconds. Under any real workload that makes
+more than one call to this model, most calls after the first are going
+to wait - that is the intended, expected, everyday behavior of hitting
+this limit, not a malfunction. That's exactly why acquire() logs the
+wait at logger.debug(...) rather than logger.warning(...): a warning
+level log is supposed to mean "something unusual or worth a human's
+attention happened." A perfectly normal, expected wait on a
+known-slow model doesn't qualify - logging it as a warning would mean
+every single production run of this system spams warnings constantly for
+completely routine behavior, drowning out the warnings that actually do
+mean something's wrong.
+
+Why the limiter reads from settings instead of holding its own numbers
+----------------------------------------------------------------
+_buckets_for() calls settings.get_rate_limit(model_id) to look up the
+rps and tpm for a model the first time that model id is seen, and builds
+the buckets from that. It does not have its own separately-maintained
+copy of "here are the rate limits" anywhere in rate_limiter.py. This
+matters for the exact reason this whole phase exists: the real numbers
+live in exactly one place (mealsight.config.settings.MODEL_RATE_LIMITS,
+built in phase 1.1), so updating an account's actual limit - which
+providers do change over time - means editing one dictionary, not
+hunting through the rate limiter's own code for a second, possibly
+stale, copy of the same numbers.
+
+
+4. THE EXCEPTION HIERARCHY
+=============================================================
+
+What a custom exception is, and why a hierarchy beats the alternatives
+----------------------------------------------------------------
+A custom exception is just a class you define yourself that inherits
+from Python's built-in Exception (directly or through some chain), so
+you can raise and catch it by name instead of using a generic one. The
+alternative approaches - raising a bare Exception everywhere, or having
+every function return some kind of error code / result tuple instead of
+raising at all - both lose information a caller several layers up
+actually needs. A bare Exception can't be selectively caught (you'd have
+to catch it and then string-match the message to figure out what
+actually went wrong, which is fragile). Returning error codes means
+every single caller, all the way up the chain, has to remember to check
+for the error case and pass it along - miss one spot and an error
+silently turns into an unexpected None or empty value somewhere
+downstream.
+
+A base class (ProviderError) with specific subclasses gives you both:
+code that only cares "did something go wrong with a provider at all" can
+catch ProviderError and get every case. Code that needs to react
+differently to different failure modes can catch the specific subclass
+instead.
+
+Each exception, what raises it, and how a caller should react
+----------------------------------------------------------------
+ProviderError - the base class. Never raised directly by name; every
+raise in this codebase constructs one of the four subclasses below.
+Carries provider (a string like "mistral" or "groq"), model_id, and an
+optional cause (the lower-level exception that triggered this one, if
+any).
+
+RateLimitExceeded - raised by retry.py when the provider itself has
+returned HTTP 429 (its own rate-limit rejection) repeatedly, even after
+retry.py already tried honoring Retry-After and running through the
+backoff schedule. A caller seeing this should back off much further than
+normal, or simply not retry again immediately - this means the client's
+own rate limiter (see section 3) and the provider's actual enforced
+limit have drifted out of sync, which is worth investigating rather than
+hammering again right away.
+
+ProviderUnavailable - raised in a few different places: by retry.py
+after exhausting retries on HTTP 5xx or a connection error, by
+mistral.py for any HTTP 400-or-above response that made it past the
+retry layer (since retry.py only retries a specific subset - see section
+8), and distinctively by groq.py for the Cloudflare 1010 block (section
+7). A caller seeing this should generally treat it as "this call failed
+and it wasn't your fault" - safe to surface to a user as "try again
+later" rather than as a hard application bug.
+
+InvalidResponse - raised when the HTTP call itself succeeded (a 200) but
+the body couldn't be turned into what the caller actually needed: either
+the raw JSON shape from the provider didn't match what was expected
+(mistral.py and groq.py both check for this when pulling the answer text
+out of the response), or - specifically in complete_json - the model's
+own output text didn't parse as JSON or didn't validate against the
+pydantic schema the caller asked for, even after one repair attempt.
+This one carries an extra field, raw_text, holding exactly what the
+model said, so a developer debugging a bad completion can see precisely
+what came back instead of just "it didn't validate."
+
+ProviderTimeout - raised by retry.py specifically when the network call
+itself timed out (httpx.TimeoutException) on every attempt including the
+last retry. A caller seeing this knows the request never even got a
+response at all, as opposed to getting a bad one - useful to distinguish
+from ProviderUnavailable if you ever want different handling for "no
+answer" versus "bad answer."
+
+Why every exception carries provider, model id, and cause
+----------------------------------------------------------------
+Picture debugging a failure three function calls above where it actually
+happened, with nothing but the traceback. If the exception's message is
+just "request failed," you don't know which provider, which model, or
+what the underlying problem actually was without walking back down the
+call stack. Carrying provider and model_id as attributes means a catch
+block - or a logging call - several layers up can report exactly what
+failed without needing to already know the context the lower-level code
+had.
+
+cause is Python's mechanism for exception chaining: when you write
+"raise SomeError(...) from original_exception", Python remembers that
+link and shows both exceptions in the traceback, with the original one
+marked as "the above exception was the direct cause of." Every raise in
+this codebase that wraps a lower-level failure (a JSON decode error, an
+httpx timeout, a pydantic validation error) does this - see the "from
+exc" at the end of the raise statements in mistral.py, groq.py, and
+retry.py. Without it, you'd see the new, high-level exception's
+traceback and have no idea what the actual root cause underneath it was
+- with it, both are visible, and the real cause is never silently
+thrown away.
+
+Why exceptions live in their own module
+----------------------------------------------------------------
+exceptions.py imports nothing from mistral.py or groq.py, and both of
+those import from exceptions.py - not the other way around. If the
+exception classes were instead defined inside mistral.py, then anything
+that wanted to catch a Mistral-specific error type - including groq.py,
+retry.py, and the factory - would end up needing to import from
+mistral.py just to get the exception class, creating a dependency on the
+concrete Mistral implementation from code that has nothing to do with
+Mistral specifically. Keeping the exception hierarchy in its own file
+that everything else can depend on, with nothing flowing the other
+direction, keeps the dependency graph one-directional and avoids that
+tangle.
+
+
+5. THE BASE INTERFACES
+=============================================================
+
+Abstract base class versus Protocol versus duck typing
+----------------------------------------------------------------
+An abstract base class - ABC in Python - is a class you're not allowed
+to instantiate directly; it exists only to be subclassed, and it can
+mark specific methods with @abstractmethod, meaning any subclass that
+doesn't actually implement that method will fail to be created at all,
+immediately, rather than fail later the first time something tries to
+call the missing method. This is called nominal typing: a class only
+"counts" as implementing the interface if it explicitly says so, by
+inheriting from it.
+
+A Protocol (from Python's typing module) is a different tool that
+achieves something similar without inheritance at all - any class whose
+methods happen to match the right names and signatures counts as
+satisfying the Protocol, purely by shape, with no explicit "I implement
+this" declaration required. This is called structural typing, sometimes
+described as "if it walks like a duck and quacks like a duck, treat it
+as a duck" - hence duck typing, which is the same idea taken even
+further with no static checking involved at all, just "call the method
+and see if it works at runtime."
+
+This codebase uses ABC - TextProvider, VisionProvider, and AudioProvider
+in base.py all inherit from abc.ABC and mark their methods
+@abstractmethod. MistralProvider explicitly declares
+"class MistralProvider(TextProvider, VisionProvider):" - it's opting in
+by name, not just happening to match a shape. Given that this whole
+phase exists because two vendor models vanished with no warning, opting
+into an explicit contract - one that fails loudly and immediately at
+class-definition time if an implementation is incomplete - fits the
+motivation better than a purely structural, nothing-enforced-until-
+runtime approach.
+
+What the interface actually buys you
+----------------------------------------------------------------
+Two concrete things. First: application code that needs to complete a
+prompt can be written against TextProvider, never mentioning Mistral or
+any other vendor by name - if a provider ever needs to be swapped, only
+a new class implementing the same three interfaces has to be written,
+and every caller of get_text_provider() keeps working unmodified.
+Second: testing. A test that wants to check application logic without
+touching the network can hand that logic a fake object that satisfies
+TextProvider - complete() and complete_json() implemented to just return
+canned data - instead of needing respx or any real HTTP mocking at all.
+(This codebase's own tests mock at the HTTP layer with respx rather than
+faking the whole provider - see section 11 - but the interface is what
+would make faking the provider itself possible for higher-level code
+later.)
+
+Method signatures, parameter by parameter
+----------------------------------------------------------------
+TextProvider.complete(prompt, model_id, *, system=None, max_tokens=None,
+temperature=0.0) -> TextResponse
+
+    prompt: the user-facing text to send.
+    model_id: which model to call - always required, always passed
+    explicitly, never assumed, which is the whole point of this phase.
+    system: an optional system-role instruction, kept separate from the
+    prompt because that's how chat-style APIs represent it - a
+    higher-priority instruction distinct from the user's own message.
+    max_tokens: an optional cap on how much the model is allowed to
+    generate in response.
+    temperature: how much randomness the model injects (see below);
+    defaults to 0.0.
+
+TextProvider.complete_json(prompt, schema, model_id, *, system=None,
+max_tokens=None, temperature=0.0) -> an instance of whatever schema is
+
+    Same parameters as complete(), plus schema: type[SchemaT] - a
+    pydantic model class describing the exact shape the caller wants
+    back. The method returns an actual instance of that class, not a
+    plain dict, so the caller gets real attribute access and pydantic's
+    own validation guarantees on the result.
+
+VisionProvider.analyze_image(image_bytes, prompt, model_id, *,
+system=None) -> TextResponse
+
+    image_bytes: the raw image data - not a file path, not a URL, the
+    actual bytes, so the caller controls exactly what gets sent with no
+    ambiguity about which file on disk is meant.
+    prompt and model_id and system: same meaning as above.
+
+AudioProvider.transcribe(audio_bytes, filename, model_id) ->
+TranscriptionResponse
+
+    audio_bytes: the raw audio data, same reasoning as image_bytes.
+    filename: needed here (unlike the image method) because the audio
+    upload is a multipart form file attachment (section 7), and that
+    upload format wants a filename to send along with the bytes -
+    typically used by the receiving server to guess the content type
+    and to label the file in its own records. It is not used for
+    detecting the file format on this codebase's own side (that's magic
+    bytes for images - filenames are considered untrustworthy for that
+    purpose here too, they're just structurally required by the
+    multipart wire format for audio).
+
+Keyword-only arguments: every optional parameter across every method
+above sits after a bare * in the signature, which in Python means
+"everything after this point must be passed by name, not by position."
+Without that *, someone calling complete("hi", "some-model", None, 500)
+would have no clue at the call site which positional slot is which -
+is None the system prompt or something else? Forcing
+system=None, max_tokens=500 by name makes every call self-documenting at
+the point it's written, and makes it impossible to accidentally swap two
+optional arguments that happen to share a compatible type.
+
+Why temperature defaults to 0.0
+----------------------------------------------------------------
+Temperature controls how much randomness a language model injects when
+choosing its next word - low temperature makes the model consistently
+pick its single most likely next word every time, high temperature makes
+it more willing to pick less-likely, more varied words. mistral.py's
+module docstring is explicit about why this codebase defaults it to
+0.0 everywhere: benchmarking showed meaningful nondeterminism above that
+for this task - meaning the same prompt sent twice at a higher
+temperature could come back with genuinely different answers, which is
+exactly the opposite of what you want from something like structured
+ingredient extraction, where you need a stable, repeatable answer for
+the same input. Defaulting to 0.0 means a caller has to explicitly ask
+for randomness rather than getting it by accident.
+
+Why calls return a structured object instead of a bare string
+----------------------------------------------------------------
+TextResponse carries text, model_id, prompt_tokens, completion_tokens,
+total_tokens, and latency_ms - not just the answer text on its own. The
+token counts matter for a very concrete, already-covered reason: they're
+exactly what mistral.py's _send_chat() passes into
+self._rate_limiter.reconcile(model_id, actual_tokens, estimated_tokens)
+right after the response comes back (see section 3) - without the
+response carrying real usage numbers, reconcile would have nothing true
+to correct the estimate against, and the rate limiter's token bucket
+would drift from reality. latency_ms - timed from just before acquire()
+completes to just after the retry-wrapped HTTP call returns - gives
+every caller a built-in measurement of how long each provider call
+actually took, useful for anything that wants to track or alert on slow
+calls later, without every caller needing to hand-roll its own timing
+code around every provider call.
+
+TranscriptionResponse is the simpler counterpart for audio - text,
+model_id, latency_ms - it has no token counts because groq.py's
+transcribe() estimates zero tokens for the limiter (this account's
+Whisper limit is RPS-only, tpm=0, so there's no token dimension to
+reconcile in the first place).
+
+
+6. THE MISTRAL PROVIDER
+=============================================================
+
+httpx.AsyncClient over requests, and why one shared client
+----------------------------------------------------------------
+httpx is a Python HTTP client library - the thing that actually opens a
+network connection and sends a request. It has two flavors: a regular
+synchronous Client, and AsyncClient, which is built to work with
+Python's async/await instead of blocking the whole program while
+waiting on the network. Since every provider method here is an async
+function (async def complete(...), and so on), and the whole rate
+limiter is built around asyncio.sleep and asyncio.Lock, httpx.AsyncClient
+is the natural fit - requests (a very common, older HTTP library) has no
+native async support at all.
+
+MistralProvider takes its httpx.AsyncClient as a constructor argument
+rather than creating a new one per call, and the factory (section 9)
+only ever builds one and hands it to every provider that needs it.
+httpx.AsyncClient pools connections - meaning once it opens a TCP
+connection and does the TLS handshake to talk to api.mistral.ai, it
+keeps that connection open and reuses it for the next request to the
+same host instead of tearing it down and paying the whole connection-
+setup cost again. Creating a fresh client per call would throw that
+pooling away every single time, meaning every call pays TLS/TCP setup
+latency it didn't need to. (This connection-setup cost is exactly what
+made the very first call in scripts/verify_rate_limiter.py's live run
+noticeably slower than the calls after it - a real, measured
+consequence of this exact behavior.)
+
+Base64 data URIs, and why images go over the wire that way
+----------------------------------------------------------------
+Base64 is a way of encoding arbitrary binary data (like an image file's
+raw bytes) as plain ASCII text, since not every transport is guaranteed
+to safely carry raw binary bytes but every transport can carry text. A
+data URI is a specific text format - "data:<media-type>;base64,<the
+encoded bytes>" - that packages that base64 text together with a label
+saying what kind of data it is, all as one self-contained string. Mistral's
+chat API accepts an image this way: instead of the client uploading a
+separate file, the image is embedded directly inside the same JSON body
+as the rest of the message, as one big base64 string inside an
+image_url field.
+
+Magic bytes, and why filenames aren't trusted
+----------------------------------------------------------------
+Magic bytes are a small, fixed sequence of bytes that certain file
+formats always start with, letting you identify the real format by
+looking at the actual content instead of trusting whatever name someone
+happened to give the file. detect_image_media_type() checks the first
+three bytes of the image against b"\xff\xd8\xff" (every JPEG file starts
+with this) and the first eight against b"\x89PNG\r\n\x1a\n" (every PNG
+file starts with this), and returns "image/jpeg" or "image/png"
+accordingly - or raises a plain ValueError if neither matches. It never
+looks at a filename at all, because analyze_image() doesn't even accept
+one - the interface only takes image_bytes. Trusting a filename
+extension is unsafe because nothing stops a caller from handing over
+bytes that don't actually match whatever the name claims - a mislabeled
+file, a renamed file, bytes that came from somewhere with no filename
+attached at all (exactly the case here). Reading the actual bytes is the
+only way to know the real format for certain.
+
+Native resolution: the rule, and why it's a setting, not silence
+----------------------------------------------------------------
+F1 score, in one plain sentence: it's a single accuracy number that
+combines how many of a model's claimed answers were actually right with
+how many of the real correct answers it actually found, so a model that
+plays it safe by only naming one obviously-correct thing doesn't look
+artificially good. A benchmark run measured this exact system's vision
+accuracy dropping from 0.67 to 0.43 - a large, real accuracy cost, not a
+guess - when the same fridge photo was sent downscaled instead of at its
+original size. mistral.py's module docstring states this finding
+directly and says the code does not resize images, and should not gain
+resizing logic without that benchmark being re-run.
+
+The reason this lives as settings.downscale_images = False (a named,
+documented config value from phase 1.1) rather than the resizing code
+simply never being written at all: a setting that exists and says
+"False, and here's exactly why" is something a future developer looking
+for a bandwidth or token-cost optimization will actually run into and
+read the reasoning for. Code that was simply never written leaves no
+trace at all - there's nothing to trip over, nothing telling the next
+person "this was already tried and measured to hurt accuracy." The
+setting is a guardrail placed exactly where someone would naturally look
+if they had the idea to add resizing later.
+
+complete_json, walked through in full
+----------------------------------------------------------------
+Requesting JSON output: complete_json() doesn't use any special
+"JSON mode" flag on the API - it appends a plain instruction to the end
+of the prompt: "Respond with valid JSON only, matching the required
+schema, and no other text." Then it calls the ordinary complete()
+method with that modified prompt.
+
+Why models still wrap output in code fences, and how those get stripped:
+even when explicitly told to return only JSON, language models
+frequently still wrap their answer in a Markdown code fence anyway -
+literally the three backtick characters, sometimes with the word "json"
+right after the opening fence, wrapping the actual JSON content, because
+that's an extremely common pattern in the model's training data for "I
+am about to show you some code or structured data." _strip_code_fences()
+handles this with a regular expression - a pattern-matching tool for
+text - that matches text starting with ``` (optionally followed by
+"json"), ending with ```, and captures everything in between. If the
+text matches that shape, only the inside gets kept; if it doesn't match
+(no fences at all), the text is used exactly as it came back.
+
+How the result gets validated: _parse_and_validate() takes the
+fence-stripped text, calls Python's standard json.loads() on it to turn
+the JSON text into a plain Python dict, then calls schema.model_validate(data)
+- schema being the pydantic model class the caller passed in. pydantic's
+model_validate does two things at once: it checks that every required
+field is present and of the right type, and it constructs and returns an
+actual instance of that class if validation passes.
+
+What happens on failure: two different things can go wrong -
+json.loads() can raise json.JSONDecodeError if the text isn't valid JSON
+at all, or model_validate() can raise pydantic's ValidationError if it
+parses as JSON but doesn't match the schema (a missing required field,
+wrong type, and so on). Both are caught together, since either one means
+"this attempt didn't produce something usable."
+
+The single repair retry
+----------------------------------------------------------------
+On that first failure, the code does not give up immediately. It builds
+a repair prompt: the original instruction, plus the literal error
+message from whichever exception was raised, plus the model's own
+previous (broken) response, plus a fresh instruction to return ONLY
+corrected valid JSON, no fences, no commentary - and sends that as a
+second, independent call to complete(). A repair instruction like this
+works because it gives the model concrete, specific information about
+exactly what it got wrong, rather than just asking it to try again blind
+- language models are often able to self-correct once shown their own
+mistake this directly.
+
+Why exactly one retry, not zero and not unlimited: zero retries would
+mean any minor formatting slip - a stray fence, one missing field - fails
+the whole call immediately, even though this class of mistake is often
+trivially fixable by asking again with context. Unlimited retries risks
+burning API budget and time chasing a model that's fundamentally not
+going to produce valid output for this prompt no matter how many times
+you ask - one repair attempt is the middle ground: give the model one
+real chance to self-correct with good information, then stop and surface
+the failure clearly rather than looping.
+
+If that second attempt also fails to parse or validate, the code raises
+InvalidResponse, and specifically sets raw_text to the second (repaired)
+attempt's actual text - not the first attempt's - since that's the more
+recent, most-informative failure a developer debugging this would want
+to see.
+
+Token estimation, and why an approximation is fine here
+----------------------------------------------------------------
+estimate_text_tokens() is deliberately crude: roughly one token per four
+characters of text (len(text) // 4, with a floor of 1 so an empty or
+tiny string never estimates zero). For an image, analyze_image() adds a
+flat IMAGE_TOKEN_ESTIMATE of 2000 on top of the text estimate - a number
+the code's own comment says was measured against a real, native-
+resolution aicook photo, which actually cost about 2147 prompt tokens
+for a modest text prompt plus one image. This is not a real tokenizer -
+a real tokenizer would need to know the exact vocabulary and encoding
+rules a specific model actually uses internally, which varies by model
+and would be significant extra complexity to replicate correctly. The
+estimate only has one job: be good enough that acquire() waits roughly
+the right amount before a call goes out, keeping the rate limiter
+honest enough to avoid violating the real account limit. It doesn't need
+to be exact, because reconcile() (section 3) corrects the token bucket
+against the real, provider-reported usage number immediately after
+every single call - any error in the estimate is bounded to the length
+of exactly one call's wait, never allowed to compound across calls.
+
+
+7. THE GROQ PROVIDER
+=============================================================
+
+What's happening here, and why multipart instead of base64 JSON
+----------------------------------------------------------------
+Audio transcription is the task of turning spoken audio into written
+text - here, sending a recorded voice memo's raw bytes to Groq's Whisper
+endpoint and getting back the words it heard. Unlike the Mistral image
+call, which embeds the image as a base64 string inside a JSON body,
+Groq's transcription endpoint wants the audio uploaded as multipart form
+data - the same wire format an ordinary web form uses to upload a file
+(picture an HTML form with a "choose file" button). httpx builds this
+for you when you pass a files= dictionary to the request - here,
+files={"file": (filename, audio_bytes, content_type)} - and it handles
+the actual multi-part boundary-encoding of the request body for you.
+This is simply what this particular endpoint's API expects, as opposed
+to Mistral's, which expects the embedded-base64-inside-JSON approach for
+images instead.
+
+The Cloudflare 1010 problem, properly explained
+----------------------------------------------------------------
+Cloudflare is a company that sits in front of a huge number of websites
+and APIs as a reverse proxy - meaning every request to those services
+passes through Cloudflare's own servers first, which can inspect, block,
+or pass through traffic before it ever reaches the real backend. Bot
+fingerprinting is Cloudflare (and similar services) looking at signals
+in an incoming request - which headers are present, in what order, what
+they contain - to guess whether the request is coming from a real
+browser being used by a real person, or from an automated script. A
+missing User-Agent header (the header a browser normally sends
+identifying itself, like "Chrome on macOS") or one that looks
+nonstandard is exactly the kind of signal that trips this - real
+browsers always send one, so a request without it, or with a suspicious
+one, looks like a bot. groq.py's module docstring documents that raw
+httpx requests to Groq's transcription endpoint have been observed
+getting HTTP 403 back with a Cloudflare "error code: 1010" body because
+of exactly this.
+
+The fix is genuinely simple once you know the cause: groq.py sets a
+plain, normal, browser-like User-Agent string explicitly on every
+request (a hardcoded desktop Chrome-on-macOS string - the exact browser
+and version don't matter, only that it looks like a real one to the
+fingerprinting check). transcribe() also checks, defensively, whether a
+403 response's body still contains the literal string "error code:
+1010" even with that header set, and if so, raises ProviderUnavailable
+with a message that explicitly names the Cloudflare block by name -
+rather than letting a generic "HTTP 403" bubble up.
+
+Why this gets its own distinguishable error message, and the real cost
+of getting this wrong
+----------------------------------------------------------------
+Here's the actual debugging trap, and it's worth spelling out because
+it's the kind of thing that wastes hours if you don't know to look for
+it: HTTP 403 almost universally means "you're not authorized" in
+practically every API a developer has ever worked with - a bad API key,
+an expired token, insufficient permissions. So the very first thing
+anyone debugging a plain, unlabeled 403 from this endpoint would
+reasonably check is their API key - is it valid, is it expired, is it
+scoped correctly, did it get truncated somewhere. All of that
+investigation is a dead end here, because the actual problem has
+nothing whatsoever to do with authorization - it's a bot-fingerprinting
+block that happens to also return status code 403, the exact same status
+code a real auth failure would return. Without the code explicitly
+checking for the "error code: 1010" marker and raising a message that
+names Cloudflare specifically, this failure mode is close to
+indistinguishable from a genuine credentials problem until someone
+happens to think to actually read the raw response body instead of just
+the status code - and the fix (a header, not a key rotation) is
+completely different from what the status code alone would suggest.
+
+
+8. THE RETRY LAYER
+=============================================================
+
+Transient failures, and why retrying is worth it at all
+----------------------------------------------------------------
+A transient failure is one caused by a temporary condition - a brief
+network hiccup, a server that's momentarily overloaded - that has a
+real chance of succeeding if you simply try again shortly after,
+as opposed to a failure caused by something fundamentally wrong with
+the request itself, which trying again will never fix. Retrying is
+worth doing specifically because a meaningful fraction of real-world API
+failures genuinely are transient - giving up immediately on the first
+failure throws away calls that would have succeeded seconds later.
+
+Decorator, in plain terms, before using the word
+----------------------------------------------------------------
+A decorator is a function that wraps another function or piece of code,
+adding behavior around it without needing to rewrite the thing being
+wrapped. request_with_retry() in this codebase isn't written as a
+Python @decorator syntactically - it's a plain async function that
+takes another async function (make_request, the thing that actually
+performs one HTTP call) as its own argument and calls it in a loop,
+adding retry behavior around each call. The effect is the same idea a
+decorator would give you - "run this thing, but with retry logic wrapped
+around it" - just expressed as an ordinary function taking a function,
+rather than the special @ syntax.
+
+Exponential backoff, and thundering herd
+----------------------------------------------------------------
+Exponential backoff means the delay between successive retry attempts
+grows each time, rather than staying fixed - here, drawn from
+settings.llm_retry_backoff, a list of delay values in seconds, indexed
+by attempt number (and clamped to the last entry in the list if there
+are more retries than list entries, via
+min(attempt, len(backoff) - 1) in _backoff_delay()). A thundering herd
+is what happens when a large number of clients that all failed at
+roughly the same moment (because the server was briefly down or
+overloaded) all retry at exactly the same fixed delay - they all hit the
+server again simultaneously, and if the server was struggling in the
+first place, that simultaneous wave of retries can make the problem
+worse instead of better. Growing delays spread retries out over time
+instead of bunching them back up right where they started.
+
+The retry policy, rule by rule, and why each rule exists
+----------------------------------------------------------------
+request_with_retry() retries on three categories: a caught
+httpx.TimeoutException (the request never got a response at all in
+time), a caught httpx.HTTPError more broadly (a connection-level
+failure - couldn't even reach the server), and specific HTTP status
+codes returned successfully by the server itself: 429, 500, 502, 503,
+504 (the RETRYABLE_STATUS_CODES set). Timeouts and connection errors are
+retried because they're exactly the transient case described above - the
+network hiccuped, try again. 5xx status codes mean the server itself
+acknowledges something went wrong on its end (5xx is the HTTP convention
+for "the server messed up" - as opposed to 4xx, "the client messed up,"
+covered next) - also worth retrying, since a server-side blip often
+clears up moments later.
+
+429 specifically means "you're going too fast, slow down" - it's the
+provider's own rate-limit rejection. request_with_retry() checks for a
+Retry-After header on a 429 response and, if the provider sent a
+numeric value there, uses exactly that number of seconds as the delay
+instead of the normal backoff schedule; only if that header is missing
+(or isn't a plain number - see below) does it fall back to the regular
+backoff. Retry-After is the provider's own literal instruction for how
+long to wait before trying again - the provider knows its own internal
+state far better than any client-side guess could, so when it tells you
+the number directly, that number beats whatever the client's own
+generic backoff schedule would have picked.
+
+Any other 4xx status code - 400 (bad request), 401 (bad credentials),
+404 (not found), and so on - is never retried at all; the response is
+simply returned immediately after one attempt, for the calling provider
+code to turn into whatever exception fits. 4xx broadly means "something
+about this specific request was wrong" - as opposed to 5xx meaning "the
+server had a problem." Retrying a 400 or 401 is pointless because
+nothing about waiting and trying the exact same malformed request or the
+exact same bad credentials again is going to make it valid the second
+time - the request itself needs to change, not the timing. It's actively
+harmful, not just wasted effort, because it burns real API quota and
+adds real latency chasing a failure that retrying can mathematically
+never fix.
+
+Why max retries and backoff come from settings
+----------------------------------------------------------------
+_backoff_delay() reads settings.llm_retry_backoff, and the main loop
+reads settings.llm_max_retries - both come from phase 1.1's config
+module, not from a hardcoded number inside retry.py itself. Same
+reasoning as everywhere else in this phase: if this codebase later
+decides the backoff schedule needs to change - looser for a flakier
+provider, tighter to fail faster during testing - that's a one-line
+change to settings.py, not a hunt through retry.py's internals, and
+every provider automatically picks up the new value since they all go
+through the same request_with_retry() function.
+
+
+9. THE FACTORY
+=============================================================
+
+The factory function pattern, and what it solves
+----------------------------------------------------------------
+A factory function is a function whose entire job is constructing and
+handing back an object, instead of the caller constructing it directly
+themselves. get_text_provider(), get_vision_provider(), and
+get_audio_provider() in providers/__init__.py are exactly this - callers
+never write MistralProvider(...) or GroqProvider(...) themselves; they
+call the factory function and get back something that satisfies the
+right interface (TextProvider, VisionProvider, AudioProvider). This
+means the actual wiring - which httpx client to use, which RateLimiter
+instance to share - is decided in exactly one place, not repeated
+(and potentially gotten wrong, or gotten inconsistently) at every call
+site that needs a provider.
+
+Why the providers are singletons, and why the client and limiter are
+shared
+----------------------------------------------------------------
+_get_mistral_provider() and get_audio_provider() both check a
+module-level variable first (_mistral_provider, _groq_provider) and only
+construct a new instance if it's still None - every subsequent call
+within the same running process gets back the exact same object.
+get_text_provider() and get_vision_provider() both call
+_get_mistral_provider() internally, so they actually return the very
+same MistralProvider instance - one object implementing both interfaces,
+not two separate ones.
+
+Here's what would concretely break if each provider held its own
+separate RateLimiter instance instead of one shared one: RateLimiter
+tracks its buckets per model id, in memory, inside that one instance. If
+get_text_provider() and get_vision_provider() each carried their own
+RateLimiter, and both happen to route calls through mistral-medium-2505
+(which they do, since VISION_MODEL and REASONING_MODEL are literally the
+same string in settings), the two RateLimiter instances would have no
+idea about each other's consumption - each would think it alone has the
+model's whole 0.42 RPS budget, and together the two code paths could
+send nearly double the real allowed rate without either individual
+limiter ever seeing anything wrong. Sharing one RateLimiter instance
+means every call to a given model, from any provider, from anywhere in
+the process, competes for the exact same bucket - which is the only way
+"0.42 RPS" actually means 0.42 RPS for the account as a whole, not per
+code path.
+
+The same sharing logic applies to the httpx.AsyncClient for a more
+mundane but still real reason: connection pooling (section 6) only helps
+if the same client object is reused across calls - a client per provider
+instance would mean Mistral and Groq calls each pool separately, which
+is fine since they're different hosts anyway, but a client per call
+(the alternative this code explicitly avoids) would throw pooling away
+entirely regardless of provider.
+
+Why close() is async, and what leaks without it
+----------------------------------------------------------------
+close() is declared async def because it awaits
+self._client.aclose() - httpx.AsyncClient's own shutdown method, which
+needs to be awaited because properly closing network connections
+(finishing in-flight operations, releasing the underlying sockets) is
+itself an async operation, not something that completes instantly.
+Without ever calling close(), the shared httpx.AsyncClient's open
+connections are never explicitly released by this code - they'd only go
+away whenever Python's garbage collector eventually gets around to
+cleaning up the client object, which isn't a defined, predictable point
+in time. In an async program in particular, leaving connections open
+indefinitely like that is the kind of thing that shows up later as
+mysteriously exhausted connection limits or resource warnings, which
+is exactly why close() exists as an explicit, deliberate shutdown step
+rather than something left to chance. (This exact class of problem is
+also why tests/integration/test_providers_live.py has its own autouse
+fixture calling close() after every test - see section 11 - a related
+but distinct issue caused by each test getting its own fresh event
+loop.)
+
+
+10. HOW IT ALL FITS TOGETHER
+=============================================================
+
+Tracing one vision call, end to end, in the order it actually happens:
+
+    1. Calling code asks the factory for a provider:
+       provider = get_text_provider() (or get_vision_provider() -
+       same underlying object, per section 9).
+
+    2. Calling code calls provider.analyze_image(image_bytes, prompt,
+       model_id). Inside mistral.py, detect_image_media_type() reads
+       the image's actual bytes to figure out JPEG or PNG (section 6),
+       and the image gets base64-encoded into a data URI.
+
+    3. estimate_text_tokens(prompt) + IMAGE_TOKEN_ESTIMATE gives a rough
+       token count for this call.
+
+    4. _send_chat() calls self._rate_limiter.acquire(model_id,
+       estimated_tokens) - this is where the two-bucket wait from
+       section 3 happens, potentially sleeping until both the RPS and
+       TPM buckets have room, all under that model's own lock.
+
+    5. Once acquire() returns, _send_chat() calls
+       request_with_retry(make_request, ...) - the actual HTTP POST is
+       wrapped inside a small closure (make_request) that
+       request_with_retry() calls, potentially more than once, applying
+       the backoff/retry rules from section 8 if the first attempt fails
+       in a retryable way.
+
+    6. httpx.AsyncClient actually sends the request over the shared,
+       pooled connection and gets the response back.
+
+    7. Back in _send_chat(), the response's usage numbers are pulled out
+       and self._rate_limiter.reconcile(model_id, actual_tokens,
+       estimated_tokens) settles the token bucket against the real
+       number (section 3).
+
+    8. A TextResponse is constructed - text, model_id, the three token
+       counts, latency_ms - and handed back up to the original caller.
+
+Every log line emitted anywhere in that whole chain - the rate limiter's
+debug-level wait log, retry.py's warning-level retry logs, anything
+mistral.py or groq.py itself logs - goes through get_logger() from
+phase 1.1's mealsight.utils.logging module, which means every one of
+those lines automatically carries whatever trace_id was bound via
+bind_trace_id() in the surrounding context, with zero extra code needed
+at any of these call sites to make that happen (contextvars propagate
+it automatically - phase 1.1's notes cover why in depth).
+test_providers/test_tracing.py in this phase specifically confirms this
+wiring works for a real provider call, not just for the logging module
+in isolation.
+
+What this layer deliberately does not do
+----------------------------------------------------------------
+Nowhere in providers/ does any code decide what prompt to send, what a
+"good" vision result looks like, how to turn a transcribed voice memo
+into structured meal preferences, or anything at all about recipes,
+pantries, or recommendations. TextProvider.complete() takes a prompt as
+a plain string parameter and sends exactly that - it has no opinion
+about what the prompt should say. This is intentional and matches
+exactly what this phase's own task scope said explicitly: "provider
+plumbing only." Perception logic - the actual "look at this photo and
+figure out what food is in it" reasoning, prompt design, and interpreting
+results - belongs in a layer above this one, a layer that can be
+swapped, tuned, or rewritten without ever touching how a request
+actually reaches Mistral or Groq, how it's rate-limited, or how its
+failures are classified. Keeping that boundary clean is the same
+one-way-dependency idea from section 1 and section 4, applied one level
+higher: providers/ doesn't know or care what it's being used for, only
+how to reliably talk to a specific vendor.
+
+
+11. THE TESTS
+=============================================================
+
+What mocking is, and what respx specifically does
+----------------------------------------------------------------
+Mocking means substituting a fake stand-in for some real, usually slow
+or unpredictable, dependency during a test - here, standing in for the
+actual Mistral or Groq servers so tests never touch the real network at
+all. respx is a library built specifically to mock httpx: you register a
+route (a URL, optionally a method) and tell it what response to hand
+back when that specific httpx.AsyncClient tries to make that specific
+call, and respx intercepts the call before it ever leaves the process. In
+this codebase, tests use it as a decorator - @respx.mock above a test
+function - which activates the interception for the duration of that one
+test only, then respx.post(some_url).mock(return_value=some_httpx_response)
+registers exactly what should come back.
+
+Why no live calls in unit tests
+----------------------------------------------------------------
+Speed: a real network round trip to a real API is dramatically slower
+than an in-process mock, and this matters a lot once you have dozens of
+tests that all need to run every time anyone changes a line of code.
+Cost: real calls to Mistral and Groq are billed - running the test suite
+constantly during development would rack up real charges for testing,
+not for actual product usage. Flakiness: real networks and real external
+services occasionally have their own outages, slowdowns, or transient
+errors that have nothing to do with whether this codebase's logic is
+correct - a test suite that sometimes fails for reasons totally outside
+the code being tested is a test suite nobody trusts. Determinism: a mock
+gives back exactly the same response every single time it's asked,
+letting a test assert on an exact, known outcome - a real API's actual
+response can vary in ways that have nothing to do with what the test is
+actually trying to check.
+
+Testing a time-based thing without a slow test suite
+----------------------------------------------------------------
+test_rate_limiter.py doesn't fake time at all - it genuinely waits, but
+it does so cheaply by registering a fake, fast model rate (FAST_RPS = 5.0,
+via monkeypatch.setitem(MODEL_RATE_LIMITS, FAST_MODEL, RateLimitSpec(...)))
+instead of testing against a real model's actual configured rate like
+0.42 RPS. At 5 requests per second, the wait between calls is only 0.2
+seconds - real, measurable, and enough to prove the limiter is actually
+enforcing something, but fast enough that the whole test suite still
+runs in about a second total instead of tens of seconds. This is a
+different technique from faking or mocking the clock itself - it's
+choosing test data (a fast rate) specifically so real waits stay short,
+which keeps the test honest about actually exercising real asyncio.sleep
+behavior rather than a simulated stand-in for it.
+
+Test by test
+----------------------------------------------------------------
+
+test_rate_limiter.py:
+
+    test_token_bucket_blocks_and_releases_at_known_rps
+        Runs three sequential acquire() calls against the fast test
+        model and checks the total elapsed time falls between 1.5 and 4
+        refill-intervals - proving the first call is free (bucket starts
+        full) but the next two each cost real waiting time, not zero.
+        If this broke, it would mean either the bucket never actually
+        throttles anything (elapsed stays near zero), or it throttles
+        far more aggressively than the configured rate justifies
+        (elapsed way too long).
+
+    test_concurrent_acquires_serialize
+        Fires three acquire() calls at once via asyncio.gather() instead
+        of one after another, and checks the total time is still
+        consistent with real waiting having happened - not near-instant.
+        This is the test that specifically protects the asyncio.Lock
+        behavior from section 3: if the lock weren't there, or weren't
+        actually being held across the wait, concurrent callers could
+        all sneak through nearly simultaneously and this test would
+        catch that by seeing an unrealistically short elapsed time.
+
+    test_reconcile_gives_back_overestimated_tokens
+        Acquires with an estimate of 100 tokens against a 100-tpm test
+        model (draining the token bucket to exactly zero), then calls
+        reconcile with an actual count of only 50, and checks the
+        bucket's internal tokens value is back up to 50. Protects the
+        "give back the surplus" half of reconcile's math (section 3) -
+        if this broke, overestimates would permanently waste budget the
+        account never actually used.
+
+    test_reconcile_takes_back_underestimated_tokens
+        The mirror case: acquires with an estimate of 50, then reconciles
+        with an actual of 90 (an underestimate), and checks the bucket
+        ends up at 10, not 50 - proving the deficit was actually removed,
+        not ignored. If this broke, underestimates would let the account
+        quietly run over its real, provider-enforced budget without the
+        limiter ever noticing.
+
+    test_model_with_zero_tpm_has_no_token_bucket
+        Registers a test model with tpm=0 and calls acquire() with an
+        enormous estimated_tokens value (999,999), wrapped in
+        asyncio.wait_for(..., timeout=1.0) so the test itself fails
+        loudly instead of hanging forever if something's wrong, then
+        checks the token bucket is genuinely None. This protects exactly
+        the deadlock scenario described in section 3 - a token bucket
+        built with a real rate of zero can mathematically never have
+        "enough" tokens, so skipping it entirely for zero-tpm models
+        (like this account's real Whisper limit) is what keeps
+        Groq calls from hanging forever waiting on a bucket that can
+        never fill.
+
+test_mistral.py:
+
+    test_complete_json_parses_clean_json
+        Mocks a response whose content is already valid, fence-free
+        JSON, and checks the returned object equals the expected
+        pydantic instance. The baseline happy path for complete_json.
+
+    test_complete_json_strips_markdown_code_fences
+        Same, but the mocked content is wrapped in a ```json fence
+        block, and the test still gets a correctly parsed result.
+        Protects _strip_code_fences() specifically - if this broke,
+        every completion that happened to come back fenced (common
+        model behavior, as covered in section 6) would fail to parse
+        even though the actual data inside was fine.
+
+    test_complete_json_retries_once_on_schema_violation_then_succeeds
+        Uses respx's side_effect to queue two different mocked
+        responses - first one missing the required "quantity" field,
+        second one valid - and checks the final result is correct and
+        that exactly two calls were made (route.call_count == 2).
+        Protects the single-repair-retry behavior from section 6 end to
+        end, proving a real self-correction round trip actually happens
+        rather than the code giving up on the first bad response.
+
+    test_complete_json_raises_invalid_response_after_retry_fails
+        Same setup, but the second mocked response is also broken (not
+        JSON at all this time). Checks InvalidResponse gets raised, that
+        exactly two calls happened (no infinite retry loop), and that
+        raw_text on the exception is exactly the second attempt's text.
+        Protects the "give up after exactly one repair, and hand back
+        the most recent failure for debugging" contract.
+
+    test_image_media_type_detected_from_bytes_not_filename
+        Builds bytes that start with the real PNG magic-byte signature
+        (followed by made-up filler data - not a real decodable PNG file
+        image, just the right header), calls analyze_image with it, and
+        inspects the actual outgoing request body (captured by respx)
+        to confirm the data URI says image/png. Protects
+        detect_image_media_type() actually being used correctly - if it
+        broke, every image could silently get mislabeled to the API as
+        the wrong media type.
+
+    test_no_resizing_occurs_bytes_round_trip_exactly
+        Builds fake JPEG-signed bytes, sends them through
+        analyze_image(), and decodes the base64 data URI that actually
+        got sent back out of the mocked request - checking the decoded
+        bytes are byte-for-byte identical to the original input. This is
+        a very direct, hard-to-fake proof that no resizing or
+        re-encoding happened anywhere in the path - if any resize step
+        were silently added later, this exact test would catch it, since
+        resizing changes pixel data and would break this byte-for-byte
+        equality immediately.
+
+test_groq.py:
+
+    test_transcribe_returns_text_on_success
+        The baseline happy path - mocks a 200 response with a text
+        field and checks the returned TranscriptionResponse carries it
+        correctly.
+
+    test_cloudflare_1010_surfaces_as_provider_unavailable
+        Mocks a 403 response whose body contains the literal Cloudflare
+        block text, and checks ProviderUnavailable gets raised with a
+        message containing both "Cloudflare" and "1010", plus that
+        provider is correctly "groq". This is the regression test for
+        the entire war story in section 7 - if this broke, that
+        confusing, misleading-as-an-auth-failure block would go
+        undetected until someone hit it for real again.
+
+    test_request_carries_browser_like_user_agent
+        Sends a request and inspects the actual outgoing headers
+        (again via respx's captured route.calls) to confirm "Mozilla"
+        shows up in the User-Agent value. Protects the actual fix, not
+        just the detection - if the header stopped being sent, the
+        Cloudflare block from section 7 would start happening again in
+        practice, even though the detection test above would still pass
+        (since that test mocks the 403 directly rather than depending on
+        the real Cloudflare service's actual behavior).
+
+test_retry.py (tests request_with_retry() directly, with a fake
+make_request function - no provider, no respx, since there's no real
+HTTP happening, just httpx.Response objects constructed by hand):
+
+    test_429_with_retry_after_is_honored
+        Queues a 429 response carrying a Retry-After: "7" header
+        followed by a 200, and - with asyncio.sleep patched to just
+        record what it was asked to sleep for instead of actually
+        sleeping - checks the recorded delay is exactly [7.0]. Protects
+        the "server's own number wins" rule from section 8.
+
+    test_429_without_retry_after_uses_backoff_schedule
+        Same shape, but the 429 has no Retry-After header at all, and
+        checks the recorded delay matches settings.llm_retry_backoff[0]
+        instead - protects the fallback path.
+
+    test_4xx_other_than_429_is_not_retried
+        Mocks a 400 and counts how many times make_request actually got
+        called - exactly one - and confirms nothing got recorded to
+        sleep. Directly protects the "never retry a non-429 4xx" rule -
+        if this broke, a genuinely bad request could get retried
+        pointlessly (and, per section 8, harmfully).
+
+    test_5xx_is_retried_per_backoff_schedule
+        Queues two 500s followed by a 200, and checks the recorded
+        sleep delays match the first two entries of
+        settings.llm_retry_backoff in order, and that exactly two
+        warning-level log calls happened, with attempt numbers 1 and 2.
+        Protects both the retry-on-5xx rule and that logging happens
+        with the right attempt count each time.
+
+    test_5xx_raises_provider_unavailable_after_exhausting_retries
+        Queues more 500 responses than settings.llm_max_retries + 1
+        allows, and checks ProviderUnavailable is what finally gets
+        raised once retries run out - protects the "eventually give up
+        cleanly" behavior, not an infinite retry loop.
+
+    test_429_raises_rate_limit_exceeded_after_exhausting_retries
+        Same idea for 429 specifically, checking RateLimitExceeded
+        (the more specific exception, section 4) gets raised instead of
+        the generic ProviderUnavailable once 429 retries are exhausted.
+
+test_tracing.py:
+
+    test_trace_id_appears_in_provider_log_lines
+        Forces production-mode JSON logging, binds a known trace id,
+        mocks a 500-then-200 sequence (so retry.py's warning log
+        actually fires), patches asyncio.sleep to a no-op so the test
+        doesn't actually wait, runs a real MistralProvider.complete()
+        call through the mocked transport, then parses every captured
+        stdout line as JSON and checks at least one carries the bound
+        trace_id. This is specifically an integration-of-two-phases
+        test - protecting that phase 1.1's contextvar-based tracing
+        actually reaches real log calls made by this phase's code, not
+        just the logging module tested in isolation.
+
+Pytest markers, and why the live integration tests are skipped by
+default
+----------------------------------------------------------------
+A pytest marker is a label you can attach to a test function -
+@pytest.mark.integration here - that lets you selectively include or
+exclude marked tests when running the suite, without needing to move
+them to a separate command or script entirely. pyproject.toml registers
+it explicitly under [tool.pytest.ini_options] markers = [...] with a
+description string - pytest would otherwise print a warning about an
+unregistered, possibly-misspelled marker name every time it's used, so
+registering it up front avoids that noise and documents what the marker
+means for anyone reading the config.
+
+addopts = "-m 'not integration'" in that same file means every ordinary
+pytest run automatically excludes anything marked integration, with no
+extra flag needed - which is exactly what makes the whole unit suite
+safe to run constantly during development (fast, free, deterministic,
+per the reasons above) without anyone needing to remember to exclude the
+live tests by hand every time.
+
+tests/integration/test_providers_live.py exists anyway, deliberately, for
+a reason unit tests structurally can't cover: mocks only prove the code
+handles whatever response shape you told the mock to return - they can
+never prove the real Mistral or Groq API actually still accepts these
+exact requests, still returns responses in the shape this code expects,
+or that the real account's credentials and rate limits genuinely behave
+the way settings.py claims they do. Real, occasional, deliberately-
+opt-in calls against the real services are the only way to catch a
+genuine drift between what this codebase assumes and what the real
+world is actually doing right now - exactly the category of problem
+that motivated this entire phase in the first place (section 1). It's
+run explicitly with -m integration, overriding the default exclusion,
+precisely because it should be a deliberate, occasional choice, not
+something that happens on every save.
+
+The autouse fixture in that file - _fresh_providers_per_test, which
+yields and then awaits close() - exists for a distinct, very concrete
+reason documented directly in its own comment: pytest-asyncio gives each
+test function its own separate event loop by default, but the provider
+factory's httpx.AsyncClient is a module-level singleton (section 9) that
+stays alive across tests unless something tears it down - reusing that
+client's connections against a different test's new event loop raises
+"Event loop is closed." Calling close() after every test forces the next
+test to build a completely fresh client bound to its own loop, avoiding
+that error.
+
+
+12. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+Token bucket versus fixed window versus leaky bucket versus a plain
+sleep between calls
+    A fixed window counts calls within a hard-edged time window (say,
+    "no more than N calls per calendar minute") and resets the count to
+    zero the instant the window rolls over - which allows a burst of
+    2N calls clustered right around the boundary (N right before the
+    reset, N right after), technically satisfying the rule while still
+    briefly running at double the intended rate. A leaky bucket is
+    similar to a token bucket but shaped the other way around - it
+    queues incoming requests and lets them "leak out" at a fixed rate,
+    which smooths bursts away entirely rather than allowing them, but
+    that also means it can't take advantage of genuinely idle capacity
+    the way a token bucket's accumulated-tokens burst allowance can. A
+    plain fixed sleep() between every call (say, always wait exactly
+    2.4 seconds no matter what) is the simplest option, but it can't
+    represent two independent limits (RPS and TPM) with different units
+    at once, and it wastes time whenever a burst would actually have
+    been safe - the token bucket won because it naturally allows a
+    burst when the account has capacity sitting unused, while still
+    strictly bounding the long-run average, and it extends cleanly to
+    tracking two independent dimensions (request count and token
+    volume) as two separate bucket instances rather than needing a
+    fundamentally different mechanism for each.
+
+Per-model locks versus one global lock
+    Covered in depth in section 3 - a global lock would serialize every
+    provider call across every model through one single point of
+    contention, meaning a slow model's wait time would block a fast
+    model's calls for no real reason, since the two models don't
+    actually share any constraint. Per-model locks, created lazily,
+    only serialize calls that are genuinely contending for the same
+    budget.
+
+Estimate-then-reconcile versus counting tokens exactly up front
+    Counting exactly up front would require replicating the specific
+    tokenizer each model actually uses internally before ever sending a
+    request - real complexity, and something that would need to be kept
+    in sync with whatever tokenizer each vendor uses, potentially
+    different per model. Estimate-then-reconcile sidesteps that entirely
+    by using a cheap, rough approximation just to get the wait timing
+    roughly right, then correcting the token bucket against the real,
+    provider-reported number the moment it's available (section 3) -
+    accepting a small amount of temporary estimation error in exchange
+    for not needing an exact, per-vendor tokenizer implementation at
+    all.
+
+ABC versus Protocol versus plain duck typing
+    Covered in depth in section 5 - ABC was chosen because it enforces
+    the contract explicitly and immediately (a subclass missing a
+    required method fails at class-definition time), which fits a
+    project whose whole motivation is "a vendor can disappear without
+    warning, so the contract between application code and any given
+    vendor needs to be a real, enforced thing," not something that only
+    shows up as a runtime AttributeError somewhere deep in a call stack
+    the first time the missing method actually gets called.
+
+A custom exception hierarchy versus returning error tuples
+    Covered in section 4 - a hierarchy lets callers selectively catch
+    exactly the failure category they care about by type, and lets
+    exception chaining preserve the real underlying cause automatically.
+    Error-tuple returns push the burden of remembering to check for and
+    propagate the error case onto every single caller, all the way up
+    the call chain, with no language-level enforcement that anyone
+    actually did so correctly.
+
+One repair retry on schema failure versus zero or unlimited
+    Covered in section 6 - zero retries throws away completions that
+    were one small correction away from being usable; unlimited retries
+    risks looping indefinitely (and burning real money and time) against
+    a prompt or model combination that's fundamentally not going to
+    produce valid output no matter how many chances it gets. One retry,
+    with a genuinely informative repair instruction built from the exact
+    error and the model's own previous attempt, is the balance point
+    this codebase settled on.
+
+Magic-byte detection versus filename extension
+    Covered in section 6 - a filename is just a label a caller attaches,
+    with nothing forcing it to actually match the real content, and in
+    this specific interface (analyze_image takes raw bytes with no
+    filename parameter at all) there often isn't even a filename
+    available to check in the first place. Reading the real leading
+    bytes of the file is the only way to know the actual format with
+    certainty.
+
+Shared singleton httpx client versus a client per call
+    Covered in section 6 and section 9 - a client per call throws away
+    connection pooling every single time, paying fresh TLS/TCP setup
+    cost on every request instead of reusing an already-open connection.
+    One shared client, built once by the factory and handed to every
+    provider that needs it, keeps that pooling benefit for the whole
+    process's lifetime.
+
+Retry as a decorator-shaped wrapper function versus retry logic inlined
+in each method
+    request_with_retry() is one function that mistral.py's _send_chat()
+    and groq.py's transcribe() both call, passing in their own specific
+    make_request closure. The alternative - writing the retry loop,
+    backoff math, and 429/5xx/4xx classification logic separately inside
+    every single method that makes an HTTP call - would mean any future
+    change to the retry policy (a different backoff schedule, a new
+    retryable status code) needs to be found and edited correctly in
+    every one of those places, with real risk of the different copies
+    quietly drifting out of sync with each other over time. One shared
+    function, called the same way from every provider, means the policy
+    only exists in one place, exactly like the model-id-in-config
+    reasoning that opened section 1.
+
+
+13. GLOSSARY
+=============================================================
+
+abstract base class (ABC)
+    A Python class that can't be instantiated directly and can mark
+    specific methods as required for any subclass to implement, failing
+    immediately at class-definition time if a subclass leaves one out.
+
+abstraction layer
+    A layer of code that sits between what you actually want to do and
+    the specific vendor's way of doing it, so everything above only
+    talks to the layer's own interface and the vendor can change without
+    every caller needing to change too.
+
+acquire (rate limiter)
+    The method that waits until both of a model's buckets have enough
+    room for a call, then consumes from both.
+
+asyncio.Lock
+    An object that only one piece of async code can hold at a time;
+    anything else trying to acquire it waits (without blocking the whole
+    program) until the current holder releases it.
+
+backoff schedule
+    A list of delay values used for successive retry attempts, usually
+    growing over time (see exponential backoff).
+
+base64
+    A way of encoding arbitrary binary data as plain ASCII text, so it
+    can be safely carried by transports that only guarantee to handle
+    text.
+
+bot fingerprinting
+    A service like Cloudflare inspecting signals in an incoming request
+    (headers present, their values, their order) to guess whether it
+    came from a real browser or an automated script.
+
+capacity (token bucket)
+    The maximum amount a bucket can ever hold at once.
+
+coroutine
+    A chunk of async code (written with async def) that can pause at an
+    await and let other code run, then resume later, without blocking
+    the whole program while it waits.
+
+data URI
+    A text format that packages a piece of data (often base64-encoded)
+    together with a label describing what kind of data it is, all as
+    one self-contained string.
+
+decorator
+    A function that wraps another function or piece of code, adding
+    behavior around it without needing to rewrite the thing being
+    wrapped.
+
+duck typing
+    Treating an object as satisfying some role purely because it happens
+    to have the right methods, checked only at runtime, with no formal
+    interface declaration at all.
+
+exception chaining
+    Python's "raise X from Y" mechanism for linking a new exception to
+    the lower-level exception that actually caused it, so both show up
+    together in a traceback.
+
+exponential backoff
+    A retry strategy where the delay between attempts grows each time,
+    to avoid piling retries up right back where a failure just happened.
+
+factory function
+    A function whose whole job is constructing and returning an object,
+    so callers don't construct it themselves and the real wiring lives
+    in one place.
+
+F1 score
+    A single accuracy number combining how many of a model's claimed
+    answers were right with how many of the real correct answers it
+    actually found.
+
+fixed window (rate limiting)
+    A rate-limiting scheme that counts calls within a hard-edged time
+    window and resets to zero when the window rolls over, which allows a
+    burst clustered right at the boundary.
+
+httpx
+    A Python HTTP client library with both a synchronous Client and an
+    async AsyncClient variant built for async/await code.
+
+interface (in this codebase)
+    An abstract base class like TextProvider that concrete providers
+    implement, letting application code depend on the shape of the
+    contract instead of on any one specific vendor.
+
+keyword-only argument
+    A function parameter that must be passed by name, not by position,
+    enforced in Python by putting a bare * before it in the signature.
+
+leaky bucket
+    A rate-limiting algorithm that queues requests and releases them at
+    a fixed steady rate, smoothing bursts away rather than allowing
+    them.
+
+magic bytes
+    A small, fixed sequence of bytes a file format always starts with,
+    letting you identify the real format from actual content instead of
+    trusting a filename.
+
+mocking
+    Substituting a fake stand-in for a real, usually slow or
+    unpredictable, dependency during a test.
+
+multipart form upload
+    The same wire format an HTML form uses to upload a file - the
+    format Groq's transcription endpoint expects audio bytes in.
+
+nominal typing
+    Typing where a class only counts as satisfying an interface if it
+    explicitly inherits from or declares that interface, by name.
+
+pydantic model
+    A Python class (built on the pydantic library) that describes a
+    data shape and validates + parses real data into an instance of
+    itself, raising a clear error if the data doesn't match.
+
+pytest marker
+    A label attached to a test function (like @pytest.mark.integration)
+    that lets a test run include or exclude marked tests selectively.
+
+race condition
+    A bug where the correctness of code depends on the unpredictable,
+    precise order in which concurrent operations happen to interleave.
+
+refill rate (token bucket)
+    How fast a bucket fills back up over time, usually expressed as
+    units per second.
+
+respx
+    A library that intercepts httpx requests during a test and returns
+    a pre-registered fake response instead of hitting the real network.
+
+RPS
+    Requests per second - how many separate API calls are allowed in a
+    one-second window.
+
+singleton
+    An object created once and reused everywhere afterward, rather than
+    a fresh copy being constructed every time it's needed.
+
+structural typing
+    Typing where any object matching the right shape (methods and
+    signatures) counts as satisfying a role, with no explicit
+    declaration required - what a Protocol provides.
+
+temperature
+    A setting controlling how much randomness a language model injects
+    when picking its next word - low temperature is consistent and
+    repeatable, high temperature is more varied.
+
+thundering herd
+    The problem where many clients that failed at the same moment all
+    retry at the same fixed delay, hitting the recovering server with a
+    simultaneous wave of requests.
+
+token (LLM)
+    A word-sized chunk of text - the unit a language model actually
+    processes input and output in, and the unit TPM limits are measured
+    in.
+
+token bucket
+    A rate-limiting algorithm modeled on a bucket with a maximum size
+    that refills at a steady rate; you can only act if you can "scoop
+    out" enough from what's currently in it, and it naturally allows
+    short bursts while still bounding the long-run average.
+
+transient failure
+    A failure caused by a temporary condition, with a real chance of
+    succeeding if retried shortly after, as opposed to a failure that
+    retrying can never fix.
+
+TPM
+    Tokens per minute - a cap on the total volume of input-plus-output
+    text an account can process in a sixty-second window, independent
+    of how many separate requests that volume is split across.
+
+
+14. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: How does rate limiting work in this system, and why enforce both RPS
+and TPM?
+
+    Each model gets two independent token buckets under one RateLimiter:
+    a request bucket with capacity 1 that refills at the model's RPS,
+    and a token-budget bucket that refills at TPM divided by 60 per
+    second, sized to the model's whole TPM as its capacity. acquire()
+    checks how long each bucket alone would need to wait, takes the
+    larger of the two, sleeps once, then consumes from both. I need both
+    dimensions because they catch different failure modes - ten tiny
+    requests can stay well under a token cap while still hitting an RPS
+    cap, and one enormous request can stay at one call total while
+    blowing straight through a token cap, so checking only one of the
+    two would let the other get silently violated. Models with no real
+    token cap - this account's Whisper limit is RPS-only, tpm=0 - skip
+    the token bucket entirely, since a bucket built with a genuine zero
+    refill rate can never have enough tokens and would just hang
+    forever.
+
+Q: How did you handle concurrency safety here, and what would break
+without it?
+
+    Every model gets its own asyncio.Lock, held across the entire
+    check-wait-consume sequence inside acquire(). Without it, two
+    coroutines calling the same model at nearly the same instant could
+    both check the bucket, both see room, and both consume - a classic
+    race condition that would let calls through faster than the
+    configured rate actually allows, defeating the whole point of the
+    limiter. I made the lock per-model instead of one global lock
+    specifically because this account has models with very different
+    rates - 0.42 RPS for one, 3.13 for another - and a global lock would
+    mean a call waiting on the slow model's budget blocks every call to
+    the fast model too, even though the two models share no real
+    constraint. I actually validated the whole thing against live
+    traffic with a small verification script in a later phase, and the
+    reconstructed gaps between real calls landed within milliseconds of
+    the mathematically exact 1/rps value - the lock and bucket math
+    hold up under real network conditions, not just in a mocked test.
+
+Q: LLM output is unreliable - how does this layer handle that?
+
+    complete_json() asks for JSON by appending an explicit instruction
+    to the prompt, then strips markdown code fences with a regex before
+    parsing, because models frequently wrap valid JSON in triple-
+    backtick fences even when told not to - that's an extremely common
+    pattern from their training data. The stripped text gets parsed and
+    validated against whatever pydantic schema the caller asked for. If
+    that fails - bad JSON, or JSON that doesn't match the schema - I
+    don't give up immediately and I don't loop indefinitely either. I
+    build one repair prompt that includes the actual error message and
+    the model's own broken response, and give it exactly one more shot.
+    If that second attempt also fails, I raise InvalidResponse carrying
+    the raw text of that second attempt, so whoever's debugging it can
+    see exactly what the model said instead of just "it didn't
+    validate." One retry balances giving the model a real, informed
+    chance to self-correct against not burning unlimited time and money
+    chasing a fundamentally bad completion.
+
+Q: Walk me through the retry policy - why is 429 special?
+
+    request_with_retry() retries on timeouts, connection errors, and
+    HTTP 5xx, using a backoff schedule pulled from settings so the
+    delay grows with each attempt instead of hammering a struggling
+    server at a fixed interval. 429 gets special handling because it's
+    the provider explicitly telling you "slow down," and it often comes
+    with a Retry-After header naming exactly how long to wait - when
+    that header's there, I use the provider's own number instead of my
+    generic backoff schedule, since the provider knows its own internal
+    state better than any guess on my end could. Any other 4xx - a bad
+    request, bad credentials - never gets retried at all, because
+    retrying the exact same malformed request or the exact same bad key
+    can't possibly succeed the second time; it just wastes quota and
+    adds latency for a failure that's structurally never going to
+    resolve itself.
+
+Q: Tell me about a real debugging problem you hit and how you diagnosed
+it.
+
+    Raw calls to Groq's transcription endpoint were coming back with
+    HTTP 403, which in almost every API I've worked with means bad
+    credentials - so that's the natural first thing to suspect. It
+    turned out to be completely unrelated to auth: it was Cloudflare's
+    bot fingerprinting rejecting the request specifically because of a
+    missing or nonstandard User-Agent header, and the response body
+    literally contained "error code: 1010," Cloudflare's own marker for
+    that exact block. The fix was to set a normal, browser-like
+    User-Agent explicitly on every request. But the part I actually
+    built defensively into the code is the diagnosis, not just the fix -
+    transcribe() checks specifically for a 403 whose body still contains
+    that 1010 marker and raises ProviderUnavailable with a message that
+    names Cloudflare by name, so if this ever happens again - a header
+    gets dropped somewhere, Cloudflare's fingerprinting rules change -
+    nobody burns an hour re-checking API keys that were never actually
+    the problem.
+
+Q: Why go to the trouble of abstract interfaces here instead of just
+calling the Mistral SDK directly?
+
+    Because this project already lived through the exact failure this
+    protects against - two models named in the original spec were
+    decommissioned before development even started. If call sites had
+    talked to a vendor's specific request shape directly, scattered
+    across the codebase, that kind of change means grepping everywhere
+    and hoping you find every occurrence, with no guarantee you got them
+    all. TextProvider, VisionProvider, and AudioProvider are ABCs -
+    abstract base classes - that MistralProvider and GroqProvider
+    explicitly implement, so a subclass missing a required method fails
+    immediately at class-definition time, not quietly at runtime the
+    first time some far-off code happens to call the missing method.
+    Application code depends only on those interfaces, never on Mistral
+    or Groq by name, and the actual model id is threaded through from
+    settings, not hardcoded per call site. If a model gets pulled again,
+    or a whole provider gets swapped, the fix is contained to one new
+    implementation of the same interface and a couple of lines in
+    settings and the factory - not an audit of every file that ever
+    talks to an AI model.

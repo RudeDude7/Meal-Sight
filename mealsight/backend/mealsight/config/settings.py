@@ -66,10 +66,13 @@ class Settings(BaseSettings):
     openweather_api_key: SecretStr | None = None
 
     # --- Model configuration (benchmark-derived, see docs/VISION_FINDINGS.md) ---
-    vision_model: str = "mistral-medium-2505"  # F1 0.64 on aicook eval set; best of 3 tested
-    extraction_model: str = "ministral-8b-2512"  # 3.13 RPS, sufficient for structured extraction
-    reasoning_model: str = "mistral-medium-2505"
-    audio_model: str = "whisper-large-v3-turbo"
+    # Field names are ALL_CAPS by design, matching the Phase 1.1 spec exactly
+    # (VISION_MODEL / EXTRACTION_MODEL / REASONING_MODEL / AUDIO_MODEL) — later
+    # phases reference these names directly, so they need to be stable.
+    VISION_MODEL: str = "mistral-medium-2505"  # F1 0.64 on aicook eval set; best of 3 tested
+    EXTRACTION_MODEL: str = "ministral-8b-2512"  # 3.13 RPS, sufficient for structured extraction
+    REASONING_MODEL: str = "mistral-medium-2505"
+    AUDIO_MODEL: str = "whisper-large-v3-turbo"
 
     # Images are sent at native resolution. The benchmark showed F1 dropping
     # from 0.67 to 0.43 when the same photo was downscaled to 25% — do not

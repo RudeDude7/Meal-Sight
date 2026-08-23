@@ -1,0 +1,1421 @@
+PHASE 1.4 STUDY NOTES: THE SEED DATA PIPELINE
+=============================================================
+
+These notes cover the fourth backend phase: the code that pulls real
+recipes from a public API and packages them, along with three hand-built
+reference datasets, into recipes.db. Everything below describes code and
+data that really exist right now, in backend/mealsight/seed/ and
+backend/tests/test_seed/.
+
+
+1. WHAT THIS PHASE BUILT AND WHY IT COMES NOW
+=============================================================
+
+This phase built a one-shot pipeline that fills recipes.db with actual
+data: 250 real recipes pulled from a public recipe API, a hand-authored
+list of ingredient substitutions, a hand-authored list of ingredient
+synonyms (different names for the same thing), and a hand-curated table
+of per-ingredient nutrition numbers. It also built four small pieces of
+logic that turn messy, free-text API data into the clean shape recipes.db
+expects - parsing measures like "1/2 cup" into a number and a unit,
+guessing how long a recipe takes to cook, deciding how important each
+ingredient is to the dish, and figuring out which dietary tags (vegan,
+gluten_free, and so on) apply.
+
+Phase 1.3 built the tables. This phase is what actually puts rows in
+them. That ordering isn't arbitrary: Phase 2's job is recipe matching -
+given what's in someone's pantry, find recipes that work, using
+substitutions when something's missing, respecting dietary restrictions,
+scoring nutrition. None of that logic can be written against tables that
+are still empty. You need real data sitting there first, or every
+downstream decision "this ingredient is critical" or "this recipe is
+vegan" is either hardcoded for a handful of test recipes or made up on
+the spot - neither of which tells you whether the actual matching logic
+works.
+
+One rule holds across every single line of code in this phase: nothing
+here ever calls an LLM. Not for parsing measures, not for guessing
+importance, not for tagging diets, not for anything. Every transformation
+is plain Python - regexes, word lists, arithmetic. The reason gets its
+own real explanation in section 5 (determinism and reproducibility are
+the short version), but it's worth stating up front because it shapes
+every decision in this document: wherever you'd expect "just ask an LLM
+to classify this," the actual answer in this codebase is a rule.
+
+
+2. FILE MAP
+=============================================================
+
+backend/mealsight/seed/recipes_from_mealdb.py
+    Fetches recipes from TheMealDB (the public API this phase uses),
+    caches raw responses to disk, and writes recipes.db rows. Owns the
+    HTTP fetching, the caching, and the top-level per-recipe assembly
+    (build_recipe_row).
+
+backend/mealsight/seed/recipe_parsing.py
+    Pure logic, no network, no database. Every transformation lives
+    here: parse_measure, split_steps, estimate_cook_time_minutes,
+    assign_importances, derive_dietary_tags, map_category_to_meal_type,
+    map_area_to_cuisine, plus every word list those functions use.
+
+backend/mealsight/seed/load_substitutions.py
+    Loads data/substitutions.json into the substitutions table.
+
+backend/mealsight/seed/load_synonyms.py
+    Loads data/ingredient_synonyms.json into the ingredient_synonyms
+    table.
+
+backend/mealsight/seed/load_nutrition.py
+    Loads data/nutrition_data.json into the nutrition_reference table,
+    then computes and prints a coverage report - what fraction of actual
+    recipe ingredients have a matching nutrition row.
+
+backend/mealsight/seed/seed_all.py
+    The orchestrator. Runs every loader above in the right order against
+    the real recipes.db, checks the results against minimum targets, and
+    prints one combined summary. Also the mealsight-seed console-script
+    entry point.
+
+backend/mealsight/seed/data/substitutions.json
+    57 hand-authored ingredient substitution entries.
+
+backend/mealsight/seed/data/ingredient_synonyms.json
+    83 hand-authored canonical-name/synonym pairs.
+
+backend/mealsight/seed/data/nutrition_data.json
+    136 hand-curated per-100g nutrition entries, sourced from USDA
+    FoodData Central.
+
+backend/.cache/themealdb/
+    A gitignored directory of cached raw JSON responses from TheMealDB,
+    one file per distinct request URL, keyed by that URL's SHA-256 hash.
+    Not committed, not part of the data this pipeline ships - purely a
+    local speed-up so re-running the ingestion script doesn't re-hit the
+    network for requests it's already made.
+
+backend/tests/test_seed/conftest.py
+    A recipe_db fixture: one fresh, throwaway recipes.db per test, never
+    the real data/ directory.
+
+backend/tests/test_seed/test_measure_parsing.py
+    Tests for parse_measure and split_steps.
+
+backend/tests/test_seed/test_importance.py
+    Tests for assign_importances, including determinism.
+
+backend/tests/test_seed/test_dietary_tags.py
+    Tests for derive_dietary_tags.
+
+backend/tests/test_seed/test_substitutions_safety.py
+    Data-correctness tests against the real substitutions.json content -
+    not code behavior, the actual authored data.
+
+backend/tests/test_seed/test_synonyms_distinctness.py
+    Data-correctness tests against the real ingredient_synonyms.json
+    content, checking it never wrongly links two distinct ingredients.
+
+backend/tests/test_seed/test_loaders_idempotent.py
+    Confirms every loader, run twice, produces the same row count.
+
+
+3. WHAT A SEED PIPELINE IS
+=============================================================
+
+Seed data versus user-generated data
+------------------------------------------------------
+Seed data is the data a system ships with before any real user has ever
+touched it - the starting content that makes the app usable on day one.
+User-generated data is everything that gets created afterward, by actual
+use: someone's pantry contents, their meal history, their ratings. This
+phase is entirely about the former. Nobody's pantry, nobody's ratings, no
+user of any kind exists yet in this codebase - just recipes, and the
+reference tables (substitutions, synonyms, nutrition) that recipes need
+in order to be useful to anything built on top of them later.
+
+ETL, mapped onto this pipeline
+------------------------------------------------------
+ETL stands for Extract, Transform, Load - a standard shape for any
+pipeline that pulls data from somewhere external, reshapes it to fit
+where it's going, and writes it there. It's not a MealSight-specific
+term; it's the standard name for "get data from A, change its shape, put
+it in B," used everywhere data moves between systems with different
+expectations about what it looks like. Mapped onto this actual code:
+
+    Extract: recipes_from_mealdb.py's fetch_categories, fetch_areas,
+    fetch_meal_ids_for_filter, and fetch_meal_detail functions - pulling
+    raw JSON out of TheMealDB's API.
+
+    Transform: recipe_parsing.py's whole content - parse_measure,
+    estimate_cook_time_minutes, assign_importances, derive_dietary_tags,
+    and the two mapping functions - turning that raw JSON into the exact
+    shape recipes.db's schema expects.
+
+    Load: build_recipe_row assembling the final row dict, and
+    upsert_recipe writing it into recipes.db. Same pattern for the three
+    JSON files: each load_*.py module reads its file (extract), does
+    basically no transformation since the JSON is already shaped right
+    (an intentionally thin transform step), and writes rows (load).
+
+Why a separate script instead of seeding at app startup
+------------------------------------------------------
+An alternative worth naming: fold this whole pipeline into whatever code
+runs when the backend server starts, so the database is always populated
+automatically. This phase doesn't do that, for a few concrete reasons.
+First, TheMealDB ingestion makes real network calls and can take a
+noticeable amount of time on a cold cache - not something you want
+happening, even occasionally, on every single server restart. Second,
+seeding is a one-time (or rare, deliberate re-run) operation, not
+something that needs to happen every time the app boots; tying it to
+startup would mean every developer, every test run, every deploy pays
+that cost or has to remember to skip it. Third, keeping it a standalone
+script (mealsight-seed) means it can be run, inspected, and reasoned
+about completely independently of the running application - you can seed
+a fresh database on a totally different machine with no server process
+involved at all. The loaders being idempotent (section 4 explains this
+term) is what makes "run it again whenever you want" a genuinely safe
+thing to say, rather than a script you can only ever run exactly once.
+
+
+4. THEMEALDB INGESTION
+=============================================================
+
+What TheMealDB is, and why it was chosen
+------------------------------------------------------
+TheMealDB is a free, public recipe API - no API key, no account, no
+payment required to use it. It exposes real recipes: names, categories
+(Chicken, Dessert, Vegan, and so on), areas (a rough cuisine label like
+"Italian" or "Indian"), full ingredient lists with their measures, plain-
+text cooking instructions, and a thumbnail image. It was picked over
+paid alternatives specifically because "free and keyless" removes an
+entire category of setup friction and cost from a phase whose only job
+is getting some real recipes into a database - no signup step, no
+billing, nothing that could quietly break or rate-limit a future
+developer who just wants to run the seed script.
+
+The strIngredient1-20 / strMeasure1-20 shape problem
+------------------------------------------------------
+TheMealDB's per-recipe response doesn't give you an ingredient list as an
+actual list. Instead, a single meal record has twenty separate flat
+fields: strIngredient1 through strIngredient20, and strMeasure1 through
+strMeasure20, most of which are empty strings for any recipe with fewer
+than twenty ingredients. This is the API being designed for a database
+table with a fixed number of columns - the underlying storage TheMealDB
+itself runs on almost certainly has this exact shape, one row per
+recipe, columns for each of up to twenty ingredient slots, rather than a
+proper ingredients table with its own foreign key back to the recipe. So
+this pipeline's very first transformation step, before anything else
+happens, is _extract_raw_ingredients: loop over slots 1 through 20 (a
+module-level constant, INGREDIENT_SLOTS = 20), pull whichever
+strIngredientN / strMeasureN pair exists, strip whitespace, and drop
+every slot whose ingredient name comes back blank. That turns twenty
+flat, mostly-empty fields into one clean list of (name, measure) pairs -
+the actual shape every downstream function in this pipeline expects to
+work with.
+
+Three-endpoint fetch strategy
+------------------------------------------------------
+Getting to "250 full recipe records" out of TheMealDB takes three
+different kinds of request, not one, because TheMealDB itself doesn't
+expose "give me every recipe" as a single call:
+
+    categories.php and list.php?a=list
+    Two lightweight endpoints that just enumerate what categories and
+    areas exist at all - fetch_categories and fetch_areas. The real run
+    of this pipeline found 14 categories and 195 areas.
+
+    filter.php?c=<category> and filter.php?a=<area>
+    Given one category or area name, this returns a list of meal ids
+    (and names/thumbnails, which this pipeline ignores) that match it -
+    fetch_meal_ids_for_filter. collect_meal_ids calls this once per
+    category and once per area, accumulating meal ids into a Python set
+    as it goes.
+
+    lookup.php?i=<id>
+    Given one specific meal id, this returns the full recipe record -
+    every ingredient slot, the full instructions text, everything -
+    fetch_meal_detail. This is the expensive call, made once per meal id
+    actually being ingested.
+
+Three steps because that's genuinely how the API is shaped: there's no
+single endpoint that returns full recipe detail for many recipes at
+once, only "list what categories/areas exist," "list ids matching one
+category or area," and "get full detail for one specific id." Getting
+full recipes at all means walking through all three, in that order.
+
+Deduplication by id
+------------------------------------------------------
+Filtering by category and filtering by area are two independent axes -
+the exact same recipe (say, a specific Chicken Curry) will show up when
+you filter by category "Chicken" and again when you filter by area
+"Indian." collect_meal_ids accumulates every id it discovers into a
+plain Python set rather than a list specifically because a set silently
+drops anything already present - by the time every category and every
+area has been walked, that set holds each distinct meal id exactly once,
+no matter how many different category/area filters happened to surface
+it. The real run discovered 792 distinct meal ids this way, in total,
+across every category and area combined, sorted numerically and capped
+at MAX_RECIPES = 250 - so the 250 actually ingested are simply the 250
+lowest-numbered ids TheMealDB happens to have, not any kind of curated
+or random selection.
+
+Being a good API citizen: throttling
+------------------------------------------------------
+THROTTLE_SECONDS = 0.35 in recipes_from_mealdb.py, and fetch_json awaits
+asyncio.sleep(THROTTLE_SECONDS) immediately before every single live
+network request it actually makes. TheMealDB doesn't publish or enforce
+a hard rate limit for this pipeline to bump up against - but hammering a
+free, keyless public service with hundreds of requests back-to-back as
+fast as the network allows is still the wrong thing to do: it's exactly
+the kind of load pattern that gets a specific IP throttled or blocked by
+services that do start enforcing limits once they notice abusive
+traffic, and it's simply inconsiderate to a service nobody's paying to
+use. A third of a second of deliberate delay before each request is
+this codebase choosing to be a well-behaved client of someone else's
+free infrastructure, even though nothing external is forcing it to.
+
+The .cache directory
+------------------------------------------------------
+Every fetch_json call first checks whether a cached response already
+exists on disk for that exact request URL (_cache_path_for hashes the
+URL with SHA-256 and looks for CACHE_DIR / "<hash>.json") before ever
+touching the network. If the cached file is there, it's read and
+returned immediately - no network call, no throttle delay, nothing.
+Only a genuine cache miss goes out over HTTP, and the very first thing
+that happens after a successful response is writing it to that same
+cache path for next time.
+
+This directory sits at backend/.cache/themealdb/ and is meant to be
+gitignored - not committed to source control, not part of what this
+pipeline ships to anyone else. It exists purely as a local convenience:
+once you've run the ingestion script once on a given machine, every
+subsequent run of it is essentially free and fully offline, since every
+request it needs has already been cached. That protects against two
+concrete annoyances: re-running the script repeatedly while developing
+or debugging the transformation logic downstream (measure parsing, cook-
+time estimation, and so on) doesn't re-hammer TheMealDB's servers every
+single time, and it means the pipeline still works even with no network
+connection at all, as long as the cache from a prior run is already
+sitting on disk.
+
+Idempotency via loader mechanics
+------------------------------------------------------
+Idempotent means an operation gives you the same end result whether you
+run it once or run it five times in a row - no error on the repeat runs,
+and no duplicated effect. recipes.id is TEXT PRIMARY KEY (TheMealDB's own
+id, kept verbatim - see phase 1.3's notes on why recipe ids are TEXT),
+and upsert_recipe writes every recipe with:
+
+    INSERT OR REPLACE INTO recipes (id, name, ...) VALUES (?, ?, ...)
+
+INSERT OR REPLACE keyed on the primary key means running the whole
+ingestion script a second time re-derives the exact same rows (same ids,
+freshly recomputed content) and overwrites them in place, rather than
+inserting a second copy of each recipe alongside the first. Combined
+with the on-disk cache, running this script again after it's already
+succeeded once is both safe and fast: nothing gets duplicated, and
+almost nothing gets re-fetched over the network.
+
+
+5. THE FOUR TRANSFORMATIONS
+=============================================================
+
+Measure parsing
+------------------------------------------------------
+TheMealDB's strMeasureN fields are free text a human typed - not a
+structured "quantity + unit" pair, just a string like "1 tbsp", "1/2
+cup", "400g", "2-3 tomatoes", or "Dash." parse_measure's whole job is
+turning that string into (quantity, unit) - a float or None, and a
+canonical unit string or None - and it has to handle every shape that
+free text actually shows up in:
+
+    Plain numbers with a unit: "1 tbsp" -> (1.0, "tbsp"),
+    "2 tablespoons" -> (2.0, "tbsp"). Note both resolve to the same
+    canonical unit "tbsp" - more on that below.
+
+    Plain fractions: "1/2 cup" -> (0.5, "cup"), "3/4 tsp" -> (0.75,
+    "tsp"). _parse_number_token splits on "/" and divides.
+
+    Unicode fraction glyphs: recipe text sometimes uses the actual
+    single Unicode character for a fraction - ½, ¼, ¾, and others -
+    instead of typing "1/2" as three separate characters. Before any
+    other parsing happens, _normalize_unicode_fractions walks a lookup
+    table (_UNICODE_FRACTIONS) replacing every one of those glyphs with
+    its plain-ASCII equivalent (½ becomes " 1/2", and so on), so "½ cup"
+    and "1 ½ cups" both parse exactly like their spelled-out
+    equivalents would.
+
+    Ranges, taken at the midpoint: "2-3 tomatoes" -> quantity 2.5,
+    "2 to 3 cloves" -> 2.5, "1-2 tbsp" -> 1.5. There's no principled way
+    to know from the text alone whether a recipe author meant "closer to
+    2" or "closer to 3" - the midpoint is a reasonable single number to
+    store when the source data itself only ever gave a range, not a
+    single value.
+
+    Attached units with no space: "400g" -> (400.0, "g"), "1kg" ->
+    (1.0, "kg"). The regex used for the numeric part (_SINGLE_RE) and
+    the unit-matching step (_find_unit) don't require a space between
+    the number and the unit text.
+
+    Non-quantities: "Dash" and "Pinch" carry real meaning (a genuinely
+    tiny, unmeasured amount) but no number - parse_measure returns
+    (None, "dash") and (None, "pinch") for these, keeping the unit but
+    correctly reporting there's no numeric quantity to store. "To
+    taste", "", and None all carry neither a real quantity nor a real
+    unit, so all three return (None, None).
+
+Unit normalization means folding every spelling variant of the same real
+unit down to one canonical string - "tablespoon", "tablespoons", "tbsp",
+and "tbsps" all become "tbsp"; "teaspoon" and friends all become "tsp";
+and so on through kg, g, ml, l, oz, lb, cup, clove, can, slice, stick,
+pinch, dash, piece, packet, bunch, handful (the full list lives in
+_UNIT_ALIASES in recipe_parsing.py). Without this, two recipes that mean
+the exact same unit - one written by whoever authored "2 tbsp", the
+other by whoever authored "2 Tablespoons" - would come out of parsing as
+two different unit strings, which would silently break anything
+downstream that ever needs to compare or aggregate quantities across
+recipes by unit.
+
+raw_measure is kept, deliberately, alongside the parsed quantity and
+unit, in every ingredient dict build_recipe_row assembles - not
+discarded once parsing succeeds. That's traceability: if parse_measure
+ever mis-parses something weird ("2-3" tomatoes as some edge case, say),
+having the original string sitting right next to the parsed result means
+you can actually see what the parser was working from and tell whether
+the bug is in the parsing logic or in the source data itself, instead of
+staring at a bare number with no way to check it against what TheMealDB
+actually said.
+
+Cook time inference
+------------------------------------------------------
+TheMealDB has no cook-time field anywhere in its response. Nothing to
+extract, nothing to transform - the value simply doesn't exist in the
+source data, so it has to be derived from what does exist: the plain-
+text strInstructions field. estimate_cook_time_minutes tries two
+approaches, in order, and always tells you which one it actually used.
+
+First, it tries to extract explicit durations directly out of the
+instruction text with a regex (_DURATION_RE) that matches things like
+"simmer for 20 minutes" or "bake for 45-50 mins" - a number (or a
+low-high range, averaged), followed by "hour(s)"/"hr(s)" or
+"minute(s)"/"min(s)". Every match found gets summed together (hours
+converted to minutes first), and if that sum comes out positive, that's
+the answer, tagged with source "extracted_from_instructions".
+
+If no explicit duration was found anywhere in the text, it falls back to
+a heuristic. A heuristic, for anyone who hasn't run into the word before,
+is a rule-of-thumb estimate - not a precise calculation, not a lookup of
+a known fact, just a reasonable guess built from an assumption that
+usually holds ("recipes with more steps and more active cooking verbs
+tend to take longer") rather than one that's provably always correct.
+Concretely: STEP_COUNT_BASE_MINUTES (10) plus STEP_COUNT_PER_STEP_MINUTES
+(5) times however many instruction steps split_steps found, plus a bonus
+of COOKING_VERB_BONUS_MINUTES (5) for every distinct cooking verb
+(bake, roast, simmer, boil, fry, saute, grill, stew, braise, steam,
+poach, broil, marinate, chill, rest) that appears anywhere in the
+instruction text, capped at COOKING_VERB_BONUS_CAP_MINUTES (30) so a
+recipe that happens to mention a lot of verbs doesn't get an unbounded
+bonus. This path is tagged with source "heuristic_step_count_and_verbs".
+
+cook_time_source is a real column on the recipes table -
+ensure_cook_time_source_column adds it with ALTER TABLE recipes ADD
+COLUMN cook_time_source TEXT if it isn't already present, checked every
+run via PRAGMA table_info(recipes) since SQLite's ALTER TABLE has no
+built-in IF NOT EXISTS for adding a column the way CREATE TABLE does for
+a whole table. The task authorized either bolting this onto the schema
+as a new column, or folding it into one of the existing JSON columns
+(dietary_tags, ingredients, steps). This pipeline chose the new column,
+specifically because every one of those three JSON columns already has
+a documented shape other code depends on (Phase 1.3's schema comments
+spell out exactly what recipes.dietary_tags, ingredients, and steps are
+each supposed to contain) - squeezing a per-recipe metadata field into
+any of them would mean either breaking that documented shape or bolting
+on an inconsistent extra key nobody else expects to find there. A clean
+new column keeps the existing JSON fields exactly as documented and
+gives this one new fact its own honest home.
+
+The general principle here, worth naming on its own: any time a value in
+a system is estimated rather than observed or supplied directly, it's
+worth recording how it was derived, right next to the value itself. A
+plain integer sitting in cook_time_minutes with no source field would
+look identical whether it came from an author writing "bake for exactly
+45 minutes" or from this pipeline's rough step-count guess - and those
+two numbers deserve very different levels of trust from whatever code
+reads them later. cook_time_source is exactly that provenance record.
+
+Ingredient importance
+------------------------------------------------------
+Every ingredient in every recipe gets one of three importance levels:
+critical, important, or optional. critical means the recipe doesn't
+really work without this ingredient - it's the defining component.
+important means it matters to the dish but is more plausibly
+substitutable or skippable with some quality loss. optional means it's a
+garnish, seasoning, or other nice-to-have whose absence barely changes
+anything. This matters directly to Phase 2's matching logic: deciding
+whether a recipe is actually makeable given what's in someone's pantry
+depends on knowing whether a missing ingredient is a dealbreaker or
+something that can just be left out or substituted - Phase 1.3's own
+schema comments spell this out as the literal reason the field exists.
+
+The actual rule set, in assign_importances, runs in this order:
+
+    1. At most one ingredient per recipe is ever critical: the first one
+    (in the recipe's own ingredient order) whose name appears literally
+    inside the recipe's title (recipe_name.lower()) - "Chicken" matching
+    inside "Chicken Alfredo," for instance. If nothing matches the title
+    at all, it falls back to the first ingredient whose name contains
+    any term from PROTEIN_TERMS (chicken, beef, pork, shrimp, tofu, eggs,
+    beans, lentils, and so on) - so a recipe like "Weeknight Dinner" with
+    no protein word in its own title can still get one critical
+    ingredient, as long as some ingredient in it is a recognizable
+    protein.
+
+    2. Anything matching GARNISH_AND_SEASONING_TERMS (salt, pepper,
+    parsley, cilantro, sesame seeds, paprika, zest, garnish, and similar)
+    is optional.
+
+    3. Everything else defaults to important - aromatics like onion and
+    garlic, sauces, and other core flavor components that aren't the
+    single defining ingredient but aren't garnishes either.
+
+Why this is rule-based rather than an LLM call: two words carry the
+whole explanation, determinism and reproducibility. Determinism means
+the exact same input always produces the exact same output, every single
+time, with nothing left to chance. Reproducibility, closely related,
+means the entire seed corpus - all 250 recipes' worth of importance
+tags - can be regenerated from scratch and come out identical to what's
+already sitting in the database, at any point in the future, by anyone,
+on any machine. A rule-based function built from plain word lists and
+string matching gives you both of those completely for free: run
+assign_importances on the same recipe name and ingredient list a hundred
+times, and you get the exact same answer a hundred times, which is
+exactly what test_importance.py's
+test_importance_is_deterministic_across_repeated_runs actually checks.
+An LLM call, even a well-configured one, doesn't reliably give you that -
+model responses can vary between calls even at low temperature, and a
+model provider can silently update or retire the exact model version you
+called last time, which would mean this seed data quietly becomes
+unregenerable: the specific classification decisions baked into the
+database today might not be reproducible from the same inputs a year
+from now, using whatever model happens to be available then. On top of
+that, an LLM call is real cost and real latency per ingredient, multiplied
+across every ingredient in every one of 250 recipes, for a classification
+task genuinely simple enough that a handful of word lists and one loop
+does it in microseconds, for free, forever.
+
+The honest tradeoff: a fixed rule set is genuinely less flexible than a
+model. It'll misjudge some edge cases a model might have handled more
+gracefully - an unusual dish where the "obvious" critical ingredient
+isn't the one matching the recipe's title, say, or a genuinely
+ambiguous case the word lists just don't cover. But for seed data
+specifically - a fixed body of recipes that need to be classified once,
+consistently, and stay that way - determinism and reproducibility are
+worth more than marginal per-recipe accuracy gains a model might
+occasionally offer, especially given that a wrong LLM call here can't
+even be diagnosed or fixed the way a wrong rule can (you can read the
+rule, find the bug, and fix it; you can't inspect why a model produced
+one specific classification the same way).
+
+Dietary tags
+------------------------------------------------------
+derive_dietary_tags looks at a recipe's ingredient names and decides
+which of five tags apply: vegetarian, vegan, dairy_free, gluten_free,
+nut_free. Each has its own term list in recipe_parsing.py:
+
+    MEAT_TERMS: chicken, beef, pork, lamb, turkey, duck, bacon, sausage,
+    shrimp, fish, salmon, gelatin, lard, mince, and similar - anything
+    that rules vegetarian (and therefore vegan) out.
+
+    DAIRY_TERMS: milk, butter, cheese, cream, yogurt, ghee, whey, casein,
+    buttermilk, parmesan, mozzarella, sour cream, condensed milk, paneer,
+    and similar - rules out dairy_free (and, combined with meat, egg, and
+    honey, rules out vegan).
+
+    EGG_TERMS: egg, eggs, egg yolk, egg white, mayonnaise, meringue -
+    rules out vegan specifically (eggs don't affect vegetarian or
+    dairy_free at all).
+
+    HONEY_TERMS: just honey - also rules out vegan specifically, since
+    honey is an animal product even though it contains no meat, dairy,
+    or egg.
+
+    GLUTEN_TERMS: flour, bread, breadcrumb, pasta, noodle, wheat, barley,
+    rye, couscous, seitan, spaghetti, and similar - but with an
+    important override, _GLUTEN_SAFE_QUALIFIERS (rice, corn, almond,
+    coconut, chickpea, "gluten-free", "gf"): an ingredient like "rice
+    flour" or "corn noodle" matches a gluten term ("flour", "noodle")
+    but also matches one of these safe qualifiers, so
+    _has_unsafe_gluten_ingredient treats it as not actually containing
+    gluten. Without that override, any flour-based ingredient at all
+    would incorrectly block gluten_free, even the ones explicitly made
+    to not contain gluten.
+
+    NUT_TERMS: almond, peanut, cashew, walnut, pecan, pistachio,
+    hazelnut, macadamia, nutella, marzipan, and similar. Coconut is
+    deliberately not on this list - botanically it's a drupe, not a tree
+    nut, and major allergen-labeling schemes (including the US FDA's)
+    list it separately from tree nuts, so an ingredient like "coconut
+    milk" correctly doesn't block the nut_free tag.
+
+The logic is conservative by design: every one of these term lists is a
+blocklist, not an allowlist. A recipe only gets a tag when nothing in
+its ingredient list matches the relevant blocklist - it's never the case
+that some ingredient actively earns a tag by matching something on a
+"safe" list. That means an ingredient this code has genuinely never seen
+before - some obscure or unusually-named item that matches none of these
+lists - doesn't block any tag, but it also doesn't grant one either; its
+presence is simply silent, in both directions. That's exactly what
+test_dietary_tags.py's
+test_unrecognized_ingredient_does_not_falsely_grant_a_tag checks: an
+unknown ingredient alongside rice still lets vegan and vegetarian apply,
+because nothing about the unknown ingredient matched any blocklist term.
+Absence of evidence is not evidence of absence here - not recognizing an
+ingredient as meat doesn't mean it's confirmed to not be meat, it just
+means this specific rule set has nothing to say about it, one way or
+the other.
+
+Why lean conservative at all, rather than trying to be maximally
+permissive about granting tags: a false positive here is a real safety
+issue, not just an annoyance. Telling someone a recipe is dairy_free
+when it actually contains cream, or vegan when it actually contains
+honey, could genuinely make someone with a real allergy or a real
+dietary commitment sick, or feel deceived by the system. A missing tag -
+failing to tag a recipe vegan when it actually is - is a worse
+recommendation (the system just doesn't surface a recipe that would've
+been fine), but it's not a safety problem. Getting the false-positive
+direction wrong is categorically worse than getting the false-negative
+direction wrong, so every one of these rules is built to only grant a
+tag when it's genuinely confident nothing in the ingredient list rules
+it out.
+
+Category and area also get mapped into MealSight's own vocabulary:
+map_category_to_meal_type turns TheMealDB's strCategory (Breakfast,
+Dessert, Starter, Side, Chicken, Beef, Vegetarian, and so on) into one of
+breakfast, dessert, appetizer, side, or main - CATEGORY_TO_MEAL_TYPE is
+an explicit dict for the categories that map cleanly, defaulting to
+"main" for anything else (protein-type categories like "Chicken" or
+"Beef" really describe a course, not a meal time, so they land on
+"main"). map_area_to_cuisine just uses strArea directly as the cuisine
+label when present (falling back to strCountry, which TheMealDB's
+lookup.php responses don't actually populate in practice), since
+TheMealDB's area field ("Italian," "Indian," "Mexican") already reads
+naturally as a cuisine name with no further transformation needed.
+
+
+6. THE SUBSTITUTIONS DATASET
+=============================================================
+
+substitutions.json holds 57 hand-authored entries, loaded into the
+substitutions table. Each entry says: given original_ingredient, you can
+use substitute instead, at this ratio (a string like "1:1" or "3:4"
+describing the swap proportion), with this much flavor_impact, and these
+dietary_notes. flavor_impact is one of three levels - minimal,
+noticeable, significant - describing how much the swap actually changes
+how the finished dish tastes or feels, not just whether it technically
+works. dietary_notes is a comma-separated string listing which dietary
+restrictions the substitute itself satisfies (not the original
+ingredient) - "dairy_free,vegan" on an olive-oil-for-butter entry, for
+instance.
+
+dietary_notes accuracy is treated as a hard requirement, not a nice-to-
+have, because Phase 2.2 is described as filtering directly on this
+field: if a substitution is tagged dairy_free but the substitute
+actually contains dairy, Phase 2.2 could recommend that substitution to
+someone who's lactose intolerant, believing it's safe, when it isn't.
+This is exactly the same false-positive-is-worse-than-false-negative
+reasoning from section 5's dietary tags, applied to a hand-authored file
+instead of a rule engine - a wrong tag here is a real, user-facing
+correctness bug, not a data-quality nitpick to clean up eventually.
+
+Two specific traps the data (and its test suite) call out by name:
+
+    Ghee is not dairy_free. Ghee is clarified butter - the milk solids
+    are mostly removed, which is why some people who are mildly
+    lactose-sensitive tolerate it better than regular butter, but it's
+    still a dairy-derived, butterfat product. It would be an easy,
+    plausible-sounding mistake to tag a butter-to-ghee substitution as
+    dairy_free, and it would be wrong.
+
+    Honey is not vegan. Honey is produced by bees - it's an animal
+    product, even though it contains no meat, dairy, or egg at all
+    (exactly the same subtlety recipe_parsing.HONEY_TERMS exists to
+    handle for whole recipes, in section 5). A honey-for-sugar
+    substitution tagged vegan would be wrong for the same reason.
+
+test_substitutions_safety.py doesn't just trust that whoever authored
+this JSON got these right - it walks every dairy_free-tagged entry
+against its own independent dairy term list (_DAIRY_TERMS: milk, butter,
+cheese, cream, yogurt, ghee, whey, casein, custard, deliberately kept
+separate from recipe_parsing.DAIRY_TERMS so a bug in one can't silently
+mask the same bug in the other) and fails loudly if any substitute text
+mentions a real dairy term without a qualifying non-dairy phrase like
+"coconut," "cashew," or "vegan" present. It also has two entries aimed
+directly at the two named traps -
+test_ghee_is_never_suggested_as_a_butter_substitute and
+test_honey_is_never_suggested_as_a_vegan_substitute. The reasoning for
+testing this instead of just trusting the human who typed the JSON:
+authoring is exactly where a mistake like this is easiest to make
+without noticing - ghee genuinely sounds dairy-free if you don't already
+know it's clarified butter - and a test that actually checks the real,
+shipped data catches that kind of mistake automatically, every single
+time the test suite runs, rather than depending on careful re-reading
+by whoever wrote or later edited the file.
+
+Why hand-authored JSON at all, rather than pulling substitution data
+from some external source: there's no free, comprehensive public API for
+"ingredient substitution knowledge" the way TheMealDB exists for
+recipes - this is exactly the kind of practical cooking knowledge that
+mostly lives in cookbooks, food blogs, and experienced cooks' heads, not
+in a structured, queryable database anywhere. Hand-authoring a curated
+57-entry set, verified by an automated safety test, is what's actually
+available here.
+
+
+7. THE SYNONYMS DATASET
+=============================================================
+
+The matching problem this table solves
+------------------------------------------------------
+Two different systems, elsewhere in this project, need to talk about
+ingredients using two different vocabularies. A vision model
+(identifying food from a photo, built in an earlier phase and evaluated
+in docs/vision_benchmark_report.md) produces whatever phrasing it
+happened to generate for what it saw in an image - "milk carton," say,
+or "scallion." TheMealDB's own recipe text uses whatever phrasing that
+recipe's original author happened to write - "green onion," maybe, for
+the exact same ingredient the vision model called "scallion." Without
+some way to connect those two vocabularies, a perfectly correct vision
+identification could fail to match a perfectly correct recipe ingredient,
+purely because the two systems used different words for the same real
+thing.
+
+ingredient_synonyms.json's 83 entries exist to bridge exactly that gap:
+each row maps one synonym (an alternate name) back to one canonical_name
+(the standard form this codebase treats as the "real" name for that
+ingredient). Two distinct sources fed this list:
+
+    Regional and everyday naming variants: "capsicum" and "sweet
+    pepper" both mapping to "bell pepper," "scallion" mapping to "green
+    onion," and similar pairs that are simply different common names for
+    the same ingredient in different regions or dialects of English.
+
+    Container-stripped forms the vision model actually produces: the
+    file's own _meta note says this explicitly - some entries exist
+    specifically because docs/vision_benchmark_report.md showed the
+    vision model really outputting phrasing like "milk carton" for a
+    carton of milk, which needs to resolve back to plain "milk" the same
+    way any other synonym would. This second source matters because it
+    means the list isn't purely theoretical or guessed at - it's
+    grounded in what the actual vision benchmark run really produced, not
+    what someone assumed a vision model might say.
+
+The opposite failure: collapsing distinct ingredients
+------------------------------------------------------
+There's a failure mode in the other direction that's arguably worse than
+missing a legitimate synonym: linking two ingredients that are
+genuinely, meaningfully different as if they were the same thing. If
+"potato" and "sweet potato" were ever wrongly linked as synonyms of each
+other, a recipe genuinely calling for potato could get "matched" against
+someone's sweet potato, or vice versa - and those are different
+vegetables with different flavors, textures, and cooking behavior; a
+recipe assuming one and getting recommended based on the other is a
+real, concrete bad recommendation, not a harmless approximation. Same
+story for "cream" and "cream cheese" - a recipe genuinely calling for
+plain cream could get satisfied by someone owning cream cheese instead,
+which would produce a genuinely wrong result if anyone actually cooked
+it that way, since cream cheese doesn't behave anything like liquid
+cream in a recipe.
+
+test_synonyms_distinctness.py's DISTINCT_PAIRS list names nine such
+pairs explicitly - potato/sweet potato, cream/cream cheese, cream/sour
+cream, milk/coconut milk, butter/peanut butter, butter/cocoa butter,
+onion/green onion, chicken/chicken stock, sugar/brown sugar - and
+test_distinct_ingredient_pairs_are_never_linked_as_synonyms checks the
+real, loaded synonym data against every one of them, in both directions,
+every time the test suite runs. This is a negative test - it asserts
+that something must never happen, rather than that something specific
+does happen. Testing what must not happen matters here specifically
+because a bad entry accidentally added to this JSON file later (someone
+adding "potato" as a synonym for "sweet potato" by mistake, say, while
+extending the list for an unrelated reason) would otherwise sail through
+completely silently - nothing about a purely positive test suite (only
+checking "the synonyms that should exist, do exist") would ever catch a
+wrong entry that also happens to exist alongside the right ones. The
+negative test is what actually stands guard against that specific,
+concrete kind of mistake.
+
+The composite primary key
+------------------------------------------------------
+ingredient_synonyms' primary key is the pair (canonical_name, synonym)
+together (this is Phase 1.3's own schema decision, not new to this
+phase) - neither column alone is unique, since the same canonical name
+legitimately has several different synonyms ("green onion" has both
+"scallion" and "scallions," for instance). What this composite key
+concretely prevents: load_synonyms's INSERT OR REPLACE is keyed on that
+exact pair, so re-running the loader can never produce two separate rows
+both claiming "scallion means green onion" - the second write to that
+same (canonical_name, synonym) pair replaces the first, rather than
+sitting alongside it as a duplicate.
+
+
+8. THE NUTRITION DATASET
+=============================================================
+
+Per-100g normalization
+------------------------------------------------------
+Every entry in nutrition_data.json - calories, protein, carbs, fat,
+fiber, sodium - is expressed per 100 grams of that ingredient, not per
+serving, per cup, or per whatever unit happens to be convenient for a
+given recipe. This is the standard basis nutrition reference data is
+normally published in (it's literally how USDA's own FoodData Central
+publishes it), and it matters specifically because it makes every
+ingredient's numbers directly comparable and directly scalable: knowing
+a value per 100g means you can compute the actual nutrition contribution
+of any real quantity of that ingredient - 250g, 30g, whatever a specific
+recipe actually calls for - with one multiplication, rather than needing
+a separate, inconsistent basis for every different ingredient.
+
+Hand-curated JSON versus a live nutrition API
+------------------------------------------------------
+The alternative to a static JSON file would be calling a live nutrition
+API (USDA's own FoodData Central API, for instance) at seed time,
+looking up each ingredient's numbers on demand. This pipeline uses a
+136-entry hand-curated JSON file instead, and the file's own header
+comment states the source directly: "USDA FoodData Central
+(fdc.nal.usda.gov) reference values, hand-curated for this seed
+pipeline." Citing the source right there in the file itself, rather than
+only in some separate document, means anyone looking at the actual data
+later - to spot-check a number, to understand where it came from, to
+decide whether it needs updating - finds that answer sitting right next
+to the numbers themselves, without having to go hunt for it anywhere
+else.
+
+Choosing hand-curated over live-API brings the exact same offline-and-
+deterministic reasoning back that showed up for ingredient importance in
+section 5: a live API call means the seeding process now depends on that
+external service being up, being reachable from wherever seeding
+happens to run, and returning values that don't quietly drift or change
+between runs; it also very plausibly means dealing with a rate limit and
+needing an API key, both of which are real setup friction for something
+whose whole point is "just run the seed script and get a populated
+database." A static JSON file has none of that - it's committed
+alongside the code, needs no network access and no credentials to load,
+and produces the exact same numbers on every single run, forever,
+regardless of whether the USDA's own API happens to be reachable or
+rate-limiting requests that day. The real tradeoff being accepted: a
+136-entry hand-curated file is necessarily a subset of everything USDA
+actually publishes, and it needs a human to actually go add an entry
+whenever a genuinely new ingredient shows up that isn't already covered
+- there's no automatic "look up whatever's missing" fallback built in.
+
+The coverage requirement
+------------------------------------------------------
+The file's own _meta note states the actual target directly: entries
+were chosen specifically to guarantee coverage of every ingredient
+appearing in 5 or more ingested recipes. That threshold - 5, not 1 and
+not some much higher number - is a practical cutoff between "worth the
+effort of manually curating a nutrition entry for" and "too rare in this
+250-recipe corpus to be worth the same effort." An ingredient that shows
+up in only one or two of the 250 recipes contributes proportionally very
+little to how useful the overall nutrition_reference table is; an
+ingredient showing up in five or more recipes is common enough across
+this specific corpus that leaving it uncovered would mean nutrition
+scoring silently fails, or falls back to a missing value, for a
+meaningful chunk of real recipes.
+
+Coverage report mechanics
+------------------------------------------------------
+compute_ingredient_frequencies reads every row's ingredients JSON out of
+the real recipes table, pulls the distinct (name-normalized:
+lowercased, whitespace-collapsed) ingredient names out of each recipe,
+and counts how many distinct recipes each ingredient name appears in
+across the whole corpus. coverage_report then compares that frequency
+table against whatever ingredient names actually exist in
+nutrition_reference, and computes: how many distinct ingredient names
+exist across all ingested recipes, how many of those have a matching
+nutrition_reference row, the resulting percentage, and the top 20 most
+frequent uncovered ingredients (sorted by frequency, ties broken
+alphabetically) - specifically so a gap in coverage is something you can
+immediately see and act on, rather than something that stays invisible
+until it causes a downstream problem. print_coverage_report is what
+actually prints that report as part of running the pipeline, so this
+information surfaces loudly every single time the pipeline runs, not
+just when someone thinks to go looking for it.
+
+The real run of this pipeline (250 recipes ingested) found 531 distinct
+ingredient names across the whole corpus, of which 136 have a
+nutrition_reference row - 25.6% coverage. That percentage looks low in
+isolation, but it's the wrong number to focus on alone: the actual
+target this file's _meta comment states is coverage of ingredients
+appearing in 5 or more recipes specifically, and every one of the top 20
+most frequent uncovered ingredients in the real run's report - basil
+leaves, beef brisket, black treacle, blackberries, brown lentils,
+cannellini beans, challots, chicken thighs, chives, curry powder,
+custard, dark chocolate, dried oregano, egg white, golden syrup, green
+beans, ground almonds, gruyère, kidney beans, lamb mince - appears in
+exactly 4 recipes, meaning nothing meeting the actual 5+ target is
+missing. 531 distinct ingredient names is a genuinely long tail: most of
+that list is ingredients appearing in only one or two recipes each -
+specific, less-common items unique to a small handful of specific
+dishes - which is exactly why the raw percentage looks unimpressive while
+the actual stated target (5+, which is what the pipeline's warning check
+in seed_all.py cares about) is fully met, with the real run printing "No
+warnings — all targets met."
+
+
+9. THE ORCHESTRATOR
+=============================================================
+
+seed_all.py's whole purpose is running every loader above against the
+real recipes.db, in the right order, and printing one combined summary
+so a person running mealsight-seed gets a single, complete picture of
+what just happened without needing to read four separate scripts'
+individual output.
+
+Dependency order: recipes first, then synonyms and substitutions (in
+either order relative to each other - they're independent of one
+another and of recipes), then nutrition last. Recipes go first because
+nutrition's own coverage report needs real recipe ingredient data
+already sitting in the database to compare against - computing coverage
+before any recipes exist would just report 0% against an empty corpus,
+telling you nothing real. Synonyms and substitutions have no dependency
+on recipes existing first at all, so their exact position relative to
+recipes doesn't matter functionally - they're placed between recipes and
+nutrition mostly because nutrition specifically has to be last.
+
+Every summary output part, matched against the real run:
+
+    recipes / substitutions / ingredient_synonyms / nutrition_reference
+    row counts - straight from each loader's own return value (each
+    load_* function returns however many entries it loaded). Real run:
+    250, 57, 83, 136.
+
+    Recipes by cuisine - one SQL query (GROUP BY cuisine, ordered by
+    count descending) against the now-populated recipes table, giving an
+    immediate, concrete sense of what the actual corpus looks like, not
+    just a raw total. Real run's breakdown: 57 British, 33 United
+    States, 28 France, 20 Italian, 13 Canadian, 12 Chinese, 11 India,
+    8 Greek, 8 Jamaican, 8 Polish, 8 Tunisian, 7 Egyptian, 5 Japanese,
+    5 Mexican, 5 Moroccan, 4 Irish, 4 Netherlands, 3 Spanish, 3 Thai,
+    2 Kenyan, 2 Turkish, 2 Vietnamese, 1 Malaysian, 1 Russian.
+
+    Nutrition coverage report - print_coverage_report's own output,
+    described in full in section 8: 136/531 (25.6%), plus the top-20
+    uncovered list.
+
+    Warnings - seed_all.py defines four explicit minimum targets
+    (MIN_RECIPES = 150, MIN_SUBSTITUTIONS = 55, MIN_SYNONYMS = 80,
+    MIN_NUTRITION_ENTRIES = 120) and checks the actual loaded counts
+    against every one of them, appending a human-readable warning string
+    for any target missed. In the real run, every actual count (250,
+    57, 83, 136) comfortably clears every target, so the printed output
+    ends with the plain line "No warnings — all targets met." rather
+    than any warning text - meaning this specific run genuinely met
+    every threshold this pipeline itself considers a bare minimum for a
+    usable seed corpus.
+
+
+10. HOW THIS CONNECTS TO THE REST
+=============================================================
+
+Phase 2's matching logic is described (in Phase 1.3's own schema
+comments, and reiterated by this phase's docstrings) as reading directly
+out of exactly these tables and fields:
+
+    recipes.ingredients[].importance - critical / important / optional
+    per ingredient, read to decide whether a missing ingredient blocks a
+    recommendation outright or is just an acceptable gap.
+
+    recipes.dietary_tags - the JSON array of tag strings (vegetarian,
+    vegan, dairy_free, gluten_free, nut_free), read to filter recipes
+    down to whatever dietary restrictions a real request cares about.
+
+    ingredient_synonyms (canonical_name, synonym) - read to resolve
+    whatever name a pantry item or a vision identification actually uses
+    back to the same canonical name a recipe's own ingredient list uses,
+    so matching isn't defeated purely by two systems using different
+    words for the same thing (section 7).
+
+    substitutions.dietary_notes - read specifically to decide whether a
+    proposed substitution is actually compatible with whatever dietary
+    restriction the original recipe needed to satisfy in the first
+    place, which is exactly why section 6 treats this field's accuracy
+    as a hard requirement rather than a nice-to-have.
+
+Every one of these is a field this phase's own code populates directly -
+there's no intermediate transformation or additional derivation step
+between what this phase writes and what Phase 2 is expected to read.
+
+
+11. THE TESTS
+=============================================================
+
+Fixtures instead of live calls
+------------------------------------------------------
+A fixture, in testing, is a stand-in piece of test data or test setup
+built by hand specifically for a test, rather than pulled from a real,
+live external source at test time. test_loaders_idempotent.py's
+_FIXTURE_MEAL is exactly this: a hand-written dict shaped exactly like a
+real TheMealDB lookup.php response (idMeal, strMeal, strCategory,
+strArea, twenty ingredient/measure slot pairs, and so on), used to test
+build_recipe_row, ensure_cook_time_source_column, and upsert_recipe
+without ever making a real HTTP call to TheMealDB during the test suite.
+This matters for cost, speed, and determinism together: a real network
+call in a test is slow relative to an in-memory dict, can fail for
+reasons that have nothing to do with the code being tested (TheMealDB
+being briefly down, a network hiccup), and could return genuinely
+different data on different test runs if TheMealDB's own content ever
+changes - none of which is something a test of this codebase's own
+transformation logic should ever depend on.
+
+Test by test
+------------------------------------------------------
+
+test_measure_parsing.py:
+
+    test_parse_measure_plain_fractions_and_units (parametrized over
+    "1 tbsp", "2 tablespoons", "1/2 cup", "3/4 tsp", "400g", "1kg",
+    "1 clove")
+        Checks parse_measure against the straightforward cases directly.
+        Would catch a regression in the basic number-plus-unit path, or
+        a broken unit alias (like "tablespoons" no longer resolving to
+        the same canonical "tbsp" as "tbsp" itself).
+
+    test_parse_measure_unicode_fractions (parametrized over ½, ¼, ¾,
+    "1 ½ cups", "2¼ cups")
+        Checks the Unicode fraction glyph substitution path
+        specifically. Would catch a broken or incomplete
+        _UNICODE_FRACTIONS lookup table, which would otherwise silently
+        turn a real recipe's "½ cup" into an unparseable quantity.
+
+    test_parse_measure_ranges_take_midpoint (parametrized over
+    "2-3 tomatoes", "2 to 3 cloves", "1-2 tbsp")
+        Checks that range measures resolve to their arithmetic midpoint.
+        Would catch a bug in the range regex or the midpoint math -
+        something that matters because a range is an explicit,
+        deliberate design choice (section 5), not an incidental edge
+        case.
+
+    test_parse_measure_missing_or_unrecognized_unit_is_none
+        (parametrized over "2", "1 large", "3 chopped",
+        "Salt and pepper")
+        Checks that a measure with no recognizable unit correctly
+        reports unit=None rather than guessing wrong or crashing. Would
+        catch the parser inventing a plausible-looking but wrong unit for
+        text it genuinely can't identify a unit in.
+
+    test_parse_measure_dash_has_no_quantity_but_keeps_unit /
+    test_parse_measure_pinch_has_no_quantity_but_keeps_unit
+        Check the specific (None, "dash") / (None, "pinch") shape.
+        Would catch these bare-quantity words being wrongly treated as
+        fully empty measures, losing real information ("this recipe
+        wants a pinch of something" versus "this recipe has no
+        measure information at all" are meaningfully different facts).
+
+    test_parse_measure_non_numeric_measures_are_fully_empty
+        (parametrized over "To taste", "to taste", "", None)
+        Checks the fully-empty (None, None) case. Would catch these
+        being wrongly parsed into some spurious quantity or unit.
+
+    test_split_steps_strips_step_prefixes /
+    test_split_steps_handles_plain_paragraphs_with_no_step_markers
+        Check split_steps against both TheMealDB's "STEP 1" / "step 2"
+        style instructions and plain paragraph-per-step instructions
+        with no such markers. Would catch a regression in the paragraph-
+        splitting logic itself, or in the prefix-stripping regex leaving
+        stray "step 1" text sitting inside what should be a clean
+        instruction string.
+
+test_importance.py:
+
+    test_importance_is_deterministic_across_repeated_runs
+        Runs assign_importances three times on the same input and checks
+        all three results are identical. This is the test that would be
+        genuinely impossible to write meaningfully against an LLM-based
+        classifier - an LLM call isn't guaranteed to return the exact
+        same classification on repeated calls with the same input, even
+        at low temperature, so a test asserting three runs are
+        byte-for-byte identical would be an unreliable, flaky test
+        against a model-based implementation, where it's a completely
+        solid, always-passing guarantee against this rule-based one.
+
+    test_ingredient_matching_recipe_name_is_critical /
+    test_protein_term_is_critical_when_nothing_matches_recipe_name
+        Check both halves of the critical-ingredient rule - matching the
+        recipe's own title first, falling back to a protein term match.
+        Would catch either half of that two-step rule being broken or
+        reordered incorrectly.
+
+    test_seasonings_and_garnishes_are_optional
+        Checks that recognized garnish/seasoning terms land as optional.
+        Would catch GARNISH_AND_SEASONING_TERMS silently losing entries
+        or the matching logic itself breaking.
+
+    test_aromatics_and_core_flavor_default_to_important
+        Checks the important default for ingredients matching neither
+        the critical rule nor the garnish list. Would catch the default
+        case accidentally falling through to the wrong importance level.
+
+    test_only_one_ingredient_is_ever_critical
+        Checks that no recipe ever gets more than one critical
+        ingredient. Would catch a bug that let the critical-assignment
+        loop run past its intended single match.
+
+test_dietary_tags.py:
+    Each test targets one specific rule or one specific edge case in
+    derive_dietary_tags: butter correctly blocking dairy_free, an
+    all-plant ingredient list correctly earning both vegan and
+    vegetarian, meat correctly blocking both, dairy-with-no-meat
+    correctly landing on vegetarian-but-not-vegan, honey correctly
+    blocking vegan specifically, rice flour correctly not blocking
+    gluten_free while plain flour correctly does, coconut milk correctly
+    not blocking nut_free while peanuts correctly do, and an unrecognized
+    ingredient correctly failing to grant a tag by itself. Each one is a
+    direct check on one of section 5's stated rules or named traps -
+    together they're what would catch a regression in any single one of
+    these rules without the others masking it.
+
+test_substitutions_safety.py and test_synonyms_distinctness.py:
+    Both files are described fully in sections 6 and 7. They're worth
+    naming here as their own category, separate from every other test in
+    this suite: every other test file in test_seed/ checks code
+    behavior - does this function, given this input, return the right
+    output. These two instead check the real, shipped data itself - is
+    the actual content of substitutions.json and ingredient_synonyms.json
+    correct - which is a meaningfully different thing to guard. A
+    perfectly correct loader function run against a JSON file with a
+    genuinely wrong entry in it (ghee tagged dairy_free, potato linked
+    to sweet potato) would pass every ordinary code-behavior test and
+    still ship wrong, dangerous data. Data-correctness tests are what
+    close that specific gap - they fail exactly when the data itself,
+    not the code that moves it around, is the actual problem.
+
+test_loaders_idempotent.py:
+    test_load_substitutions_is_idempotent,
+    test_load_synonyms_is_idempotent, and
+    test_load_nutrition_is_idempotent each run their respective loader
+    twice against a fresh database and check the row count is identical
+    both times (and nonzero). test_recipe_upsert_is_idempotent does the
+    same for a single hand-built fixture recipe run through
+    build_recipe_row and upsert_recipe twice, checking exactly one row
+    exists in recipes afterward, not two. Together these are what
+    directly protects the "run this pipeline again whenever you want,
+    safely" property section 4 depends on - if any one of these broke,
+    running mealsight-seed a second time (which is a completely ordinary
+    thing to do, whenever new data needs loading or the pipeline needs
+    debugging) would silently start duplicating rows instead of cleanly
+    overwriting them.
+
+
+12. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+TheMealDB versus Spoonacular, Edamam, or scraping
+    Spoonacular and Edamam are both real, more feature-rich recipe APIs,
+    but both require an API key and both meter or charge for usage past
+    a free tier - real setup friction and a real ongoing dependency on
+    a paid service for something that's meant to be a one-time (or
+    rarely re-run) seeding step. Scraping recipe sites directly avoids
+    API limits entirely but trades that for real legal and reliability
+    risk - scraping terms of service vary site to site, and scraped HTML
+    structure can change without warning, silently breaking the
+    ingestion code with no upstream announcement at all. TheMealDB, free
+    and keyless with a stable, documented JSON API, was the option with
+    the least friction and the least ongoing risk for what this phase
+    actually needed: real recipes to seed a database with, not the
+    single richest or most complete possible recipe dataset.
+
+Rule-based versus LLM-based classification for importance and dietary
+tags
+    Covered at length in section 5. An LLM could plausibly produce
+    reasonable-looking classifications for both tasks, but at the cost
+    of losing determinism (the same input isn't guaranteed to produce
+    the same output across calls) and reproducibility (this exact seed
+    corpus couldn't be regenerated identically later, especially if the
+    specific model version used ever gets retired or updated), while
+    adding real per-call cost and latency multiplied across every
+    ingredient in 250 recipes. Rule-based logic is less flexible - it'll
+    genuinely misjudge some edge cases a model might handle better - but
+    it's free, instant, fully inspectable (you can read the exact rule
+    that produced any given classification and fix it directly, rather
+    than guessing why a model produced what it did), and gives an ironclad
+    guarantee that the same input always produces the same seed data,
+    forever.
+
+Hand-curated nutrition JSON versus live USDA API calls
+    Covered in section 8. A live API call means seeding depends on an
+    external service being reachable, likely needs an API key, and can
+    return values that aren't guaranteed identical across repeated runs.
+    A static, hand-curated JSON file needs no network access and no
+    credentials, and produces byte-identical results on every run,
+    forever - at the real cost of needing a human to manually add new
+    entries as new, currently-uncovered ingredients show up, rather than
+    that happening automatically.
+
+Caching HTTP responses versus re-fetching every run
+    Covered in section 4. Re-fetching everything on every run would mean
+    every single re-run of the ingestion script - including runs made
+    purely to test or debug the transformation logic that happens after
+    fetching - re-hits TheMealDB's free, keyless service with the exact
+    same hundreds of requests it already successfully made moments
+    earlier, which is both slow for the developer and needlessly
+    inconsiderate to a service nobody's paying to use. Caching to a
+    gitignored local directory, keyed by request URL, means only
+    genuinely new requests ever touch the network again.
+
+Storing raw_measure versus discarding it once parsed
+    Covered in section 5. Discarding raw_measure once parse_measure
+    successfully extracts a quantity and unit would save a small amount
+    of storage, at the real cost of losing the ability to check a parsed
+    result against what TheMealDB actually said, the moment any parsing
+    mistake is ever suspected. Keeping it costs almost nothing and
+    preserves that traceability completely.
+
+Inferring cook time versus leaving it null
+    TheMealDB has no cook-time field at all, so the honest alternative
+    to inferring one was simply leaving recipes.cook_time_minutes null
+    for every single recipe, and treating cook time as generally unknown
+    seed-data-wide. This pipeline instead estimates a value and records
+    how it was derived via cook_time_source, on the reasoning that a
+    labeled estimate ("this is a heuristic guess, treat it accordingly")
+    is more useful to whatever reads it later than a bare null that
+    tells the reader nothing at all about whether a value might become
+    available with more effort, or is simply structurally absent from
+    the source. The real cost accepted here: some of these numbers are
+    genuinely rough guesses, not observed facts, and any code that reads
+    cook_time_minutes without also checking cook_time_source risks
+    treating a rough heuristic guess with the same confidence as a
+    recipe author's own stated time.
+
+Separate seed script versus startup seeding
+    Covered in section 3. Tying this pipeline to application startup
+    would mean every server restart potentially pays real network-call
+    latency and risks hitting a live external service unnecessarily, for
+    an operation that's genuinely meant to run rarely and deliberately,
+    not automatically on every boot. A standalone, idempotent script run
+    on demand fits that actual usage pattern far better.
+
+JSON files in the repo versus a database dump or external store
+    The three hand-authored datasets (substitutions, synonyms,
+    nutrition) are committed as plain JSON files inside the package
+    itself, loaded via importlib.resources, rather than as a separate
+    database dump file or a reference to some external store. Plain
+    JSON in the repo is diffable in ordinary code review the same way
+    any other source file is - a change to one substitution entry shows
+    up as an ordinary, readable git diff, rather than as an opaque binary
+    diff a database dump would produce. It also means anyone cloning
+    this repository gets the complete, exact reference data immediately,
+    with no separate download, no external dependency, and no
+    possibility of that external store going away or drifting out of
+    sync with the code that depends on it.
+
+
+13. GLOSSARY
+=============================================================
+
+canonical name
+    The standard, preferred name this codebase treats as the "real" name
+    for a given ingredient, as opposed to any alternate name (a synonym)
+    that should resolve back to it.
+
+composite primary key
+    A primary key made of two or more columns together, used when no
+    single column alone is guaranteed unique - see phase 1.3's notes for
+    the fuller explanation; used again in this phase for both
+    substitutions and ingredient_synonyms.
+
+conservative (logic)
+    Logic that only concludes something positive (like granting a
+    dietary tag) when it's genuinely confident nothing rules it out -
+    treating an unrecognized case as unproven either way, rather than as
+    proof of anything.
+
+determinism
+    The property that the exact same input always produces the exact
+    same output, every single time, with nothing left to chance.
+
+ETL (Extract, Transform, Load)
+    The standard shape of a pipeline that pulls data from an external
+    source, reshapes it to fit where it's going, and writes it there.
+
+fixture (testing)
+    A stand-in piece of test data or setup built by hand for a test,
+    used instead of a real, live external source at test time.
+
+heuristic
+    A rule-of-thumb estimate built from an assumption that usually
+    holds, as opposed to a precise calculation or a known, looked-up
+    fact.
+
+idempotent
+    An operation that produces the same end result whether run once or
+    many times - no error and no duplicated effect on a repeat run.
+
+negative test
+    A test that asserts something must never happen, as opposed to
+    asserting that something specific does happen.
+
+per-100g normalization
+    Expressing a nutrition value (calories, protein, and so on) as
+    however much of it exists in 100 grams of a given ingredient, making
+    every ingredient's numbers directly comparable and scalable to any
+    real quantity.
+
+provenance
+    A record of where a value actually came from or how it was derived
+    - here, specifically whether cook_time_minutes was extracted
+    directly from instruction text or produced by a fallback heuristic.
+
+reproducibility
+    The property that an entire body of derived data (here, the whole
+    seed corpus) can be regenerated from the same inputs and come out
+    identical, at any later point in time, by anyone.
+
+seed data
+    The data a system ships with before any real user has ever touched
+    it - as opposed to user-generated data, created afterward through
+    actual use.
+
+throttling
+    Deliberately slowing down how fast a client sends requests to an
+    external service, even when nothing is externally enforcing a limit,
+    out of consideration for that service.
+
+
+14. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: TheMealDB's data is genuinely messy - twenty flat ingredient slots,
+free-text measures, no cook-time field at all. How did you actually turn
+that into clean, structured rows?
+
+    Every messy piece got its own small, dedicated transformation, kept
+    completely separate from the fetching code. The twenty
+    strIngredient/strMeasure slots get collapsed into one clean list of
+    (name, measure) pairs by just looping over all twenty and dropping
+    the empty ones - that's _extract_raw_ingredients. Free-text measures
+    like "1/2 cup" or "2-3 tomatoes" or "Dash" go through parse_measure,
+    which handles plain fractions, Unicode fraction glyphs, ranges taken
+    at the midpoint, and units glued directly onto numbers like "400g" -
+    every shape I actually found in the real data, not a guess at what
+    might show up. And since TheMealDB simply has no cook-time field at
+    all, I derive one: first trying to pull explicit durations straight
+    out of the instruction text with a regex, and falling back to a
+    step-count-plus-cooking-verb heuristic when no explicit duration
+    exists. The key design choice tying all of this together is that
+    every one of these transformations lives in one pure-logic module,
+    recipe_parsing.py, with zero network or database code in it at all -
+    that's what let me unit test every single edge case against fixed
+    inputs, completely independent of TheMealDB actually being up or
+    returning anything in particular.
+
+Q: You made a point of never calling an LLM anywhere in this pipeline,
+even for something like ingredient importance where a model might
+plausibly do a nuanced job. Why?
+
+    Two properties I needed for this specific kind of data: determinism
+    and reproducibility. Determinism means the same input always
+    produces the same output - I actually have a test,
+    test_importance_is_deterministic_across_repeated_runs, that calls
+    the same function three times on the same input and checks all
+    three results match exactly. That's a completely solid guarantee
+    against rule-based logic, and it's a test I genuinely couldn't write
+    the same way against an LLM call, since model outputs aren't
+    guaranteed identical across repeated calls even at low temperature.
+    Reproducibility is the bigger one for seed data specifically: this
+    corpus needs to be regeneratable identically, potentially a long
+    time from now, by anyone rerunning the pipeline - and an LLM-based
+    classification bakes in a dependency on a specific model version
+    that could get quietly updated or retired, which would mean the
+    exact classifications sitting in the database today might not be
+    reproducible from the same inputs later. On top of that, a rule
+    engine here is free and instant, where an LLM call multiplied across
+    every ingredient in 250 recipes is real, nontrivial cost and latency
+    for a task simple enough that a handful of word lists genuinely
+    handles it well.
+
+Q: You said every loader is idempotent. What does that actually mean in
+practice, and why does it matter here specifically?
+
+    It means running the whole pipeline a second time doesn't duplicate
+    anything - every table this phase writes to has either a natural
+    primary key (recipes.id, straight from TheMealDB's own id) or a
+    composite one (substitutions and ingredient_synonyms both use a
+    two-column pair, since neither column alone is unique on its own),
+    and every write goes through INSERT OR REPLACE keyed on that primary
+    key. So a second run re-derives and overwrites the exact same rows
+    instead of inserting new copies alongside the old ones. It matters
+    because seeding genuinely isn't a strict one-time operation in
+    practice - I re-ran this pipeline plenty of times myself while
+    developing and debugging the transformation logic downstream of
+    ingestion, and I have a whole test file,
+    test_loaders_idempotent.py, that runs every single loader twice
+    against a fresh database and checks the row count comes out
+    identical both times, plus a fixture-based test doing the same for a
+    single recipe upsert specifically.
+
+Q: dietary_notes on your substitutions data is described as something
+Phase 2 actually filters on for real dietary safety. How did you make
+sure that hand-authored data was actually correct?
+
+    I didn't just trust careful authoring - I wrote a test file,
+    test_substitutions_safety.py, that walks the real, loaded JSON data
+    and checks it directly, not just the code that moves it around. It
+    has its own independent dairy term list, separate from the one the
+    recipe-level dietary tagging logic uses, specifically so a bug in
+    one list can't accidentally mask the same bug existing in the other,
+    and it flags any dairy_free-tagged substitute whose text mentions a
+    real dairy term without some qualifying non-dairy phrase present. I
+    also added two tests aimed at two specific traps I knew were easy to
+    get wrong: ghee is clarified butter, so it's genuinely not
+    dairy-free even though people sometimes tolerate it better than
+    regular butter, and honey is an animal product, so it's genuinely
+    not vegan even though it contains no meat, dairy, or egg. Both of
+    those are exactly the kind of mistake that sounds plausible enough
+    to slip past a human just reading the file, so I wanted an
+    automated check that catches it every time the test suite runs,
+    rather than relying on catching it by eye during authoring or
+    review.
+
+Q: TheMealDB just doesn't have a cook-time field at all. How did you
+handle a source field that simply doesn't exist, and how did you avoid
+that estimate being mistaken for a real, known fact later?
+
+    I derive a value instead of leaving it null, but I never let that
+    estimate pretend to be an observed fact. estimate_cook_time_minutes
+    tries to actually extract explicit durations mentioned in the
+    instruction text first - things like "simmer for 20 minutes" - and
+    only falls back to a rougher heuristic, based on step count plus a
+    bonus for recognized cooking verbs, when no explicit duration exists
+    anywhere in the text. Either way, I record which path actually
+    produced the number in a dedicated cook_time_source column I added
+    to the recipes table specifically for this - I chose a new column
+    over folding it into one of the existing JSON fields because those
+    already have a documented shape other code depends on, and I didn't
+    want to break that contract just to smuggle in one more fact. The
+    general idea I was going for: any time a value in this kind of
+    system is estimated rather than truly known, it's worth recording
+    how it was derived right next to the value itself, so nothing
+    downstream ever has to guess whether a given number is a hard fact
+    or a rough guess.
+
+Q: You mention a specific coverage percentage for the nutrition data -
+25.6% - which sounds low. Walk me through what that number actually
+means and whether it's actually a problem.
+
+    That raw percentage is genuinely the wrong number to focus on by
+    itself. The real target I set for this dataset was covering every
+    ingredient that shows up in five or more of the 250 ingested recipes
+    - and I built an explicit coverage report specifically so I could
+    check that target concretely rather than guessing at it. The
+    reported 25.6% is 136 covered out of 531 total distinct ingredient
+    names across the whole corpus - and 531 is a genuinely long tail,
+    since most of that list is ingredients that show up in just one or
+    two specific recipes each. When I actually looked at the top 20 most
+    frequent uncovered ingredients from a real run of this pipeline,
+    every single one of them tops out at exactly 4 recipes - meaning
+    nothing that actually clears my real 5-or-more target is missing.
+    The pipeline prints that top-uncovered list loudly, every single run,
+    specifically so a gap that did matter - something showing up in ten
+    recipes with no nutrition entry, say - couldn't stay invisible. In
+    this case, checking it confirmed the target was genuinely met, not
+    that the low headline percentage was actually hiding a real problem.

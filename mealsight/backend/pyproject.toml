@@ -8,7 +8,11 @@ dependencies = [
     "pydantic-settings>=2.3",
     "structlog>=24.1",
     "httpx>=0.27",
+    "aiosqlite>=0.20",
 ]
+
+[project.scripts]
+mealsight-seed = "mealsight.seed.seed_all:main"
 
 [dependency-groups]
 dev = [

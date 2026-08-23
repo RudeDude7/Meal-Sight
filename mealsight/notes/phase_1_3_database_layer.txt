@@ -1,0 +1,1499 @@
+PHASE 1.3 STUDY NOTES: THE DATABASE LAYER
+=============================================================
+
+These notes cover the third backend phase: the code that actually stores
+and retrieves data on disk for MealSight - three separate SQLite database
+files, an async connection wrapper around them, schema files, an
+initialization/reset module, a command-line entry point, and the tests
+that back all of it. Everything below describes code that really exists
+right now, in backend/mealsight/db/, backend/tests/test_db/, and
+scripts/init_databases.py.
+
+
+1. WHAT THIS PHASE BUILT AND WHY IT COMES NOW
+=============================================================
+
+This phase built the plumbing for reading and writing data: three SQLite
+database files (pantry, recipes, user_intelligence), an async Database
+class that wraps a connection to one of them safely, .sql files
+describing every table, a way to create and reset those tables, a
+command you can run from a terminal to do that setup, and a test suite
+that proves all of it actually behaves the way it claims to.
+
+It comes before any business logic for the same reason phase 1.1's
+config module came before anything else, and phase 1.2's provider layer
+came before any vision or recipe code: everything above this layer needs
+somewhere to put data and somewhere to read it back from, and getting
+that foundation wrong - unsafe concurrent access, a schema that silently
+drifts between environments, queries built by gluing strings together -
+is the kind of mistake that shows up everywhere at once, in every
+feature built on top, instead of in one place you can fix once.
+
+
+2. FILE MAP
+=============================================================
+
+backend/mealsight/db/connection.py
+    The Database class - one instance wraps one SQLite file behind a
+    single async connection. Also the registry functions
+    (get_pantry_db, get_recipe_db, get_user_db, close_all) that hand out
+    one shared instance per database for the whole running process.
+
+backend/mealsight/db/schema/pantry.sql
+    Table definitions for pantry.db: pantry, shelf_life_reference,
+    grocery_lists, consumption_log, plus three indexes.
+
+backend/mealsight/db/schema/recipes.sql
+    Table definitions for recipes.db: recipes, nutrition_reference,
+    substitutions, ingredient_synonyms, plus four indexes.
+
+backend/mealsight/db/schema/user_intelligence.sql
+    Table definitions for user_intelligence.db: user_profile,
+    meal_history, preference_scores, cooking_patterns, plus three
+    indexes and the rating CHECK constraint.
+
+backend/mealsight/db/init.py
+    init_database, init_all_databases, and reset_database - the
+    functions that actually apply a .sql file to a Database and, for
+    reset_database, wipe one clean first.
+
+backend/mealsight/db/__init__.py
+    Re-exports the names above so other code can write
+    "from mealsight.db import get_pantry_db" instead of reaching into
+    the connection and init modules directly.
+
+scripts/init_databases.py
+    A command-line script: initializes all three real databases (or
+    wipes and reapplies them with --reset), then prints a summary table
+    of what exists.
+
+backend/tests/test_db/conftest.py
+    Shared pytest fixtures - one Database per test, always pointed at a
+    temporary file, never the real data/ directory.
+
+backend/tests/test_db/test_connection.py
+    Tests for the Database class itself: pragmas, transactions,
+    fetch_one's None behavior, mapping access, concurrent writes.
+
+backend/tests/test_db/test_init.py
+    Tests for init_database, init_all_databases, and reset_database.
+
+backend/tests/test_db/test_constraints.py
+    Tests for the meal_history rating CHECK constraint specifically.
+
+
+3. WHY SQLITE
+=============================================================
+
+Postgres and MySQL both work the same basic way: there's a separate
+server process running somewhere, listening on a network port, and your
+application code connects to it over that network connection - even if
+the server happens to be running on the very same machine. SQLite throws
+that whole model out. There's no server, no port, no separate process to
+start up or keep alive. A SQLite database is just a single file on disk,
+and your application talks to that file directly, in-process, through a
+library. Opening a SQLite database is closer to opening a regular file
+than it is to connecting to a server.
+
+That fits this project well for a very concrete reason: MealSight runs
+as one backend process on one machine, without a fleet of separate
+application servers all needing to share one central database over the
+network. When there's no need for multiple independent processes on
+different machines to all reach the same data store at once, the entire
+category of problems a client-server database is built to solve -
+network round trips, connection pooling across many client processes,
+running and monitoring a separate database server - simply doesn't
+apply. A file that your one process opens directly is simpler and
+faster for that shape of problem, with genuinely less to configure and
+nothing extra to keep running.
+
+Here's what you honestly give up, though. SQLite allows exactly one
+writer to a database file at a time, full stop - and while readers can
+generally keep working during a write (assuming WAL mode, section 5), a
+second concurrent write attempt still has to wait its turn. Postgres and
+MySQL are built from the ground up to handle many separate client
+processes writing to the same database from different machines at once.
+There's also no built-in replication or clustering story with plain
+SQLite - if a real production system ever needs multiple independent
+application servers on different machines all writing to the same
+dataset simultaneously, or needs a database that can survive one
+machine dying entirely without losing anything, that's exactly the point
+where you'd outgrow SQLite and reach for a real client-server database
+instead. For one backend process managing its own local data - which is
+exactly MealSight's current shape - none of that is a live problem yet.
+
+
+4. THE THREE-DATABASE SPLIT
+=============================================================
+
+This is the single biggest architectural decision in this phase, so it
+gets real space.
+
+The decision: instead of one database file with every table in it, this
+phase creates three physically separate SQLite files - pantry.db,
+recipes.db, user_intelligence.db - each with its own schema, its own
+Database instance, its own connection. Every module docstring in this
+phase - connection.py and all three .sql files - repeats the same line:
+there is no cross-database join anywhere in this layer, and cross-
+database data flow is the agent's job, not SQL's.
+
+What a join actually is, for anyone who hasn't written one: a join is a
+single SQL query that pulls matching rows from two or more tables at
+once, based on some shared value between them - for example, "give me
+every recipe, along with how many times the user has cooked something
+with the same cuisine, in one query" would need to look at both a
+recipes table and a meal_history table together. That's completely
+routine when both tables live in the same database file - SQL is
+built for exactly this. It becomes structurally impossible the instant
+those two tables live in two separate physical database files, because a
+single SQL query only ever runs against one open connection to one
+database file. There's no SQL syntax that reaches across two entirely
+separate SQLite files in one query.
+
+So the hard rule that follows directly from the three-way split: you
+genuinely cannot ask "show me recipes matching what's in the pantry,
+sorted by how much the user has liked this cuisine before" as one SQL
+query, because that question touches pantry.db, recipes.db, and
+user_intelligence.db all at once, and no single connection can see all
+three simultaneously. Something else has to ask each database its own
+piece of the question separately, then combine the answers in Python
+afterward. In this project, that something else is the agent - the
+higher-level orchestration code (not built in this phase) that will call
+into each database's own MCP server, get back an answer from each, and
+stitch the results together itself. The reasoning for putting that job
+on the agent rather than on SQL is what the rest of this section
+justifies.
+
+The alternative was real, and it's worth being honest about what it
+offers: one database, all eleven tables in it, joins trivial, one
+schema file, one Database instance. It lost for a specific, concrete
+reason tied to ownership. The plan behind this project is that pantry
+management, recipe matching, and user-preference learning are each going
+to be their own MCP server (a server exposing a defined set of tools an
+agent can call) eventually. If all three shared one database file, "the
+pantry server's code" and "the recipes server's code" would both be
+reading and writing tables in the exact same physical file, meaning a
+schema change made for one server's benefit could break the other, a
+slow or buggy query in one server could contend for the same underlying
+file lock as the other, and testing one server in isolation would still
+require the whole shared schema to exist and be seeded correctly, even
+for tables that server never touches. Splitting into three physical
+files up front means the pantry server's tests only ever need pantry.db,
+the recipes server's tests only ever need recipes.db, and a schema
+change to one never has any chance of touching the others - because
+there is no shared file for it to touch.
+
+The parallel to larger systems: this is the same reasoning behind
+"microservices each owning their own database" in bigger, distributed
+systems - a service that owns its own data can be developed, deployed,
+tested, and changed independently, at the cost of no longer being able
+to write one query that spans two services' data; you write two
+queries, one to each, and combine the results in the calling code
+instead. This project makes the exact same trade at a smaller scale,
+with three SQLite files playing the role three separate services'
+databases would play in a bigger system.
+
+
+5. THE CONNECTION LAYER
+=============================================================
+
+What aiosqlite is, and why async at all
+------------------------------------------------------
+Python's standard library already ships a sqlite3 module - but it's
+synchronous: every call blocks the calling code until the disk operation
+finishes. Blocking I/O (input/output - here, reading or writing to disk)
+means the thread that made the call just sits there, doing nothing else,
+until the operating system hands back the result. In an async program
+built around asyncio's event loop - the thing that juggles many
+concurrent operations on one thread by switching between them at each
+await - one blocking call anywhere freezes that entire event loop for
+its duration, since nothing else can run while the one thread is stuck
+waiting on the disk. aiosqlite solves this by running the real,
+synchronous sqlite3 calls on a separate background thread and handing
+control back to the event loop with an awaitable in the meantime, so a
+slow disk operation in one coroutine (a chunk of async code that can
+pause and resume) doesn't stall every other coroutine that happens to be
+running concurrently in the same process.
+
+Lazy connection, and the race condition it avoids
+------------------------------------------------------
+Lazy connection means the actual SQLite file is only opened the first
+time something actually needs it, not the moment the Database object is
+constructed. Database.__init__ just stores the path, name, and schema
+path - it does not call aiosqlite.connect at all. _ensure_connection is
+what actually opens the connection, and it only runs the first time any
+query method is called.
+
+Here's the race condition this has to guard against: a race condition is
+a bug where the correctness of code depends on the unpredictable order
+two concurrent operations happen to interleave in. If two coroutines
+both called a method that opened the connection with no protection at
+all, both could check "is there a connection yet? no" at nearly the same
+instant, before either has finished actually opening one - and both
+would then go ahead and open their own separate connection to the same
+file. That's not just wasteful; it's the exact kind of thing that
+becomes two independent connections to one file both trying to do things
+at once, exactly the situation WAL mode and careful serialization are
+meant to prevent (see below), except now there are silently two
+connection objects instead of the one the rest of this code assumes.
+_ensure_connection guards against this with a check-lock-check pattern:
+check if a connection already exists; if not, acquire self._connect_lock
+(an asyncio.Lock, guaranteeing only one coroutine can be inside that
+block at a time); check again once inside the lock (because another
+coroutine might have finished connecting while this one was waiting for
+the lock); and only then actually call aiosqlite.connect. The second
+check inside the lock is what makes this safe rather than just
+"probably fine" - without it, the first coroutine to get the lock
+connects, releases the lock, and a second coroutine that was also
+waiting would still go on to open a second connection unnecessarily.
+
+What a PRAGMA is
+------------------------------------------------------
+A PRAGMA is a SQLite-specific command (not standard SQL) that changes
+some setting about how the current connection behaves, rather than
+reading or writing table data. connection.py issues two, every single
+time a connection is opened.
+
+    PRAGMA foreign_keys = ON
+
+    A foreign key is a column value in one table that's meant to refer
+    to a row in another table - the mechanism a relational database uses
+    to say "this row belongs to, or points at, that other row." The
+    surprising part, and exactly why this PRAGMA has to be set explicitly
+    on every single connection rather than once per database file:
+    SQLite does not enforce foreign key relationships by default at all,
+    even if a table's own CREATE TABLE statement declares one. Enforcement
+    is a per-connection setting, off unless you turn it on for that
+    specific connection - so _ensure_connection turns it on every time a
+    new connection is opened, since there's no way to make it stick
+    permanently in the database file itself.
+
+    PRAGMA journal_mode = WAL
+
+    Write-ahead logging (WAL) is a different way SQLite can record
+    changes before they're finalized. Instead of the traditional approach
+    (writing changes into a separate rollback journal file, then copying
+    them into the main database file once the transaction commits), WAL
+    mode appends new changes to a separate log file first, and readers
+    can keep reading the original, still-consistent database file while
+    a writer is in the middle of appending to that log. In plain terms:
+    a reader doesn't have to wait for a writer to finish, and a writer
+    doesn't have to wait for readers to finish either, because they're
+    not touching the same physical bytes at the same moment. This
+    connects directly to test_concurrent_writes_do_not_raise_database_
+    is_locked in the test suite (section 10) - that test fires 25 inserts
+    at once and checks none of them raise SQLite's classic "database is
+    locked" error, and WAL mode (together with this code only ever
+    opening one connection per Database, see below) is exactly what
+    makes that true.
+
+row_factory and aiosqlite.Row
+------------------------------------------------------
+By default, a row you get back from a SQL query is a plain tuple -
+accessible only by position, like row[0], row[1], and so on, with
+nothing telling you which position was which column just by looking at
+the code. _ensure_connection sets connection.row_factory = aiosqlite.Row
+right after connecting, which changes every row this connection ever
+returns into something you can also index by column name - row["name"],
+row["category"], and so on - while still supporting the old positional
+access too (the pragma tests in section 10 use exactly that positional
+form). This matters for two concrete reasons: code that reads row["name"]
+is far more readable at the call site than code that reads row[2] and
+expects the reader to already know column 2 is the name column; and it
+doesn't silently break if a column ever gets added or reordered in the
+schema later, since name-based access doesn't care about position the
+way index-based access does.
+
+Context managers, and the transaction wrapper
+------------------------------------------------------
+A context manager is an object that defines what should happen right
+before and right after a block of code runs, and Python's "with"
+statement is what triggers that - "with some_context_manager():" runs
+the "before" step, runs the indented block, then runs the "after" step
+once the block finishes, whether it finished normally or by raising an
+exception. This is exactly what guarantees cleanup code actually runs
+even when something inside the block goes wrong, without needing a
+separate try/finally written out by hand every time.
+
+Database.transaction() is written with @asynccontextmanager (the
+async-flavored version, used with "async with") specifically so calling
+code can write:
+
+    async with db.transaction() as connection:
+        await connection.execute(...)
+        await connection.execute(...)
+
+and get atomic behavior across everything inside that block. Atomic
+here means all of it succeeds together, or none of it does - there's no
+in-between state where the first execute took effect but the second
+didn't. commit is the operation that makes every change made so far
+permanent; rollback undoes everything done since the last commit, as if
+none of it had happened. Database.transaction() is written to yield the
+connection, then commit if the block finished normally, or catch any
+Exception, roll back, and re-raise it if the block raised instead. The
+"raise" at the end (bare, re-raising the same exception that was just
+caught) matters: it means the caller still sees the original failure and
+can react to it, rather than the transaction wrapper silently swallowing
+it after cleaning up.
+
+Why this pattern beats manually calling commit() and rollback()
+scattered through application code: with manual calls, every single
+place that writes to the database has to remember to call commit on
+success and rollback on every possible failure path - miss one spot
+(especially an exception path that's easy to forget when writing the
+happy path first) and you get a change that's neither fully committed
+nor fully rolled back, sitting in an inconsistent state. Wrapping that
+logic in one context manager means every caller gets correct commit/
+rollback behavior automatically, by construction, just by using "async
+with db.transaction()" - there's no separate step to remember or forget.
+
+execute, execute_many, fetch_one, fetch_all
+------------------------------------------------------
+These four are the everyday helpers most calling code will actually use,
+as opposed to reaching for db.transaction() directly.
+
+    execute(query, params) runs one statement and commits immediately by
+    itself - use it for a single INSERT, UPDATE, or DELETE that doesn't
+    need to be grouped atomically with anything else. It returns the
+    connection's lastrowid - the autoincrementing id SQLite just assigned,
+    meaningful right after an INSERT into a table with an
+    AUTOINCREMENT primary key, and 0 otherwise (the code uses
+    "cursor.lastrowid or 0" so a None from SQLite becomes a plain int
+    instead).
+
+    execute_many(query, params_seq) runs the same statement repeatedly,
+    once per set of parameters in params_seq, then commits once at the
+    end - the right tool for inserting many rows without writing a
+    Python loop that calls execute() (and therefore commits) once per
+    row.
+
+    fetch_one(query, params) runs a SELECT and returns just the first
+    row, or None if nothing matched. Deliberately returning None instead
+    of raising an exception when no row matches: "no row found" is an
+    entirely ordinary, expected outcome for a lookup - checking a pantry
+    for an item that isn't there yet is normal, not exceptional - so
+    forcing every caller to wrap every single lookup in a try/except
+    just to handle the completely routine "it's not there" case would be
+    real friction for something that isn't actually unusual at all. "if
+    row is not None:" is simpler than a try/except for a case that's
+    going to happen constantly.
+
+    fetch_all(query, params) runs a SELECT and returns every matching
+    row as a list - use it whenever the caller actually needs more than
+    one result.
+
+Parameterized queries, and SQL injection
+------------------------------------------------------
+Every single one of those four helpers takes params as a separate
+argument from query, and the query string itself uses ? placeholders
+wherever a value belongs - never the actual value pasted directly into
+the string. Here's the concrete failure mode that guards against: say
+you built a query by gluing a value directly into a string instead,
+something like this (illustrative only - not code that exists in this
+project):
+
+    query = "SELECT * FROM pantry WHERE name = '" + user_input + "'"
+
+If user_input were the ordinary word "onion", that produces a
+perfectly normal query. But if user_input were instead something like
+    ' OR '1'='1
+then the assembled string becomes
+    SELECT * FROM pantry WHERE name = '' OR '1'='1'
+which is a completely different query - one that matches every single
+row in the table, because '1'='1' is always true, regardless of what
+name actually is. That's SQL injection: a value that was only ever
+supposed to be data gets interpreted as part of the SQL syntax itself,
+because it was pasted directly into the query text instead of being
+kept clearly separate from it. Depending on what the crafted value
+actually contained, this same mechanism can be used to read data that
+was never meant to be visible, or even to modify or delete data outright
+- not just query 'onion' incorrectly.
+
+Parameterized queries (the ? placeholders, with the real values passed
+in through the separate params argument) prevent this at the root:
+SQLite receives the query text and the parameter values as two entirely
+separate things, and it never re-parses a parameter value as if it were
+part of the SQL syntax, no matter what characters that value contains.
+There is no length of quote marks or semicolons or SQL keywords inside a
+parameter value that can ever change what the query does, because the
+value is never mixed back into the query text at all - it's bound in
+afterward, as pure data. This is exactly what the module docstring on
+Database means by "Never build SQL by string interpolation of values" -
+it's not a style preference, it's the actual defense mechanism.
+Parameterization also has a smaller, secondary benefit worth knowing:
+because the query text itself stays identical across calls (only the
+bound values change), SQLite can reuse the same parsed, compiled version
+of that statement instead of re-parsing the SQL text from scratch on
+every single call - a real, if secondary, performance win on top of the
+security one.
+
+The one place this project does build a query with an f-string is
+reset_database's DROP TABLE IF EXISTS {row['name']} in init.py - and
+that's a table name (an identifier), not a value at all. SQL has no ?
+placeholder mechanism for identifiers, only for values, so there's no
+parameterized alternative to reach for there in the first place. It's
+safe specifically because that table name was just read back out of
+sqlite_master (SQLite's own internal table listing) a moment earlier in
+the same function - it's never anything a caller or an end user
+supplied, so there's no injection surface to worry about, unlike a value
+that actually originated from outside the program.
+
+Slow query logging
+------------------------------------------------------
+Every one of execute, execute_many, fetch_one, and fetch_all times
+itself (using time.monotonic(), a clock meant for measuring elapsed
+durations rather than telling you the current date and time) and calls
+_log_if_slow afterward. If the duration is over SLOW_QUERY_THRESHOLD_MS
+(100.0 milliseconds), it logs a warning-level event carrying the
+database's name, the query text, and the duration - and specifically
+never the parameter values. Warning level, rather than something
+quieter, because a query taking over 100ms in a SQLite-backed local
+app is unusual enough to be worth a human's attention if it keeps
+happening, unlike phase 1.2's rate-limiter waits, which were logged at
+debug precisely because waiting there was the expected, everyday case,
+not the exception. Parameter values are deliberately excluded from this
+log line because they may hold user data - a pantry item name, a recipe
+note, anything a real person typed or a photo produced - and a slow-
+query log is exactly the kind of thing that ends up sitting around in
+log files far longer, and far more widely read, than anyone examining
+one specific request ever intended.
+
+Because every one of these log calls goes through get_logger() from
+phase 1.1's logging module, and phase 1.1's trace-id contextvar
+mechanism injects the current trace_id into every log line
+automatically, a slow-query warning shows up already carrying whatever
+trace_id was bound for the request that triggered it - meaning a slow
+query found in the logs can be traced straight back to the specific
+request that caused it, without the database layer itself needing to
+know or care about trace ids at all.
+
+The registry
+------------------------------------------------------
+get_pantry_db(), get_recipe_db(), and get_user_db() each check a
+module-level variable first and only construct a new Database if it's
+still None - every subsequent call in the same running process gets
+back the exact same object (a singleton, per phase 1.2's terminology).
+This matters for the same reason the shared httpx client mattered in
+phase 1.2: one Database instance means one underlying connection is
+reused for every call to that database throughout the process, instead
+of a fresh connection (and a fresh WAL setup, a fresh pragma set) being
+created every single time some code wants to touch pantry.db.
+close_all() closes every open singleton and resets all three back to
+None, so the next get_*_db() call anywhere builds fresh ones - the exact
+shutdown-and-rebuild pattern phase 1.2's provider factory close() also
+uses. Parent directories get created (self.path.parent.mkdir(parents=
+True, exist_ok=True)) right inside _ensure_connection, immediately
+before the connection is actually opened - so a data/ directory that
+doesn't exist yet on a fresh checkout doesn't need to be created by
+hand before this code will work; the first real connection attempt
+creates it automatically.
+
+
+6. THE SCHEMAS
+=============================================================
+
+What a schema is, and why .sql files
+------------------------------------------------------
+A schema is the definition of what tables exist and what columns and
+constraints each one has - the structure data gets stored into, as
+opposed to the data itself. This project writes that structure as plain
+.sql files (pantry.sql, recipes.sql, user_intelligence.sql) rather than
+building the same CREATE TABLE statements out of Python string
+concatenation or an object-based schema description. A .sql file is SQL,
+readable by any SQL-aware editor, diffable in plain text the same way
+any other source file is, and copy-pasteable directly into a SQLite
+shell to inspect or test by hand - none of which is as immediate when
+the same structure is instead assembled by executing Python code.
+
+CREATE TABLE IF NOT EXISTS, and idempotent
+------------------------------------------------------
+Every single table and index in all three schema files uses IF NOT
+EXISTS. Idempotent means an operation you can run more than once and get
+the exact same end result as running it just once - no error, no
+duplicate effect. CREATE TABLE IF NOT EXISTS does exactly that: if the
+table's already there, it's a no-op; if it isn't, it gets created.
+Without IF NOT EXISTS, running the schema a second time against an
+already-initialized database would fail outright with a "table already
+exists" error. Since init_database might reasonably run every time the
+application starts up (so a fresh checkout with no database file yet
+just works, with nothing extra to remember to run by hand first), it has
+to be safe to run against a database that's already fully set up - which
+is exactly what idempotent init buys.
+
+pantry.db
+------------------------------------------------------
+
+    pantry
+        The actual rows of what's believed to currently be in the
+        fridge or pantry. freshness_status (defaulting to 'fresh') is a
+        simple, human-readable label for whether an item still looks
+        good - the kind of thing a vision-based system (built in a
+        later phase) would update after re-examining a photo.
+        estimated_shelf_days holds however many days this specific item
+        is expected to last, which is a separate number from
+        shelf_life_reference's numbers below - this column is this
+        item's own estimate, possibly adjusted for its specific
+        condition, not a lookup value. added_date is set once, when the
+        item first entered the pantry, and never changes again;
+        last_seen_date is meant to be updated every time a later photo
+        confirms the item is still there - the gap between the two is
+        what would let a future feature notice "this has been sitting
+        untouched for a suspiciously long time" versus "this just
+        arrived." source (defaulting to 'photo') records where this
+        pantry entry's existence was learned from.
+
+    shelf_life_reference
+        A lookup table, keyed by item_name, holding generic shelf-life
+        expectations for a kind of food - separately for refrigerated,
+        frozen, and pantry (room-temperature) storage. This is reference
+        data about food in general, not about any specific item
+        currently sitting in this user's fridge - that's what the
+        pantry table itself is for.
+
+    grocery_lists
+        Each row is one whole grocery list - a status (defaulting to
+        'active'), an estimated_total_cost, and an items column holding
+        the actual list content.
+
+    consumption_log
+        A running record of items being used up - what was used, how
+        much, and optionally which recipe it was used for. This is what
+        a future feature would read to understand actual consumption
+        patterns over time, as distinct from the pantry table's current
+        snapshot of what's left right now.
+
+    The waste_log table named in the original spec is deliberately not
+    in this schema. The comment directly in pantry.sql says exactly
+    that: do not add it without a corresponding phase task. Documenting
+    a deliberate omission this explicitly matters because an absence, on
+    its own, looks exactly like something that just hasn't been gotten
+    to yet - a future developer (or a future version of whoever wrote
+    this) scanning the schema for waste_log and not finding it has no
+    way to tell "not built yet" apart from "decided against, for a
+    reason" without that comment sitting right there to settle it.
+
+recipes.db
+------------------------------------------------------
+
+    recipes
+        Why id is TEXT and not an autoincrementing integer: an
+        autoincrementing integer id only makes sense as a stable
+        identifier within one specific database file that's assigning
+        those numbers itself. Recipes are very plausibly going to be
+        imported from an external source (an API, a seed data file, a
+        scraped dataset) that already has its own identifier scheme for
+        each recipe - forcing a fresh, disconnected integer id onto data
+        that already has a natural, meaningful identifier is unnecessary
+        friction, and a TEXT id can hold any external scheme's id
+        directly, verbatim, without needing a separate translation step
+        or a second lookup column just to remember what the recipe was
+        called in whatever system it came from.
+
+        The three JSON columns - dietary_tags, ingredients, steps - each
+        carry a comment directly above them in recipes.sql spelling out
+        the exact shape Phase 2 depends on:
+
+            dietary_tags: a JSON array of strings, e.g.
+            ["vegetarian", "gluten-free"].
+
+            ingredients: a JSON array of objects, each shaped
+            {"name": string, "quantity": number, "unit": string,
+            "importance": "critical" | "important" | "optional"}.
+            importance is a three-level signal for how much a missing
+            ingredient should matter when deciding whether a recipe is
+            actually makeable: critical presumably means the recipe
+            doesn't really work without it, important means it matters
+            but might be substitutable or skippable with some loss,
+            optional means it's a nice-to-have that changing or omitting
+            barely affects the result. The comment says outright that
+            Phase 2 reads this field to decide whether a missing
+            ingredient blocks a recommendation entirely or is just a
+            nice-to-have - so this shape isn't just documentation for
+            documentation's sake, it's the literal contract the very
+            next phase is going to build against.
+
+            steps: a JSON array of strings, one per ordered instruction.
+
+        Documenting the exact shape in a comment directly above each
+        column - rather than only in a separate document, or not at all
+        - means anyone reading the schema file itself, in the one place
+        they'd naturally look while writing a query or inserting a row,
+        sees exactly what's expected without needing to go find a
+        different file first.
+
+        The tradeoff of storing this as JSON text in one column versus
+        fully normalizing it (giving ingredients, for example, its own
+        separate table with a foreign key back to recipes, one row per
+        ingredient) is real: normalized tables let you write a SQL WHERE
+        clause that filters directly on ingredient properties (find
+        every recipe using more than 200g of a specific ingredient, say)
+        and let the database enforce structure on every row. A JSON
+        column can't be queried that granularly by plain SQL at all -
+        you'd have to pull the whole JSON blob out and parse it in
+        Python to inspect anything inside it. JSON won here because
+        recipes' ingredient lists and steps are read and written as one
+        coherent whole nearly every time - you don't typically want "just
+        the third ingredient of some recipe" as an isolated fact, you
+        want the entire ingredient list together, in order, to make
+        sense of the recipe at all - and because a variable-length list
+        of variable-shaped ingredient entries maps far more directly and
+        simply onto "one JSON array" than onto a whole extra table with
+        its own foreign key relationship, for something this project
+        doesn't currently need to query into piecemeal.
+
+    nutrition_reference
+        A lookup table, keyed by ingredient, holding per-100g nutrition
+        numbers (calories, protein, carbs, fat, fiber, sodium) plus
+        where that number came from (source, defaulting to 'usda' - the
+        USDA's public nutrition database being an obvious real source
+        for this kind of reference data).
+
+    substitutions
+        What can stand in for a given ingredient - ratio (defaulting to
+        '1:1'), a note on how the substitution changes the flavor, and
+        any dietary implications of swapping it. The primary key is the
+        pair (original_ingredient, substitute) together, since the same
+        original ingredient can have several different valid
+        substitutes, and the same substitute could plausibly stand in
+        for more than one original ingredient too - neither column alone
+        uniquely identifies one row.
+
+    ingredient_synonyms
+        Maps alternate names people actually use (a synonym) back to one
+        canonical_name - the same real ingredient often gets called
+        different things ("scallion" versus "green onion", say). The
+        primary key is the pair (canonical_name, synonym) together, for
+        the same reason as substitutions above: a single canonical name
+        can have several different synonyms, so neither column alone is
+        unique on its own.
+
+user_intelligence.db
+------------------------------------------------------
+
+    user_profile
+        A plain key/value table: key, value, updated_at. This is
+        deliberately flexible rather than a fixed-column table with one
+        column per known profile fact, because the actual set of
+        profile facts worth tracking is exactly the kind of thing that's
+        going to keep growing and changing as this project develops -
+        a key/value shape lets a new fact get stored under a new key
+        with zero schema change required, where a fixed-column table
+        would need a new column (and therefore a schema migration) added
+        every single time a new kind of fact needed tracking.
+
+    meal_history
+        One row per meal actually cooked - which recipe, what cuisine
+        and meal_type it was, the date, how it was rated, how many
+        servings were made, and what ingredients were actually used
+        (which might differ from the recipe's own listed ingredients, if
+        substitutions were made). This is the record a later phase's
+        preference-learning logic would read to notice actual patterns
+        over time.
+
+    preference_scores
+        A learned-preference table: dimension is the category of
+        preference being tracked (something like "cuisine" or "protein",
+        conceptually - the schema doesn't hardcode which dimensions
+        exist, it's just a string), value is the specific value within
+        that dimension ("Italian", say, if dimension were "cuisine"),
+        score is a float because a learned preference is inherently a
+        matter of degree, not a strict yes/no - someone can like Italian
+        food more than Mexican but still enjoy both, and a single
+        floating-point number is what lets that kind of comparison and
+        ranking happen at all. data_points counts how many actual
+        observations that score is based on so far, which is what would
+        let later logic distinguish "we're fairly confident about this
+        score, it's based on twenty meals" from "we've only seen this
+        once, take it with a grain of salt." The primary key is
+        (dimension, value) together, since there's exactly one current
+        score per specific value within a specific dimension.
+
+    cooking_patterns
+        Tracks how often, and how long, someone tends to cook at a given
+        point in a weekly rhythm - the composite primary key
+        (day_of_week, hour_of_day) models exactly one row per
+        combination of weekday and hour, accumulating cook_count and
+        average_cook_time_minutes for that specific weekly time slot as
+        more meals get logged into it over time. This is the kind of
+        signal that could eventually support something like "recommend a
+        thirty-minute recipe on a Tuesday evening, since that's when
+        this user usually has less time to cook."
+
+Indexes
+------------------------------------------------------
+An index is a separate, auxiliary structure the database maintains
+alongside a table, built specifically to make looking things up by some
+particular column fast. The analogy that actually explains why: think of
+the index at the back of a textbook. Finding every page that mentions
+"osmosis" by flipping through the whole book page by page is slow and
+gets slower the longer the book is. The book's own back-of-book index
+lets you jump straight to the exact pages, because that index was
+already organized, once, specifically to answer "where does this term
+appear" quickly - at the cost of the book being a bit longer overall,
+since that index itself takes up pages. A database index is the exact
+same trade: it's extra structure, built and maintained specifically to
+make one kind of lookup fast, paid for in extra disk space and slightly
+slower writes (because every INSERT or UPDATE now also has to update the
+index, not just the table).
+
+Every index in this phase's three schemas, and what it's for:
+
+    idx_pantry_category on pantry(category)
+        Speeds up "show me everything in the vegetable category" (or
+        any other category) - a query that would otherwise have to scan
+        every single row in pantry and check each one's category by
+        hand.
+
+    idx_pantry_name on pantry(name)
+        Speeds up looking a specific item up by its exact name - "is
+        there already a pantry row for 'onion'" - the same kind of
+        lookup this phase's own tests do repeatedly (section 10).
+
+    idx_pantry_last_seen_date on pantry(last_seen_date)
+        Speeds up finding items that haven't been confirmed present in a
+        while - sorting or filtering by "how long since this was last
+        actually seen in a photo" without scanning the whole table.
+
+    idx_recipes_cuisine on recipes(cuisine)
+        Speeds up "find recipes for this cuisine."
+
+    idx_recipes_cook_time_minutes on recipes(cook_time_minutes)
+        Speeds up "find recipes that take less than X minutes" - a very
+        plausible, common filter for a system whose whole point is
+        matching recipes to how much time and what's actually on hand
+        right now.
+
+    idx_recipes_meal_type on recipes(meal_type)
+        Speeds up "find recipes for breakfast" (or whatever meal_type is
+        being filtered on).
+
+    idx_ingredient_synonyms_synonym on ingredient_synonyms(synonym)
+        Speeds up the specific direction this table is actually going to
+        be queried in practice: given some name someone actually typed
+        or said (a synonym), find its canonical_name. Without this
+        index, that lookup would have to scan every synonym row looking
+        for a match, even though the table's own primary key is on
+        (canonical_name, synonym) together - a primary key index on
+        that pair doesn't help a lookup that only knows the synonym
+        half.
+
+    idx_meal_history_date on meal_history(date)
+        Speeds up anything filtering or sorting meal history by date -
+        "meals cooked in the last week," for instance.
+
+    idx_meal_history_cuisine on meal_history(cuisine)
+        Speeds up "how many times has this user cooked this cuisine" -
+        directly useful for the preference-learning use case
+        meal_history exists to support.
+
+    idx_meal_history_rating on meal_history(rating)
+        Speeds up filtering meal history by how it was rated - "recipes
+        rated 5" or "recipes rated 1 or 2, to learn what to avoid," for
+        instance.
+
+None of this is free, and it's worth saying plainly: every index adds
+disk space, and every write to the indexed table now also has to update
+that index, not just the table's own row - so an index is worth adding
+specifically because some query that reads through that column is
+expected to be common enough that paying a little extra on every write
+is worth it. These specific indexes were each chosen because they match
+a column this project's own schema comments and table purposes already
+suggest will be filtered or sorted on regularly - not indexed
+speculatively, and not indexing every column just in case.
+
+The rating CHECK constraint
+------------------------------------------------------
+A CHECK constraint is a rule attached directly to a column (or table)
+that SQLite enforces on every single insert or update, rejecting the
+statement outright if the rule isn't satisfied - independent of
+whatever validation the application code around it does or doesn't do.
+meal_history.rating carries exactly this:
+
+    rating INTEGER CHECK (rating IS NULL OR (rating BETWEEN 1 AND 5))
+
+This rejects 0, 6, -1, 100, or any other integer outside 1 through 5
+inclusive - a real meal_history insert attempting any of those values
+raises aiosqlite.IntegrityError instead of silently succeeding with a
+nonsensical rating on the row (this is exactly what
+test_rating_check_rejects_out_of_range_values in the test suite checks,
+across all four of those specific bad values). NULL is explicitly
+allowed by the "rating IS NULL OR ..." half of the condition, because
+not every meal necessarily gets rated - someone might log that they
+cooked something without bothering to rate it, and that should be a
+perfectly valid row, not a forced, meaningless default rating.
+
+Validating this at the database level, in addition to whatever checks
+application code might do before ever attempting the insert, is worth it
+because the database is the one place every single write to this table
+is guaranteed to pass through, no matter which piece of code, written at
+which point in time, ends up doing that write. Application-level
+validation living only in one function is only as good as every future
+caller remembering to call that same validation function first - a
+CHECK constraint can't be bypassed that way, because SQLite itself
+refuses the write, regardless of which code path it came from.
+
+
+7. INITIALIZATION AND RESET
+=============================================================
+
+init_database(db, schema_path) reads the given schema file's whole
+contents as one string, and calls db.executescript(sql) to apply every
+statement in it in order, then queries sqlite_master (SQLite's own
+internal table listing every table, index, and other schema object that
+exists) for the current list of table names and logs it. init_all_
+databases() simply calls init_database once for each of the three real
+databases, using each one's own stored schema_path. Both are safe to run
+repeatedly for the same reason CREATE TABLE IF NOT EXISTS is idempotent
+(section 6): applying the same schema file again against a database that
+already has all of it is a no-op, not an error - nothing about running
+init_database twice in a row behaves any differently from running it
+once.
+
+The tables get logged after init specifically so a real run - not a
+test, an actual startup or an actual invocation of the CLI script -
+leaves a visible, checkable record of exactly what tables exist in that
+database at that moment, without needing to separately go open the file
+and inspect it by hand to confirm setup actually worked as expected.
+
+reset_database(db, *, confirm=False) is a different, deliberately
+destructive operation: it looks up every real table in the database
+(explicitly excluding SQLite's own internal sqlite_% tables), drops every
+one of them inside a single transaction, then calls init_database again
+to rebuild the schema from scratch, empty. This exists specifically for
+test fixtures and local development - situations where wiping a
+database completely clean and starting over is exactly what's wanted,
+as opposed to any real, in-use environment where dropping every table
+would mean losing all of that environment's actual data permanently and
+irreversibly.
+
+The confirm=True guard is the general principle "make destructive
+operations awkward to call by accident," applied directly: reset_
+database(db) with no further argument raises ValueError immediately, by
+design, before touching anything at all - the caller has to write
+confirm=True explicitly, as a deliberate, visible word right there in
+the call, to make this actually run. A boolean argument that has to be
+supplied is a stronger guard than a comment or a line in a README saying
+"be careful with this function," because a comment only helps someone
+who happens to read it before calling the function - it does nothing at
+all to stop code that calls reset_database(db) without ever having read
+that warning. A required argument is enforced by the function itself,
+every single time, regardless of whether whoever's calling it ever read
+any documentation about it.
+
+
+8. THE CLI SCRIPT
+=============================================================
+
+scripts/init_databases.py is a plain command-line entry point - a
+script you run directly from a terminal, as opposed to a function you'd
+import and call from other Python code. It exists as a separate script
+because "set up my local databases" or "wipe and start over" are things
+a developer wants to do directly, once, from a terminal, without writing
+a throwaway Python snippet that imports init_all_databases and calls it
+by hand every single time. Running it with no arguments calls init_all_
+databases() against the three real databases (from the actual configured
+paths in settings, not test paths) and then prints a summary; passing
+--reset instead wipes and reapplies all three from scratch.
+
+The summary table this script prints (database name, path, table names,
+file size) is genuinely useful specifically because file size and table
+count are two of the fastest possible sanity checks that something real
+actually happened: an unexpectedly tiny file size, or a table you expect
+to see missing from the printed list, is an immediate, visible signal
+that something didn't go the way you assumed - far faster to notice
+looking at four printed lines than by opening a SQLite client and
+querying each database by hand to check.
+
+--reset requires typed confirmation - the script prints which databases
+are about to be wiped and their paths, then calls Python's input() and
+demands the user type the literal text "RESET" before proceeding; typing
+anything else at all aborts with nothing changed. This sits on top of,
+not instead of, the confirm=True guard already built into reset_database
+itself (section 7) - two separate guards, at two different levels. The
+confirm=True check protects any code that calls reset_database directly,
+regardless of whether a human is even present to type anything at all
+(a test calling reset_database programmatically, for instance, still has
+to pass confirm=True explicitly). The typed-confirmation prompt protects
+specifically against a human running this script from a terminal by
+habit or muscle memory, or genuinely not having meant to include --reset
+this time, and gives them one more concrete, deliberate moment to notice
+and stop before the destructive part of the script does anything
+irreversible.
+
+
+9. HOW THIS CONNECTS TO THE REST
+=============================================================
+
+Dependency direction: mealsight/db/connection.py imports from
+mealsight.config.settings and mealsight.utils.logging - phase 1.1's
+config and logging modules - and nothing else in this codebase currently
+imports anything from mealsight.db. That makes the db package sit one
+level above the phase 1.1 foundation (config and logging), parallel to
+where phase 1.2's providers package sits, rather than underneath or
+tangled up with it. Nothing built so far reaches back down into db from
+below it, and db doesn't reach sideways into providers either - each
+phase built so far only depends on the foundation, not on each other.
+
+What sits on top, in later phases, is presumably each MCP server itself
+- a pantry server built against get_pantry_db(), a recipes server built
+against get_recipe_db(), a user-intelligence server built against
+get_user_db(). The three-way physical split (section 4) is exactly what
+makes that mapping clean: each future server's code only ever needs to
+import and call into the one Database instance it actually owns, never
+needing to know the other two databases even exist, let alone reach into
+them. Concretely, the pantry MCP server would use get_pantry_db() to
+read and write pantry, shelf_life_reference, grocery_lists, and
+consumption_log, and it would never touch recipes.db or
+user_intelligence.db at all - not because something stops it at the
+code level, but because there's simply no reason for pantry-server logic
+to ever need a connection to a database file it doesn't own. Anything
+that genuinely needs data from more than one of the three databases at
+once is exactly the case section 4 already covered: that's the agent's
+job, calling into more than one server and combining what comes back,
+not any one server's job to reach across into a database it doesn't own.
+
+
+10. THE TESTS
+=============================================================
+
+What a pytest fixture is, and what tmp_path gives you
+------------------------------------------------------
+A pytest fixture is a function, decorated with @pytest.fixture, that
+sets up something a test needs and hands it to that test as an argument
+- pytest matches fixtures to tests by name. conftest.py in this phase
+defines three: pantry_db, recipe_db, user_db, each an async fixture that
+builds a Database pointed at a fresh file under tmp_path, yields it to
+the test, and calls db.close() once the test finishes (the yield-then-
+cleanup shape is the same async-generator-fixture pattern phase 1.2's
+integration test used for the same reason - releasing the connection
+cleanly rather than leaving it open past the end of the test).
+
+tmp_path is a fixture pytest itself provides: a Path pointing at a
+brand-new, empty directory created fresh for that one test, and deleted
+automatically afterward. Every one of this phase's db fixtures builds
+its Database inside that directory - tmp_path / "pantry_test.db", and so
+on - rather than pointing anywhere near the real data/ directory
+settings.py configures for actual use.
+
+This matters for a very direct reason: if these tests pointed at the
+real data/ directory instead, running the test suite would mean
+repeatedly creating, wiping, and reinitializing whatever real local data
+happens to be sitting there - test_reset_database_drops_and_reapplies_
+schema alone would wipe every table clean, for real, every single time
+the test suite runs. Using tmp_path means every test gets its own
+private, disposable file that genuinely cannot collide with real data,
+or with any other test running at the same time.
+
+Test by test
+------------------------------------------------------
+
+test_connection.py:
+
+    test_foreign_keys_and_wal_pragmas_are_set_on_a_live_connection
+        Grabs the live connection via pantry_db._ensure_connection(),
+        then runs PRAGMA foreign_keys and PRAGMA journal_mode directly
+        against it and checks the actual returned values - 1 for foreign
+        keys, "wal" for journal mode. This test specifically checks the
+        connection's real, live state after the fact, rather than just
+        trusting that _ensure_connection's setup code ran - trusting the
+        setup code ran without checking would mean a typo in the pragma
+        string, or a pragma silently not taking effect for some SQLite-
+        version-specific reason, could go completely unnoticed; actually
+        querying the pragma back out proves the setting genuinely took
+        hold on this connection, not just that the code that's supposed
+        to set it was present somewhere.
+
+    test_transaction_commits_on_success
+        Inserts a row inside "async with pantry_db.transaction()" with
+        no exception raised, then checks that row is actually visible
+        with a completely separate fetch_one call afterward. Protects
+        the "commits on success" half of the transaction contract - if
+        this broke, a successful block might leave its changes
+        uncommitted, meaning data silently never actually got saved even
+        though no error was ever raised to say so.
+
+    test_transaction_rolls_back_on_exception
+        Inserts a row inside the same transaction block, then
+        deliberately raises inside that block, and checks the row is
+        absent afterward. Protects the other half - if this broke, a
+        failed operation could leave a partial, half-applied change
+        sitting in the database, which is exactly the inconsistent state
+        atomicity is supposed to prevent.
+
+    test_fetch_one_returns_none_when_no_row_matches
+        Queries for a name that was never inserted and checks the result
+        is None, not an exception. Protects the "no match is normal, not
+        exceptional" design decision from section 5 - if this broke,
+        every single ordinary lookup-that-doesn't-find-anything
+        throughout the whole codebase would need its own try/except just
+        to handle a case that's supposed to be completely routine.
+
+    test_rows_support_mapping_access_by_column_name
+        Inserts a row with four columns, fetches it back, and checks
+        row["name"], row["category"], row["quantity"], row["unit"] all
+        return the right values. Protects the row_factory setup - if
+        this broke, every place in the codebase relying on name-based
+        row access (which is essentially expected to be everywhere,
+        given how much more readable it is than positional access) would
+        break at once.
+
+    test_concurrent_writes_do_not_raise_database_is_locked
+        Fires 25 separate insert coroutines at once with
+        asyncio.gather, then checks all 25 rows actually landed with a
+        single COUNT(*) query. "database is locked" is the specific
+        SQLite error that happens when one connection tries to write
+        while another connection already holds a lock on the same file
+        that conflicts with it - a real, common failure mode for
+        anything writing to SQLite concurrently without care. This test
+        is genuinely proving an architectural decision, not just one
+        function: it works because of two things acting together - WAL
+        mode (section 5), which lets readers and writers coexist instead
+        of blocking each other outright, and this codebase only ever
+        opening one aiosqlite connection per Database and routing every
+        call through it, so there's only ever one connection to this
+        file in play at all, never two separate connections racing
+        against each other's locks. If either piece were missing - no
+        WAL mode, or code that opened a fresh connection per call instead
+        of reusing one - this exact test is where that would very
+        plausibly start failing, intermittently, exactly the kind of bug
+        that's miserable to track down without a test already sitting
+        there catching it.
+
+test_init.py:
+
+    test_init_is_idempotent
+        Runs init_database twice against the same fresh Database and
+        checks the table list is identical both times, with no
+        exception raised on the second run. Protects the basic idempotency
+        promise from section 6 and section 7 directly.
+
+    test_init_idempotent_preserves_existing_rows
+        Inserts a row, runs init_database again, and checks that row is
+        still there afterward. This is a stronger, more specific check
+        than plain idempotency of the schema alone - it protects against
+        a version of "idempotent" that only means "doesn't error the
+        second time" while secretly still doing something destructive to
+        existing data, which would technically not throw an error but
+        would absolutely not be safe to run against a real, already-
+        populated database.
+
+    test_reset_database_refuses_without_confirm
+        Calls reset_database(pantry_db) with no confirm argument and
+        checks it raises ValueError with a message containing
+        "confirm=True". Protects the guard from section 7 - if this
+        broke, the single safeguard against an accidental full wipe
+        would be gone.
+
+    test_reset_database_drops_and_reapplies_schema
+        Inserts a row, calls reset_database(pantry_db, confirm=True),
+        and checks the table still exists (schema reapplied) but the row
+        is gone (data actually wiped). Protects that reset_database does
+        what it claims to do when properly authorized - not too little
+        (leaving stale data behind) and not too much (failing to rebuild
+        the schema afterward).
+
+test_constraints.py:
+
+    test_rating_check_rejects_out_of_range_values (parametrized over 0,
+    6, -1, 100)
+        Attempts to insert a meal_history row with each of those rating
+        values and checks aiosqlite.IntegrityError gets raised every
+        time. Protects the CHECK constraint from section 6 directly -
+        if this broke, nonsensical ratings could silently get stored.
+
+    test_rating_check_accepts_in_range_values (parametrized over 1, 5,
+    3)
+        Inserts with each of those values and confirms the row lands
+        with exactly that rating. Protects against the constraint being
+        accidentally too strict - it would be just as real a bug for
+        this CHECK to reject a perfectly valid rating of 3 as it would
+        be for it to accept an invalid rating of 6.
+
+    test_rating_check_accepts_null
+        Inserts with rating=None and confirms the row lands with
+        rating None. Protects the explicit "rating IS NULL OR ..." half
+        of the CHECK - a meal logged without a rating at all needs to
+        stay a valid, insertable row.
+
+
+11. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+Three databases versus one
+    Covered in full in section 4. One database makes joins trivial but
+    means every future MCP server's code and tests would depend on the
+    same shared schema and the same shared file, with no real boundary
+    stopping one server's change from affecting another's data. Three
+    physically separate files give up in-SQL joins across that boundary
+    entirely, in exchange for each server genuinely owning, and being
+    independently testable against, only its own data.
+
+SQLite versus Postgres (or MySQL)
+    Covered in section 3. A client-server database is built for many
+    separate client processes, likely on different machines, all
+    reaching one shared server at once - solving problems (connection
+    pooling across many clients, replication, surviving one machine's
+    failure) this project doesn't currently have, since it's one backend
+    process managing its own local data. SQLite loses exactly at the
+    point this project would grow multiple independent, concurrently-
+    writing server processes needing to share one dataset over a
+    network - not a problem yet, but a real limit worth naming honestly.
+
+Raw SQL versus an ORM like SQLAlchemy
+    An ORM (object-relational mapper) lets you describe tables as Python
+    classes and mostly avoid writing SQL text directly, generating
+    queries for you instead. This project writes plain SQL strings
+    directly, parameterized, rather than adopting an ORM's abstraction
+    layer on top of that. Given the schema itself is intentionally
+    simple - four to five straightforward tables per database, no
+    complex relationships to map since cross-database joins are ruled
+    out by design anyway (section 4) - an ORM's main selling point
+    (managing complex relational mappings for you) has less to actually
+    offer here, while still adding a real learning-curve and debugging-
+    indirection cost of its own.
+
+.sql schema files versus schema defined in Python
+    Covered in section 6 - a .sql file is plain SQL, directly readable,
+    directly runnable in a SQLite shell, and diffable as plain text,
+    versus a Python-code description of the same structure that would
+    need its own translation step to become real SQL and isn't directly
+    inspectable the same way.
+
+JSON columns versus fully normalized tables
+    Covered in depth in section 6, for recipes.dietary_tags, ingredients,
+    and steps specifically. Normalizing would let SQL filter directly
+    into ingredient-level detail (find every recipe using a specific
+    ingredient above some quantity, say) at the cost of a real join-
+    heavy structure for something that's read and written as one whole
+    unit almost every time. JSON won because the actual, current access
+    pattern is "read or write this recipe's whole ingredient list
+    together," not "query into individual ingredients across many
+    recipes" - the moment that second pattern becomes genuinely common,
+    that's exactly the point this decision would deserve revisiting.
+
+aiosqlite versus sqlite3 in a thread pool
+    The Python standard library's sqlite3 is synchronous; one entirely
+    valid alternative to using aiosqlite at all would have been keeping
+    sqlite3 directly and manually running each call in a thread pool
+    executor to avoid blocking the event loop, which is roughly what
+    aiosqlite already does for you, packaged as a library. Reaching for
+    aiosqlite instead of hand-rolling that same thread-pool-wrapping
+    logic around plain sqlite3 avoids reimplementing an already-solved,
+    fiddly piece of async plumbing that aiosqlite has already gotten
+    right.
+
+WAL versus the default rollback journal
+    SQLite's traditional default journal mode makes a writer briefly
+    block readers (and vice versa) around each transaction, using a
+    separate rollback journal file that gets used to undo a transaction
+    if something goes wrong partway through. WAL mode instead lets
+    readers keep working against the still-consistent main file while a
+    writer appends to a separate log, which is exactly what
+    test_concurrent_writes_do_not_raise_database_is_locked depends on
+    (section 10) - the default rollback journal mode would make
+    concurrent access here meaningfully more prone to exactly the
+    "database is locked" failure this test set out to rule out.
+
+CREATE TABLE IF NOT EXISTS versus a versioned migration tool like
+Alembic
+    A migration tool like Alembic tracks a sequence of incremental
+    schema changes over time - add this column in version 3, rename that
+    one in version 7 - with an explicit, ordered history of how the
+    schema evolved, and a way to step forward or backward through that
+    history. This phase uses plain CREATE TABLE IF NOT EXISTS statements
+    instead, with no migration history at all. That's a real, deliberate
+    trade given the phase's own stated scope: this is schema and access
+    plumbing, not a system that's already had to evolve its schema
+    across deployed versions yet. IF NOT EXISTS is simple and genuinely
+    idempotent for the "does this table exist yet, if not create it"
+    problem this phase actually has, but it has no story at all for "this
+    column used to be one type and now needs to become another" or "this
+    table needs a new required column and every existing row needs a
+    real, non-default value backfilled into it" - the moment schema
+    changes need to safely evolve data that already exists in a real,
+    running system, a real migration tool starts pulling its weight in a
+    way IF NOT EXISTS structurally cannot.
+
+Singleton connections versus a connection per request
+    Covered in section 5's registry discussion - a connection per
+    request (or per call) would mean repeatedly paying the cost of
+    opening a file handle and re-running the pragma setup on every
+    single database interaction, and would also reopen exactly the
+    multiple-connections-to-one-file situation section 5's race-
+    condition discussion and section 10's concurrency test are both
+    concerned with. One shared, lazily-created connection per Database,
+    reused for the life of the process, avoids both costs.
+
+fetch_one returning None versus raising
+    Covered in section 5 - raising on every ordinary "nothing matched"
+    lookup would force a try/except around what is, in practice, a
+    completely routine and expected outcome for a huge fraction of
+    lookups (checking whether an item is already in the pantry, whether
+    a user profile key has been set yet, and so on). Returning None
+    keeps that ordinary case a plain, cheap "if row is not None:" check,
+    reserving actual exceptions for things that are genuinely
+    exceptional - a constraint violation, a malformed query - rather
+    than for "the thing you were looking for happens not to exist yet."
+
+
+12. GLOSSARY
+=============================================================
+
+aiosqlite
+    A Python library wrapping the standard library's synchronous sqlite3
+    module so SQLite calls can be awaited from async code, run on a
+    background thread instead of blocking the event loop.
+
+asyncio.Lock
+    An object that only one piece of async code can hold at a time;
+    anything else trying to acquire it waits until the current holder
+    releases it.
+
+atomic (transactions)
+    A property where everything in a block of database operations
+    succeeds together, or none of it does - no in-between, partially
+    applied state.
+
+blocking I/O
+    Input/output that makes the calling code sit idle until the
+    operation finishes, as opposed to letting other work happen in the
+    meantime.
+
+CHECK constraint
+    A rule attached to a column or table that SQLite enforces on every
+    insert or update, rejecting the write outright if the rule isn't
+    satisfied.
+
+commit
+    Making every change made since the last commit permanent.
+
+composite primary key
+    A primary key made of two or more columns together, used when no
+    single column alone is guaranteed unique.
+
+context manager
+    An object that defines setup and cleanup steps around a block of
+    code, triggered by Python's "with" (or "async with") statement, which
+    runs the cleanup step even if the block raises an exception.
+
+coroutine
+    A chunk of async code, written with async def, that can pause at an
+    await and resume later without blocking the whole program.
+
+CREATE TABLE IF NOT EXISTS
+    A SQL statement that creates a table only if it doesn't already
+    exist, making schema setup safe to run more than once.
+
+event loop
+    The mechanism asyncio uses to juggle many concurrent operations on
+    one thread by switching between them at each await.
+
+foreign key
+    A column value in one table meant to refer to a row in another
+    table - the mechanism a relational database uses to record that one
+    row belongs to, or points at, another.
+
+idempotent
+    Describes an operation that produces the same end result whether run
+    once or many times, with no error and no duplicated effect on a
+    repeat run.
+
+index
+    A separate structure a database maintains alongside a table,
+    specifically to make lookups by some column fast, at the cost of
+    extra disk space and slightly slower writes.
+
+join
+    A single SQL query that pulls matching rows from two or more tables
+    at once, based on some shared value between them.
+
+journal_mode
+    The SQLite setting controlling how changes are recorded before
+    being finalized - the default rollback-journal approach, or WAL.
+
+lastrowid
+    The autoincrementing id SQLite just assigned to a row, available
+    right after an INSERT into a table with an AUTOINCREMENT primary
+    key.
+
+lazy connection
+    Opening a resource (here, a database connection) only the first
+    time it's actually needed, rather than the moment the object holding
+    it is created.
+
+migration (database)
+    An explicit, ordered, incremental change to a schema over time,
+    typically managed by a dedicated tool that tracks and can apply or
+    reverse that history.
+
+parameterized query
+    A SQL query where values are passed separately from the query text
+    itself (via placeholders like ?), rather than being pasted directly
+    into the SQL string.
+
+PRAGMA
+    A SQLite-specific command that changes a setting about how the
+    current connection behaves, rather than reading or writing table
+    data.
+
+race condition
+    A bug where the correctness of code depends on the unpredictable,
+    precise order in which concurrent operations happen to interleave.
+
+rollback
+    Undoing every change made since the last commit, as if it never
+    happened.
+
+row_factory
+    The setting controlling what shape a SQL query's result rows come
+    back as - a plain positional tuple by default, or something
+    name-indexable (aiosqlite.Row) if set.
+
+schema
+    The definition of what tables, columns, and constraints exist in a
+    database, as distinct from the actual data stored in them.
+
+singleton
+    An object created once and reused everywhere afterward, rather than
+    a fresh instance being constructed every time one is needed.
+
+SQL injection
+    A vulnerability where a value that was only ever meant to be data
+    gets interpreted as part of the SQL syntax itself, letting an
+    attacker change what a query actually does.
+
+SQLite
+    A database engine with no separate server process - the database is
+    a single file your application opens and reads/writes directly.
+
+sqlite_master
+    SQLite's own internal table listing every table, index, and other
+    schema object that exists in a database.
+
+WAL (write-ahead logging)
+    A SQLite journal mode where new changes are appended to a separate
+    log file first, letting readers keep working against the original,
+    still-consistent database file while a write is in progress.
+
+
+13. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: Why three separate SQLite databases instead of one, and what did that
+cost you?
+
+    The plan is for pantry management, recipe matching, and user-
+    preference learning to each become their own MCP server eventually,
+    and I wanted each one to genuinely own its own data - not just by
+    convention, but structurally, so one server's schema change or one
+    server's tests can never touch another's data by accident. Splitting
+    into three physical SQLite files does that: there's no way for
+    pantry-server code to even reach recipes.db's tables, because
+    there's no shared connection that sees both. The real cost is that
+    you lose SQL joins across that boundary entirely - you can't write
+    one query that pulls from pantry and recipes together, because a
+    single SQLite connection only ever sees one file. That cross-cutting
+    work becomes the agent's job instead: call each server, get an
+    answer from each, combine them in Python. I think that's the right
+    owner anyway, since combining pantry state with recipe matching with
+    learned preferences is exactly the kind of judgment call an agent
+    should be making, not something that should live inside a SQL WHERE
+    clause.
+
+Q: How is SQL injection actually prevented here, and why isn't that
+optional?
+
+    Every query helper - execute, execute_many, fetch_one, fetch_all -
+    takes the query text and the parameter values as two separate
+    arguments, with ? placeholders in the query wherever a value belongs.
+    SQLite receives those as genuinely separate things and never
+    re-parses a parameter value as SQL syntax, no matter what characters
+    it contains. The alternative - building the query by pasting a value
+    directly into the string - means a value like a stray quote followed
+    by "OR 1=1" can change what the query actually does, matching every
+    row instead of the one it was supposed to. That's not a style
+    preference I could reasonably skip under time pressure; it's the
+    actual mechanism that keeps a piece of data from being able to
+    rewrite the query it's sitting inside. The one place this codebase
+    does build a query with an f-string is a DROP TABLE statement using
+    a table name pulled straight out of sqlite_master - never caller
+    input - and that's specifically because SQL has no placeholder
+    syntax for identifiers, only for values, so there's no parameterized
+    form to reach for there at all.
+
+Q: What does WAL mode actually do, and how did you handle concurrent
+writes?
+
+    WAL - write-ahead logging - is a SQLite journal mode where new
+    writes get appended to a separate log file instead of immediately
+    modifying the main database file in place, which lets readers keep
+    reading the still-consistent main file while a write is in progress,
+    instead of blocking each other. I turn it on with a PRAGMA right
+    when a connection opens. On top of that, each Database only ever
+    opens one aiosqlite connection for its whole lifetime, reused for
+    every call, guarded by an asyncio.Lock specifically around the
+    lazy-connect step so two coroutines racing to connect at the same
+    moment can't each open a separate connection to the same file. I
+    actually have a test that fires twenty-five concurrent inserts at
+    once with asyncio.gather and checks none of them raise "database is
+    locked" - that's proving the WAL-plus-single-connection combination
+    actually holds up under real concurrent access, not just in theory.
+
+Q: Why is schema initialization idempotent instead of using real
+migrations, and what's the difference?
+
+    Every CREATE TABLE and CREATE INDEX in all three schema files uses
+    IF NOT EXISTS, so running init against an already-set-up database is
+    a no-op - I have a test that runs init twice and checks the table
+    list, and the actual row data, come out identical both times. A real
+    migration tool like Alembic is built for a different problem: an
+    ordered, trackable history of incremental changes to a schema that
+    already has real data living in it - add a column here, rename one
+    there, with a way to step forward or backward through that history
+    safely. This phase doesn't have that problem yet; it's schema
+    plumbing for a system that hasn't had to evolve a live schema across
+    deployed versions. The moment a column needs to change type, or a
+    new required column needs real values backfilled into existing
+    rows, IF NOT EXISTS has genuinely nothing to offer for that - that's
+    exactly the point I'd reach for a real migration tool instead.
+
+Q: Why JSON columns for recipe ingredients and steps instead of fully
+normalized tables, and when would that choice start to hurt?
+
+    A recipe's ingredient list and its steps are read and written as one
+    coherent whole almost every time - you don't want "just the third
+    ingredient," you want the entire list together to make sense of the
+    recipe. Normalizing that into a separate ingredients table with a
+    foreign key back to recipes would buy me the ability to write SQL
+    that filters directly on ingredient properties across many recipes
+    at once, at the cost of a real join-based structure for data that's
+    mostly consumed as a single unit. JSON matches the actual access
+    pattern better right now. I'd regret this the moment the project
+    genuinely needs to query into ingredient-level detail across many
+    recipes in SQL itself - "find every recipe using more than 200 grams
+    of chicken," say - because that kind of question is exactly what a
+    normalized table answers cleanly and a JSON blob can't answer
+    without pulling every row out and parsing it in Python first.
+
+Q: If this project outgrew SQLite, how would you actually migrate it to
+Postgres?
+
+    The query layer is already written as plain, parameterized SQL
+    behind one class, Database, with the same four or five helper
+    methods used everywhere - execute, fetch_one, fetch_all, and so on -
+    rather than SQL scattered ad hoc through the codebase. That's the
+    part that makes a migration realistic instead of a rewrite: the
+    actual SQL text would need real changes, since SQLite and Postgres
+    don't share every detail (AUTOINCREMENT versus Postgres's own serial
+    or identity columns, for instance, and Postgres actually enforces
+    foreign keys by default instead of needing a PRAGMA at all), and I'd
+    want to replace aiosqlite with an async Postgres driver underneath.
+    But because every call site already goes through Database's own
+    methods instead of talking to sqlite3 or aiosqlite directly, that
+    swap is contained to this one module and the schema files, not
+    spread across every place that ever reads or writes data. The
+    three-way physical split would also translate directly into three
+    separate Postgres databases, or three separate schemas within one
+    Postgres instance if that ended up simpler operationally - the
+    ownership boundary this phase built doesn't depend on SQLite
+    specifically to make sense.

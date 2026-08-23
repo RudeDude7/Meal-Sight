@@ -1,0 +1,1506 @@
+PHASE 1.1 STUDY NOTES: CONFIGURATION AND LOGGING FOUNDATION
+=============================================================
+
+These notes cover the first backend phase of MealSight: a settings module
+and a logging module, plus the packaging and tooling around them. No
+feature code (vision, recipes, agent logic) exists yet. Everything below
+describes code that actually exists in the repository right now.
+
+
+1. WHAT THIS PHASE BUILT
+=============================================================
+
+This phase created an installable Python package called mealsight under
+backend/, with two working pieces inside it: a settings module that loads
+configuration and secrets from the environment, and a logging module that
+emits structured log lines and can trace one request across multiple
+function calls. Everything else (pyproject.toml, the __init__.py files,
+the tests) exists to support those two modules: to make them installable,
+checkable by tools, and provably correct.
+
+File-by-file map:
+
+    backend/pyproject.toml
+        Describes the mealsight package to Python's packaging tools:
+        what it depends on, what Python version it needs, and how ruff
+        (a linter) and mypy (a type checker) should behave when run
+        against it.
+
+    backend/mealsight/__init__.py
+        Marks the mealsight/ folder as a Python package. Currently empty
+        of real content (just a docstring and an empty __all__ list).
+
+    backend/mealsight/config/__init__.py
+        Marks config/ as a sub-package and re-exports the three names
+        from settings.py (Settings, load_settings, settings) so other
+        code can write "from mealsight.config import settings" instead
+        of reaching into the settings module directly.
+
+    backend/mealsight/config/settings.py
+        Defines the Settings class, the RateLimitSpec class, the
+        MODEL_RATE_LIMITS dictionary, the load_settings() function, and
+        the module-level settings object everything else will import.
+
+    backend/mealsight/utils/__init__.py
+        Marks utils/ as a sub-package and re-exports bind_trace_id,
+        get_logger, and timed_block from logging.py.
+
+    backend/mealsight/utils/logging.py
+        Defines the trace-id contextvar, the bind_trace_id() and
+        get_logger() functions, the structlog processor pipeline, and
+        the timed_block() timing helper.
+
+    backend/tests/__init__.py
+        Empty. Marks tests/ as a package so imports inside the test
+        files resolve consistently.
+
+    backend/tests/test_settings.py
+        Four tests covering: loading from environment variables,
+        failing when a required secret is missing, redacting secrets
+        in repr(), and looking up rate limits per model.
+
+    backend/tests/test_logging.py
+        Four tests covering: trace ID appearing in a log line, trace ID
+        surviving an await, valid JSON output in production mode, and
+        the timing helper emitting duration_ms.
+
+
+2. WHY A FOUNDATION PHASE EXISTS AT ALL
+=============================================================
+
+Configuration and logging are built before any feature code because every
+other part of the system needs them, and building them after the fact
+means going back and rewiring code that already works.
+
+Consider what happens in a project that skips this step. A developer
+writing the vision module needs to know which AI model to call, so they
+write the model name directly into that file: "mistral-medium-2505". A
+week later, someone writing the recipe-matching module needs a timeout
+value, so they write "30" directly into a function signature. This is
+called a magic number: a literal value with no explanation of where it
+came from or why it is that value, sitting in the middle of unrelated
+code. Six months later nobody can answer "why is this timeout 30 and not
+60" without digging through git history, and the same model name is
+typed out in four different files, so changing models means editing four
+files and hoping none were missed.
+
+Secrets (API keys, passwords) cause a sharper version of the same
+problem. If every file that needs an API key calls os.getenv("SOME_KEY")
+directly, there is no single place that lists which keys the whole
+system requires, no single place that checks they are actually present,
+and no protection against one of those fifteen call sites accidentally
+printing the key to a log file. A secret is any value that grants access
+to something and must not be exposed publicly, such as an API key or
+password.
+
+Tracing is the third problem. Once a system has more than one moving
+part, a single user action (say, "get me a meal recommendation") can
+trigger a chain of calls: an image goes to a vision model, a voice memo
+goes to a transcription service, several smaller calls extract structured
+data, and a final reasoning call produces the recommendation. If
+something goes wrong, and all of this only prints "Error occurred" with
+no way to tell which of the twenty concurrent user requests it belongs
+to, debugging becomes guesswork. A foundation phase exists to solve this
+kind of problem once, in one place, before it is multiplied across
+dozens of feature files.
+
+
+3. PROJECT LAYOUT AND PACKAGING
+=============================================================
+
+What makes a folder a package
+------------------------------
+A Python package is a folder that Python's import system recognizes as a
+place code can be imported from. Historically, the file __init__.py
+(read as "init dunder", for the double underscores on each side) is what
+marks a folder as a package; even an empty __init__.py file is enough.
+This project uses __init__.py files that are not fully empty: several of
+them import names from the modules inside their folder and list them in
+a variable called __all__, which is a list of the names that folder's
+package considers is its public interface (a convention, not a strict
+lock).
+
+Example, from backend/mealsight/config/__init__.py:
+
+    from mealsight.config.settings import Settings, load_settings, settings
+
+    __all__ = ["Settings", "load_settings", "settings"]
+
+This means other code can write "from mealsight.config import settings"
+without knowing that settings actually lives in a file called settings.py
+inside that folder.
+
+Installable package versus relative imports
+---------------------------------------------
+An installable package is code that has been registered with Python's
+package system (via pip, or here, uv) so that "import mealsight" works
+from anywhere on the machine, the same way "import json" works, rather
+than only working if the calling script happens to sit in the right
+folder relative to the code. The alternative is importing by relative or
+manipulated path, for example inserting a folder into sys.path by hand,
+or relying on the current working directory being exactly right when a
+script runs. That approach breaks the moment a test runner, a different
+working directory, or a packaging step changes how the code is invoked.
+Making mealsight installable means every test file, every future
+application file, and any tool (ruff, mypy, pytest) can all agree on
+where "mealsight" is without special-casing.
+
+pyproject.toml, section by section
+------------------------------------
+pyproject.toml is the single configuration file that modern Python
+tooling (packaging, dependency management, linting, type checking, and
+test running) all read from, instead of each tool needing its own
+separate file.
+
+    [project]
+    name = "mealsight"
+    version = "0.1.0"
+    description = "..."
+    requires-python = ">=3.11,<3.12"
+    dependencies = [
+        "pydantic>=2.7",
+        "pydantic-settings>=2.3",
+        "structlog>=24.1",
+    ]
+
+    This block declares what the package is called, what version it is,
+    and which Python versions it supports (3.11 only, here). The
+    dependencies list is what the package needs to actually run in
+    production: pydantic (data validation), pydantic-settings (loading
+    that validation from environment variables), and structlog
+    (structured logging). These get installed whenever anyone installs
+    mealsight, including in a deployed environment.
+
+    [dependency-groups]
+    dev = [
+        "pytest>=8.0",
+        "pytest-asyncio>=0.23",
+        "ruff>=0.6",
+        "mypy>=1.10",
+    ]
+
+    Dev dependencies are tools needed only while developing the code:
+    running tests, linting, and type checking. A deployed copy of the
+    application does not need pytest installed to run; it only needs
+    pytest installed to be developed and verified. Keeping the two
+    lists separate means a production install can skip the dev tools
+    entirely, which keeps the deployed footprint smaller.
+
+    [build-system]
+    requires = ["hatchling"]
+    build-backend = "hatchling.build"
+
+    [tool.hatch.build.targets.wheel]
+    packages = ["mealsight"]
+
+    The build system block tells Python's packaging tools which
+    program actually knows how to turn this source folder into an
+    installable unit (a wheel, Python's standard packaged-and-built
+    format). Hatchling is the tool doing that here. The
+    packages = ["mealsight"] line tells hatchling specifically which
+    folder is the package to include.
+
+    [tool.pytest.ini_options]
+    asyncio_mode = "auto"
+    testpaths = ["tests"]
+
+    Configures pytest (the test runner) to automatically treat async
+    test functions as tests it should run (asyncio_mode = "auto"),
+    without needing a decorator on every single async test, and to look
+    for tests in the tests/ folder specifically.
+
+    [tool.ruff]
+    target-version = "py311"
+    line-length = 110
+
+    [tool.ruff.lint]
+    select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+
+    Configures ruff, described below.
+
+    [tool.mypy]
+    python_version = "3.11"
+    strict = true
+    warn_unused_configs = true
+
+    [[tool.mypy.overrides]]
+    module = "tests.*"
+    strict = true
+
+    Configures mypy, described below. The override block re-states
+    strict = true for the tests.* module path; this is explicit rather
+    than left implicit so a future reader does not have to guess
+    whether tests are held to the same standard as application code
+    (they are).
+
+What uv is, and why it instead of pip or poetry
+--------------------------------------------------
+uv is a single command-line tool that replaces several separate tools
+that Python developers historically used one at a time: pip (installing
+packages), venv (creating an isolated Python environment so one
+project's dependencies don't collide with another's), and a lock-file
+manager (pinning exact dependency versions so the same install happens
+every time). "uv sync" reads pyproject.toml, creates the isolated
+environment in a .venv folder, and installs exactly the dependencies
+declared, all in one step, and it does this fast because it is written
+in a lower-level language and caches aggressively. Poetry is a similar
+all-in-one tool that existed before uv; it was not chosen here, and uv
+was, mainly because uv is faster and works directly against the
+standard pyproject.toml format without inventing its own separate
+project file format.
+
+What ruff and mypy are, and what strict mode adds
+-----------------------------------------------------
+A linter is a tool that reads source code without running it and flags
+patterns that are likely bugs or violate a style convention: unused
+imports, lines that are too long, variables that are assigned but never
+used. Ruff is a linter (and also an automatic code formatter, though
+formatting was not configured in this phase). The "select" list in
+pyproject.toml turns on specific families of rules: E and F are
+pycodestyle/pyflakes basics (unused names, obvious errors), I is import
+sorting, UP flags code that could use a newer, cleaner Python syntax, B
+catches common bug patterns, SIM flags code that could be simplified,
+and C4 flags unnecessary data-structure comprehensions.
+
+A type checker is a different kind of tool: it reads the type hints
+already present in the code (things like "-> str" or "x: int") and
+checks that the code is internally consistent with them, without
+running the code. Mypy is the type checker used here. Ordinary (non-
+strict) mypy only checks the functions and variables that already have
+type hints, and silently allows a function with no type hints at all to
+call anything and return anything. Strict mode specifically additionally
+requires: every function must have hints on every parameter and its
+return type (no untyped functions allowed at all); no variable can be
+implicitly given the special "Any" type (which turns off checking for
+that value) without it being written explicitly; and several other
+individually-named checks that close loopholes non-strict mode leaves
+open. Strict mode was applied to the whole mealsight package (not just
+part of it) because a foundation module that every other module will
+import is exactly the place where a type error is most expensive to
+leave in: a wrong type here does not surface as one bug, it surfaces as
+a bug everywhere that imports the wrong value.
+
+
+4. THE CONFIG MODULE, IN DEPTH
+=============================================================
+
+What pydantic-settings is, versus os.getenv directly
+---------------------------------------------------------
+os.getenv("SOME_KEY") is the plain Python standard-library way to read
+an environment variable: it returns a string, or None if the variable is
+not set, and it is the caller's job to check for None, convert the
+string to whatever type is actually needed (an integer, a list, a
+boolean), and decide what to do if it's missing or malformed. Doing this
+by hand at every call site means the same missing-value check and the
+same string-to-number conversion gets rewritten (or forgotten) over and
+over.
+
+pydantic-settings is a library that lets you describe all of this once,
+declaratively, as a class. Settings in this project inherits from
+BaseSettings (from pydantic_settings), and every attribute on the class
+is one configuration value, written with a Python type hint:
+
+    mistral_api_key: SecretStr
+    max_text_length: int = 2000
+
+Three things happen automatically because of this:
+
+    Type coercion: pydantic-settings reads the environment variable as
+    a string (all environment variables are strings) and converts it to
+    the declared type. MAX_TEXT_LENGTH="2000" in the environment becomes
+    the Python integer 2000 on the settings object, not the string
+    "2000". The same happens for the list[int] fields (llm_retry_backoff)
+    and the Path fields (the database paths).
+
+    Validation: if a value cannot be converted to the declared type (for
+    example, a non-numeric string where an int is expected), pydantic-
+    settings raises an error immediately when the class is constructed,
+    rather than the bad string quietly propagating into code that
+    expects a number and crashing somewhere unrelated later.
+
+    Defaults: any attribute written with "= some_value" (like
+    max_text_length: int = 2000) is optional; if the environment
+    variable is not set, that default is used. Attributes written with
+    no "=" at all (mistral_api_key: SecretStr, groq_api_key: SecretStr)
+    have no default, which makes them required: constructing Settings
+    without them present raises an error.
+
+What a .env file is
+----------------------
+A .env file is a plain text file, one KEY=VALUE pair per line, sitting
+in the project folder, that a program reads at startup to populate
+environment variables without the developer needing to type "export
+KEY=value" in their shell every time. pydantic-settings is configured
+here (model_config = SettingsConfigDict(env_file=str(DEFAULT_ENV_FILE),
+...)) to read backend/../.env, that is, the .env file at the repository
+root, automatically.
+
+.env is not committed to version control (git) because it typically
+holds real secrets: actual API keys that grant access to paid services.
+If it were committed, anyone with read access to the repository (or its
+full history, since old commits do not disappear just because a file is
+later deleted) would have those keys. The project's .gitignore file
+excludes .env for exactly this reason, while committing an .env.example
+file with placeholder values so a new developer knows which variables
+they need to supply themselves.
+
+Environment variables set directly in the shell take priority over
+values in the .env file. This matters operationally: a real deployment
+does not typically ship a .env file at all; it sets real environment
+variables through whatever deployment platform is in use, and those take
+effect exactly the same way local .env values do during development,
+without code changes.
+
+Fail fast at import time
+----------------------------
+"Fail fast" means detecting a problem as early as possible and stopping
+immediately, rather than allowing the program to continue running in a
+broken state and only discovering the problem later, at a less
+convenient moment.
+
+The alternative this project rejected is lazy validation: only checking
+whether MISTRAL_API_KEY is present the first time some function actually
+tries to call the Mistral API. Under that approach, the application can
+start up successfully, accept requests, run for a while, and then fail
+in the middle of handling a real user's request, at the exact moment it
+first needs that missing key: the least convenient possible time, and
+the error message at that point might be a confusing low-level HTTP
+authentication failure rather than a clear "this environment variable is
+missing."
+
+This project instead builds the settings object once, at import time
+(the moment Python first runs the settings.py file, which happens the
+first time any other module does "from mealsight.config.settings import
+settings" or similar), via:
+
+    settings = load_settings()
+
+If a required secret is missing, load_settings() raises immediately,
+which means the whole application refuses to start at all, with an
+error message naming exactly which variable is missing. This trades "the
+app might partially work for a while" for "the app either fully starts
+with everything it needs, or doesn't start, and tells you why." For an
+application that will make paid API calls, failing fast at startup is
+much cheaper than discovering a missing key mid-request.
+
+Concretely, load_settings() does this by catching pydantic's
+ValidationError (the exception pydantic-settings raises when
+construction fails) and re-raising a plainer RuntimeError:
+
+    try:
+        return Settings(_env_file=env_file)
+    except ValidationError as exc:
+        missing = sorted(
+            {str(error["loc"][0]).upper() for error in exc.errors() if error["type"] == "missing"}
+        )
+        if missing:
+            raise RuntimeError(
+                f"Missing required environment variable(s): {', '.join(missing)}. "
+                "Set them in your shell or in .env."
+            ) from exc
+        raise
+
+Every group of settings, and why each value is what it is
+---------------------------------------------------------------
+
+    Required secrets versus optional secrets
+
+        mistral_api_key: SecretStr
+        groq_api_key: SecretStr
+        openweather_api_key: SecretStr | None = None
+
+    mistral_api_key and groq_api_key have no default, so they are
+    required: the application needs both (Mistral for vision/reasoning,
+    Groq for audio transcription) to do anything useful at all.
+    openweather_api_key defaults to None, marking it optional, because
+    the weather-based feature it would support is deferred (not yet
+    built). The field is declared now anyway, rather than added later,
+    so that when that feature is eventually built, no existing code
+    needs to change to add a new required setting; it is already there,
+    already optional, and simply needs to be filled in and used.
+
+    SecretStr (from pydantic) is a wrapper type for a string that should
+    never print itself in full elsewhere in the codebase (see the
+    "__repr__" section below).
+
+    The four model IDs and their benchmark rationale
+
+        vision_model: str = "mistral-medium-2505"     # F1 0.64 on aicook eval set; best of 3 tested
+        extraction_model: str = "ministral-8b-2512"   # 3.13 RPS, sufficient for structured extraction
+        reasoning_model: str = "mistral-medium-2505"
+        audio_model: str = "whisper-large-v3-turbo"
+
+    These are not arbitrary choices; they come out of an earlier
+    benchmarking phase (see docs/VISION_FINDINGS.md and
+    docs/vision_benchmark_report.md) that actually ran multiple models
+    against a labeled evaluation set and measured accuracy. F1 score
+    (defined below, in the DOWNSCALE_IMAGES section) is the accuracy
+    number that comparison was based on. mistral-medium-2505 was the
+    highest-scoring of the three vision models tested, so it is used
+    for both vision (looking at photos) and reasoning (producing the
+    final recommendation). ministral-8b-2512 is used for the narrower
+    task of pulling structured data out of text (extraction) because it
+    is fast enough (3.13 requests per second, see RPS/TPM below) for
+    that higher-volume, lower-complexity job. whisper-large-v3-turbo is
+    Groq's audio transcription model, used for turning spoken voice
+    memos into text.
+
+    The rate limit dict and RateLimitSpec
+
+        class RateLimitSpec(BaseModel):
+            model_config = ConfigDict(frozen=True)
+            rps: float
+            tpm: int
+
+        MODEL_RATE_LIMITS: dict[str, RateLimitSpec] = {
+            "mistral-medium-2505": RateLimitSpec(rps=0.42, tpm=375_000),
+            "ministral-8b-2512": RateLimitSpec(rps=3.13, tpm=625_000),
+            "whisper-large-v3-turbo": RateLimitSpec(rps=20 / 60, tpm=0),
+        }
+
+    RateLimitSpec is a small pydantic model (a plain typed data
+    container, similar to Settings but not loaded from the environment)
+    describing one model's two limits. frozen=True means once one is
+    created it cannot be modified in place, which matches the fact that
+    these numbers describe a fixed real-world account limit, not
+    something that should change at runtime. RPS is requests per second:
+    how many API calls can be sent in a one-second window before the
+    provider starts rejecting or throttling further calls. TPM is
+    tokens per minute: a token is roughly a chunk of a word (the unit an
+    AI language model actually processes text in), and TPM caps the
+    total volume of text sent and received per minute, separately from
+    how many individual requests that text is split across. Both limits
+    exist because they catch different failure modes: a service could
+    stay under its request-count limit while still sending far too much
+    text per minute (a few enormous requests), or stay under its
+    token-volume limit while still sending requests too rapidly (many
+    tiny requests back to back). whisper-large-v3-turbo's TPM is set to
+    0 because Groq's limit for that model, as given, is 20 requests per
+    minute with no separate token cap; 20/60 converts "20 per minute"
+    into the same requests-per-second unit the other two entries use, so
+    a single rate limiter can treat all three model entries uniformly.
+
+    Matching thresholds
+
+        min_ingredient_match: float = 0.5
+        substitution_match_weight: float = 0.7
+        critical_missing_penalty: float = 0.3
+
+    These will control the not-yet-built logic that decides whether a
+    recipe counts as "makeable" given what's in the pantry: how similar
+    an available ingredient needs to be to a required one to count as a
+    match, how much weight a suggested substitution gets compared to
+    the real ingredient, and how much a recipe's score is penalized when
+    it is missing something important. These are placed in settings now,
+    as named, documented constants, so that whichever future module
+    implements the matching logic reads these values instead of
+    hardcoding its own copies of 0.5, 0.7, and 0.3 with no explanation.
+
+    Freshness
+
+        expiring_soon_days: int = 3
+        stale_pantry_item_days: int = 14
+
+    Thresholds for pantry-item freshness logic: an item within 3 days of
+    its use-by point counts as "expiring soon"; an item that has sat in
+    the pantry for 14 days or more counts as "stale."
+
+    Nutrition
+
+        high_protein_threshold_g: float = 25
+        low_carb_threshold_g: float = 30
+        low_calorie_threshold: float = 400
+
+    Thresholds (in grams, and in calories for the last one) that will
+    presumably classify a recipe as "high protein," "low carb," or
+    "low calorie" for filtering or labeling purposes.
+
+    Repetition
+
+        repetition_window_days: int = 7
+        max_same_protein_per_week: int = 3
+
+    Controls for avoiding meal repetition: how many days count as one
+    "week" for repetition purposes, and how many times the same protein
+    (e.g. chicken) is allowed to be recommended inside that window.
+
+    Input limits
+
+        max_image_size_mb: float = 10
+        max_audio_duration_seconds: int = 300
+        max_text_length: int = 2000
+
+    Caps on what the system will accept as input: a photo no larger than
+    10 megabytes, a voice memo no longer than 300 seconds (5 minutes),
+    typed text no longer than 2000 characters. These exist to keep the
+    system from being handed something so large it wastes API budget or
+    causes unexpected failures downstream.
+
+    Retry counts and backoff lists
+
+        llm_max_retries: int = 3
+        llm_retry_backoff: list[int] = Field(default_factory=lambda: [2, 5, 10])
+        api_max_retries: int = 2
+        api_retry_backoff: list[int] = Field(default_factory=lambda: [1, 3])
+
+    When a call to an AI model or an external API fails (a network
+    blip, a temporary server error), the system will retry rather than
+    giving up immediately. The *_max_retries values cap how many times
+    it retries. The *_backoff lists are the number of seconds to wait
+    before each successive retry (2 seconds before the first retry, 5
+    before the second, 10 before the third, for LLM calls) — waiting
+    longer between each attempt, rather than retrying instantly and
+    repeatedly, so a struggling service is not hammered with requests
+    while it is already failing. Field(default_factory=lambda: [...])
+    is used instead of a plain "= [2, 5, 10]" default because mutable
+    defaults (lists, dicts) are unsafe to write directly as a class
+    attribute default in Python; default_factory tells pydantic to call
+    that lambda function fresh, producing a brand new list, every time
+    a Settings object is built with no override, so separate Settings
+    instances never accidentally share and mutate the same list object.
+
+    Database paths
+
+        pantry_db_path: Path = DEFAULT_DATA_DIR / "pantry.db"
+        recipes_db_path: Path = DEFAULT_DATA_DIR / "recipes.db"
+        user_intelligence_db_path: Path = DEFAULT_DATA_DIR / "user_intelligence.db"
+
+    Where the three SQLite database files (not yet created by any code
+    in this phase) will live. DEFAULT_DATA_DIR is a data/ folder at the
+    repository root, computed from the settings.py file's own location
+    (REPO_ROOT = Path(__file__).resolve().parents[3], meaning: three
+    folders up from this file — config, then mealsight, then backend —
+    lands at the repository root). Because these are ordinary Settings
+    fields, they can each be overridden individually by an environment
+    variable (PANTRY_DB_PATH, and so on) without touching code, for
+    example to point a test run at a temporary directory instead of the
+    real data folder.
+
+    THEMEALDB_BASE_URL
+
+        themealdb_base_url: str = "https://www.themealdb.com/api/json/v1/1"
+
+    The base URL for TheMealDB, a free public recipe API this system
+    calls for recipe data. Kept as a setting (not hardcoded at each call
+    site) so the URL, or an eventual API version bump, changes in one
+    place.
+
+    DOWNSCALE_IMAGES
+
+        downscale_images: bool = False
+
+    This one has a comment directly above it in the code explaining why
+    it must not casually be changed:
+
+        # Images are sent at native resolution. The benchmark showed F1 dropping
+        # from 0.67 to 0.43 when the same photo was downscaled to 25% — do not
+        # "optimize" this to save bandwidth/tokens without re-running that
+        # benchmark, it directly costs recommendation accuracy.
+
+    F1 score, in one plain sentence: it is a single number between 0 and
+    1 that combines two separate measurements, precision (of the items
+    the model claimed to see, what fraction were actually correct) and
+    recall (of the items that were actually in the photo, what fraction
+    the model found), into one overall accuracy score, so that a model
+    which only ever names one obviously-correct item (high precision,
+    terrible recall) doesn't look artificially good.
+
+    A real benchmark run measured that shrinking a fridge photo to 25%
+    of its original size dropped this combined accuracy score from 0.67
+    to 0.43: a large, measured accuracy loss, not a guess. This is
+    exactly the kind of fact a future developer, focused on a different
+    problem (maybe reducing image upload time or API token cost), could
+    easily not know about, and "downscaling images to save bandwidth"
+    sounds like a harmless, obviously-good optimization on its own. By
+    encoding DOWNSCALE_IMAGES = False as a named setting with a comment
+    citing the exact numbers, instead of simply never writing any
+    downscaling code at all, the fact that this was tried and measured
+    to be harmful is preserved directly next to the setting someone
+    would naturally look at (or flip) if they had that "optimization"
+    idea later. A setting with no code behind it yet (no downscaling
+    logic actually exists in this phase) still earns its place here
+    because the warning is the valuable part.
+
+The module-level singleton
+------------------------------
+A singleton is an object that is created once and reused everywhere
+afterward, instead of a new copy being constructed each time it is
+needed. At the bottom of settings.py:
+
+    settings = load_settings()
+
+This line runs once, the first time settings.py is imported anywhere in
+the program, and every subsequent "from mealsight.config.settings import
+settings" elsewhere in the codebase receives that exact same object
+(Python caches imported modules, so re-importing does not re-run the
+file). The alternative would be calling load_settings() fresh inside
+every function that needs a setting. The singleton was chosen instead
+because configuration should be consistent across the whole running
+program: it would be confusing and error-prone if one part of the
+system could see a different max_text_length than another part, simply
+because each constructed its own separate Settings object at a slightly
+different moment or from a slightly different environment snapshot.
+
+The tradeoff is specifically in testing. Because "settings" is one
+shared object built once at import time, a test cannot simply construct
+"a different Settings for this one test" without either mutating the
+shared object (risky, since a mutation could leak into a different test
+that runs afterward) or working around the singleton somehow. This
+project's tests take two different approaches depending on what's being
+tested: test_settings.py calls load_settings() directly (bypassing the
+singleton entirely) to get a fresh, isolated Settings object per test,
+while test_logging.py uses monkeypatch.setattr(settings, "environment",
+"production") to temporarily change one field on the real shared
+singleton, with pytest automatically reverting that change after the
+test finishes. Both are ways of coping with the same tradeoff: a
+singleton is convenient for the running application, and slightly more
+work to override safely inside a test.
+
+The redacting __repr__
+--------------------------
+__repr__ is a special method Python calls automatically to produce a
+string representation of an object, used by the built-in repr()
+function, and also automatically shown when an object is the result of
+an expression typed at an interactive prompt, and often included
+automatically inside error tracebacks and inside some logging or
+debugging tools when they print out the state of an object. Because of
+that last point, __repr__ is a place a secret can leak without anyone
+directly, deliberately printing it: an unhandled exception whose
+traceback happens to include a Settings object anywhere in its call
+stack (for example, as a function argument) could otherwise print every
+field on that object, including the raw API keys, straight into a log
+file, a crash report, or a terminal that other people can see.
+
+This project's Settings class overrides __repr__ (and sets
+__str__ = __repr__, so str(settings) redacts identically) to build its
+own string field by field, checking each one:
+
+    def __repr__(self) -> str:
+        parts: list[str] = []
+        for name in type(self).model_fields:
+            value = getattr(self, name)
+            if isinstance(value, SecretStr) or "api_key" in name or "secret" in name:
+                parts.append(f"{name}=<redacted>")
+            else:
+                parts.append(f"{name}={value!r}")
+        return f"{type(self).__name__}({', '.join(parts)})"
+
+This checks two things for every field, not just one: whether the
+value's actual type is SecretStr (which is true for the three key
+fields as declared), and separately whether the field's name contains
+"api_key" or "secret" as a plain string check. The name check is
+deliberately there as a second, independent line of defense: even if
+some future field were mistakenly declared as a plain "str" instead of
+"SecretStr" by a developer who forgot, its name alone (if it is named
+sensibly, containing "api_key" or "secret") would still get it redacted.
+This is tested directly in test_repr_redacts_every_secret, which
+asserts that the actual raw secret values never appear anywhere in the
+rendered string, for all three secret fields including the optional
+openweather one.
+
+
+5. THE LOGGING MODULE, IN DEPTH
+=============================================================
+
+Structured logging versus plain string logging
+----------------------------------------------------
+Plain string logging is calling something like print(f"User {user_id}
+requested recipe {recipe_id}") or logging.info(f"..."), producing one
+human-readable sentence per log line. This is easy to read directly in
+a terminal, but hard for a machine to search or filter afterward: to
+find "every log line about user 42", a tool would have to parse that
+sentence back apart with a regular expression and hope the format never
+changes.
+
+Structured logging instead emits each log line as a set of named
+fields (a "dictionary" of key-value pairs) rather than a single
+sentence. This project's logger, called as logger.info("hello world",
+foo="bar"), does not just log the string "hello world"; it logs an
+event with the message under the key "event" and "bar" under the key
+"foo", alongside several other fields added automatically (see the
+processor list below). This means "find every log line where
+foo="bar"" is a direct, reliable filter against a specific field,
+rather than a guess about sentence wording.
+
+JSON in production, colored text in development, and what reads JSON
+-----------------------------------------------------------------------
+JSON (JavaScript Object Notation) is a widely used plain-text format
+for representing exactly this kind of key-value data, and essentially
+every log-aggregation and monitoring platform used in real production
+deployments (systems that collect logs from many running servers,
+let you search across all of them, and set up alerts) expects to
+receive logs as JSON, one JSON object per line, so it can parse and
+index every field automatically. That is what configure_logging emits
+when settings.environment == "production":
+
+    if environment == "production":
+        renderer: Any = structlog.processors.JSONRenderer()
+    else:
+        renderer = structlog.dev.ConsoleRenderer(colors=True)
+
+In development, on a single developer's own machine reading the
+terminal directly, raw JSON on every line is harder for a human to
+scan quickly than a shorter, colored, one-line-per-field rendering,
+which is what ConsoleRenderer(colors=True) produces instead. Both
+renderers receive the exact same underlying event data; only the final
+formatting step differs, which is why the earlier processors (below)
+do not need to know or care which renderer will run last.
+
+Structlog processors, in order
+----------------------------------
+A structlog processor is one stage in a pipeline that every single log
+event passes through, in a fixed order, before it becomes the final
+printed line; each processor receives the event so far (as a Python
+dictionary of fields collected up to that point) and returns a
+modified version of it for the next processor to receive. This project
+configures exactly this list, in configure_logging():
+
+    shared_processors: list[Any] = [
+        structlog.processors.TimeStamper(fmt="iso", key="timestamp"),
+        structlog.stdlib.add_log_level,
+        _inject_trace_id,
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+    ]
+
+followed by the JSON or console renderer as the final stage. In order:
+
+    TimeStamper(fmt="iso", key="timestamp")
+        Adds the current time, in ISO 8601 format (a standard,
+        sortable date-and-time text format), under the key
+        "timestamp", to every event.
+
+    structlog.stdlib.add_log_level
+        Adds the severity level (info, warning, error, and so on)
+        under the key "level".
+
+    _inject_trace_id (this project's own function)
+        Reads the current trace id (explained below) out of a
+        contextvar and adds it under the key "trace_id", but only if
+        one has actually been bound in the current context; otherwise
+        it leaves the event unchanged.
+
+    StackInfoRenderer()
+        If the log call was asked to include stack information (where
+        in the code the call happened), formats that into the event.
+
+    format_exc_info
+        If the log call happened inside an "except" block and was
+        asked to include exception details, formats the exception
+        traceback into the event instead of leaving it as a raw
+        exception object.
+
+Together these guarantee that every emitted event carries at minimum
+timestamp, level, service (added separately, see get_logger below), and
+event (the original log message, added by structlog itself before any
+processor runs) — matching the requirement that every log line carry
+those four fields.
+
+Contextvars, from scratch
+------------------------------
+A context variable (contextvars.ContextVar) is a value that is only
+visible within the specific "context" that set it — for asyncio-based
+Python code, that context is the currently running Task (asyncio's
+unit of concurrent work) and the chain of function calls it is
+currently inside, including everything after every await inside that
+same task. This project declares one:
+
+    _trace_id_var: ContextVar[str | None] = ContextVar("mealsight_trace_id", default=None)
+
+This differs from an ordinary global variable (a plain module-level
+variable, shared by literally every piece of code running in the
+program) in exactly the situation that matters here: concurrency. If
+this project used a plain global instead of a ContextVar to store
+"the current trace id," and the application were handling two
+different users' requests at the same time using asyncio (Python's
+built-in way of running many operations concurrently on a single
+thread by pausing one piece of work at each await and running another
+while the first waits), setting the global for user A's trace id and
+then, before user A's request finishes, setting it again for user B's
+request, would silently overwrite it — and now both requests, and any
+logging happening inside either of them, would report user B's trace
+id. This is a real, common bug class in concurrent code, usually
+called a race condition’s effect on shared state, or more specifically
+here, values "leaking" between logically-separate concurrent tasks
+that happen to share one global. A ContextVar avoids this because each
+asyncio Task gets its own independent copy of the context (including
+this variable) the moment it is created, so setting it inside one
+task's work never affects any other task's copy, even though all tasks
+are running inside the exact same process and could otherwise share
+Python's usual global state freely.
+
+The trace ID mechanism, end to end
+----------------------------------------
+A trace id is an arbitrary identifier (in this codebase, just a
+string) chosen once per logical unit of work — here, once per
+recommendation request — and attached to every log line produced
+anywhere during the handling of that one request, so that afterward,
+searching logs for that one id shows the complete story of that one
+request, in order, even if the logs from many different concurrent
+requests are all mixed together in the same output stream.
+
+bind_trace_id(trace_id) does exactly one thing: it sets the module's
+ContextVar to that value, for the current context:
+
+    def bind_trace_id(trace_id: str) -> None:
+        _trace_id_var.set(trace_id)
+
+_inject_trace_id, one of the processors above, reads that same
+ContextVar back out on every single log call, and if it holds a value,
+copies it into the event under the key "trace_id":
+
+    def _inject_trace_id(_logger: WrappedLogger, _method_name: str, event_dict: EventDict) -> EventDict:
+        trace_id = _trace_id_var.get()
+        if trace_id is not None:
+            event_dict["trace_id"] = trace_id
+        return event_dict
+
+Because this is a ContextVar and not a global, and because asyncio
+Tasks copy their context (including this variable) at creation and
+keep that copy through every await inside them, calling
+bind_trace_id() once, near the start of handling one request, is
+enough: every function called afterward inside that same logical
+request — no matter how many layers deep, no matter how many separate
+async functions are awaited along the way — sees the same trace id
+automatically when it calls get_logger(...).info(...), with no further
+action needed at each of those call sites.
+
+The alternative explicitly rejected here is passing a trace_id
+parameter through every function signature by hand: every function
+anywhere in the call chain that might eventually want to log something
+would need its own trace_id: str parameter, and every single call to
+every one of those functions, anywhere in the codebase, would need to
+remember to pass it along, purely so that it could eventually be
+threaded down to a logging call several layers deeper. This is
+mechanical, easy to forget in exactly one call site (silently breaking
+tracing only in that one path), and pollutes the signature of every
+function that has nothing to do with logging with a parameter that
+exists purely to serve logging. The contextvar approach keeps every
+function signature exactly as it would be without any tracing feature
+at all, and gets the trace id everywhere it's needed with none of that
+threading.
+
+Why get_logger is the single entry point
+--------------------------------------------
+get_logger(name) is documented, and used everywhere in this project, as
+the only way calling code should obtain a logger:
+
+    def get_logger(name: str) -> Any:
+        configure_logging(settings.environment)
+        return structlog.get_logger().bind(service=name)
+
+If callers were instead allowed to call structlog.configure(...)
+themselves, or call structlog.get_logger() directly without going
+through this function, two things could go wrong: different parts of
+the codebase could configure structlog differently (one part emitting
+JSON, another part emitting console-colored output, in the very same
+running process), and the "service" field — which name identifies
+which part of the system produced a given log line — could be missing
+entirely, or filled in inconsistently, because .bind(service=name)
+would need to be repeated correctly at every call site instead of once,
+here. Funneling every logger creation through one function is what
+guarantees the four required fields (timestamp, level, service, event)
+are actually present on every event, everywhere, without relying on
+every future caller remembering to do it right.
+
+The timing helper
+----------------------
+timed_block is a context manager (a function used with Python's "with"
+statement, which guarantees its cleanup code runs even if the code
+inside the "with" block raises an exception) that measures how long the
+code inside it took to run, and logs that duration when the block ends:
+
+    @contextmanager
+    def timed_block(logger: Any, event: str, **extra: Any) -> Iterator[None]:
+        started = time.perf_counter()
+        try:
+            yield
+        finally:
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            logger.info(event, duration_ms=duration_ms, **extra)
+
+time.perf_counter() reads a high-resolution clock suited for measuring
+short elapsed durations (it is not a wall-clock date/time; it is only
+meaningful as a difference between two readings). The "try/finally"
+structure specifically means the duration is logged whether the code
+inside the "with" block succeeded or raised an exception, since
+"finally" runs in both cases — a timing measurement is useful precisely
+because it can show "this operation took 4000ms right before it
+failed," not only "this operation took 4000ms and succeeded." duration_ms
+is milliseconds (thousandths of a second), a more human-scaled unit
+than raw seconds for timing individual operations like one API call,
+and it is what any future dashboard or alert built on these logs (for
+example, "warn me if a vision call takes longer than 5000ms") would
+read directly.
+
+Usage looks like:
+
+    with timed_block(logger, "vision_call_completed"):
+        result = call_vision_model(...)
+
+which logs an event named "vision_call_completed" with a duration_ms
+field, once the "with" block finishes.
+
+
+6. HOW THE PIECES CONNECT
+=============================================================
+
+Dependency direction: config and logging as leaves
+------------------------------------------------------
+A dependency, in this sense, is simply: module A "depends on" module B
+if A imports something from B. Looking at the actual imports in this
+phase: mealsight/utils/logging.py imports from mealsight/config/settings.py
+(it needs settings.environment to decide which renderer to configure).
+Neither settings.py nor logging.py imports anything from any
+not-yet-built application module (there is no vision.py, no agent.py,
+no mcp module yet, and neither foundation file references one). This
+makes config and logging leaves in the dependency graph: modules that
+sit at the bottom, imported by everything above them, importing nothing
+application-specific themselves.
+
+This direction matters because of what a circular import is: a
+situation where module A imports from module B, and module B (directly
+or through some longer chain) imports from module A. Python cannot
+resolve this cleanly — depending on exactly which module happens to be
+imported first, one of the two ends up trying to use names from the
+other before that other module has finished running top-to-bottom, and
+either fails outright or, worse, silently gets a partially-initialized
+module. Keeping config and logging as strict leaves — every future
+module (vision, recipes, the agent orchestration, MCP servers) will
+import settings and get_logger, but settings and logging will never
+import any of those — makes a circular import involving the foundation
+itself structurally impossible, no matter how complicated the
+application code built on top eventually gets.
+
+The rate limit dict, shaped for direct consumption
+-------------------------------------------------------
+MODEL_RATE_LIMITS is deliberately shaped as dict[str, RateLimitSpec],
+keyed by exactly the model id string (e.g. "mistral-medium-2505") that
+will be passed to the actual API call, with each value already holding
+both numbers a rate limiter needs (rps and tpm) as named attributes on
+one small object, rather than as two separate parallel dictionaries, or
+as a raw tuple of two numbers in some implicit order. A future rate
+limiter, given a model id, does exactly this to get everything it needs
+in one step, with no further parsing or reshaping:
+
+    limit = settings.get_rate_limit("mistral-medium-2505")
+    # limit.rps, limit.tpm
+
+get_rate_limit() (a method on Settings) is the only way this dict
+should be read, rather than reaching into MODEL_RATE_LIMITS directly,
+because it turns a lookup of an unconfigured model id into a clear
+KeyError naming that model, instead of either a raw, less-informative
+KeyError from indexing the dict directly, or — worse — a made-up
+default limit that would let an unconfigured model run with no real
+rate protection at all and silently violate whatever the provider's
+actual account limit is.
+
+
+7. THE TESTS
+=============================================================
+
+What monkeypatching is, and why environment variables are monkeypatched
+-----------------------------------------------------------------------------
+Monkeypatching is temporarily replacing or setting something (an
+attribute on an object, an environment variable, a function) only for
+the duration of one test, with pytest automatically restoring the
+original value afterward, regardless of whether the test passed or
+failed. pytest provides this as a fixture (a reusable piece of test
+setup) called monkeypatch, used here as monkeypatch.setenv(...) and
+monkeypatch.delenv(...) for environment variables, and
+monkeypatch.setattr(...) for an attribute on an already-existing object.
+
+Environment variables are monkeypatched rather than actually set for
+real (for example, by writing them into the real shell before running
+pytest) for two reasons. First, it keeps every test's setup visible
+directly in that test's own code, instead of depending on whatever
+happens to be set in whichever environment happens to run the test
+suite next (a developer's machine, a CI server, and so on) — a test
+that reads environment state it did not itself set is not reliably
+repeatable. Second, and just as important, it guarantees automatic
+cleanup: if a test manually set a real environment variable and then
+crashed before manually unsetting it, that variable would leak into
+every test that runs afterward in the same process; monkeypatch
+guarantees the revert happens even if the test fails partway through.
+
+Test by test
+----------------
+
+    test_settings_loads_from_monkeypatched_env
+        Sets MISTRAL_API_KEY and GROQ_API_KEY via monkeypatch, calls
+        load_settings(env_file=None) (deliberately bypassing the real
+        .env file on disk, so this test only ever sees the two
+        environment variables it just set), and asserts the resulting
+        Settings object's secret fields, unwrapped via
+        get_secret_value() (the method SecretStr requires to be called
+        explicitly, precisely so nothing accidentally reads the raw
+        value without meaning to), match exactly what was set, and
+        that openweather_api_key is correctly None since it was never
+        supplied. This protects the basic promise of the whole config
+        module: that values placed in the environment actually make it
+        onto the settings object, unmodified. If this test broke, it
+        would mean environment variables are silently not being read
+        (a typo in a field's expected name, a case-sensitivity
+        mismatch, or a broken env_file override) — the config module's
+        single most basic job failing silently.
+
+    test_missing_required_secret_raises_naming_the_variable
+        Explicitly removes both required environment variables with
+        monkeypatch.delenv(..., raising=False) (raising=False meaning:
+        don't fail if the variable wasn't set in the first place, since
+        the test does not know or care whether it existed before),
+        then asserts load_settings(env_file=None) raises RuntimeError,
+        and that the exact strings "MISTRAL_API_KEY" and "GROQ_API_KEY"
+        both appear in that error's message. This protects the "fail
+        fast, and say why" behavior directly: if this test broke, it
+        could mean either that a missing secret silently no longer
+        raises at all (the worst outcome: the app now appears to start
+        successfully with no working API key), or that it still raises
+        but the message no longer actually names which variable is
+        missing (a much harder error to debug from the outside, forcing
+        a developer to go read the settings source code just to find
+        out what to set).
+
+    test_repr_redacts_every_secret
+        Sets real-looking (but fake) values for all three secret
+        fields, then asserts none of those three literal fake secret
+        strings appear anywhere in repr(settings), and that all three
+        fields instead show the literal text "<redacted>". Also asserts
+        str(settings) produces the identical output as repr(settings).
+        This protects against the specific, quiet failure mode where
+        someone adds a new secret field to Settings later, or where the
+        redaction logic itself has a bug (for example, checking the
+        wrong field-name substring), and a real API key silently starts
+        appearing in full inside logs, error tracebacks, or debugging
+        output the next time this object happens to get printed
+        somewhere. If this test broke, it would mean an actual secret
+        API key could leak into any of those places right now.
+
+    test_rate_limit_specs_retrievable_per_model
+        Builds a Settings object and asserts get_rate_limit(...)
+        returns the exact expected RateLimitSpec (both rps and tpm) for
+        both "mistral-medium-2505" and "ministral-8b-2512", and
+        separately asserts that asking for an unknown model id
+        ("unknown-model-xyz") raises KeyError with that model's id
+        actually appearing in the error message (via pytest.raises(...,
+        match=...), which checks the exception's message against a
+        pattern). This protects the exact contract the next phase's
+        rate limiter is going to depend on: if the recorded rps/tpm
+        numbers were ever accidentally edited to something other than
+        the real account limits, or if an unknown model id silently
+        returned some default instead of erroring, a future rate
+        limiter could send requests faster than the real account is
+        actually allowed to handle, causing real rate-limit failures
+        against the live API.
+
+    test_trace_id_propagates_into_emitted_log_lines
+        Forces production mode (so output is JSON, and therefore easy
+        to parse back apart in the test), calls bind_trace_id(...) with
+        a known value, logs one event, and asserts that parsing the
+        captured output as JSON shows exactly that trace id under the
+        "trace_id" key. This protects the most basic promise of the
+        whole tracing mechanism: that binding a trace id actually
+        causes it to show up in a subsequently emitted log line at all.
+
+    test_trace_id_propagates_across_await_boundary
+        This is the test that specifically proves the contextvars
+        choice is correct, not merely the trace-id feature "working" in
+        the simplest possible case. It binds a trace id inside an outer
+        async function, then explicitly awaits asyncio.sleep(0) (an
+        await that hands control back to the event loop and back again,
+        with no actual delay — its only purpose here is to force a real
+        suspension-and-resumption of this coroutine, the same mechanic
+        that happens during a real await on a network call), and only
+        after that await, calls a second, separately-defined async
+        function (_log_from_inner_coroutine) that itself calls
+        get_logger(...).info(...). The test asserts the trace id is
+        still present in that inner function's emitted log line. What
+        this specifically rules out: if a plain global variable (rather
+        than a ContextVar) had been used instead to store the trace id,
+        this particular test does not by itself prove a global would
+        fail (a plain global would still pass this exact single-request
+        test, since nothing else is running concurrently here to
+        overwrite it) — but it is exactly the property (surviving an
+        await, into a separately-called function, without explicitly
+        passing the value along) that must hold for tracing to work at
+        all under real concurrency, where many such chains are running
+        interleaved. pytest-asyncio (declared as a dev dependency, and
+        enabled project-wide via asyncio_mode = "auto" in
+        pyproject.toml) is the plugin that lets a plain "async def
+        test_..." function be collected and actually run as a test by
+        pytest at all; without it, pytest has no built-in way to run an
+        async function and would simply skip it or error.
+
+    test_logger_emits_valid_json_in_production
+        Forces production mode, logs one event with an extra field
+        (foo="bar"), and asserts the captured output, parsed with
+        json.loads, is valid JSON at all, and specifically contains
+        event, service, foo, timestamp, and level with the expected
+        values. This protects two things at once: that the production
+        renderer actually produces syntactically valid JSON (a broken
+        renderer could produce almost-JSON that no downstream log
+        system could parse, silently breaking every dashboard and alert
+        built on top of these logs), and that all four required fields
+        (plus any caller-supplied extra field) really are present
+        together on one real emitted line, not just in isolation.
+
+    test_timed_block_emits_duration_ms
+        Wraps an empty "with timed_block(...)" block, and asserts the
+        resulting JSON log line has event == "did_a_thing" and a
+        numeric duration_ms field that is zero or positive. This
+        protects the timing helper specifically: that it actually logs
+        on exit (even though the wrapped block here does nothing), and
+        that the field it adds is a real, usable number rather than,
+        for example, a string, or missing entirely.
+
+
+8. KEY DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+pydantic-settings, versus os.getenv, versus a config.py of plain
+constants
+    os.getenv scattered across call sites means no single list of
+    required configuration, no automatic type conversion, and no single
+    point of validation; a config.py of plain module-level constants
+    (CONFIG_VALUE = 5) solves "one place to look" but still does
+    nothing to load values from the environment, coerce their types, or
+    validate them, and provides no clean way to mark some values as
+    required secrets versus optional ones with defaults. pydantic-
+    settings won because it does all of this — environment loading,
+    .env support, type coercion, validation, required-versus-optional —
+    in one declarative class, with the failure behavior (fail fast, or
+    not) explicitly controlled by this project's own load_settings()
+    wrapper rather than left to chance.
+
+structlog, versus the Python standard library's logging module
+    The standard library's logging module is built around formatting a
+    single string message per call, with structured fields (if used at
+    all) bolted on awkwardly through its "extra" argument and a custom
+    Formatter subclass that has to be written by hand to actually
+    produce JSON. structlog is built from the ground up around
+    structured, key-value events and a processor pipeline (exactly the
+    mechanism this project uses for trace-id injection, timestamps, and
+    switching between JSON and console output), which is a much more
+    direct fit for "every log line must carry these named fields" than
+    retrofitting the standard library's message-string-first design.
+
+contextvars, versus passing trace_id explicitly through every function
+signature, versus a plain module-level global
+    Passing trace_id explicitly was rejected because it pollutes every
+    function signature along the entire call chain with a parameter
+    that exists only to serve logging, and is easy to forget at exactly
+    one call site, silently breaking tracing only along that one path.
+    A plain global was rejected because it is not safe under
+    concurrency: with asyncio running multiple logical requests
+    interleaved in one process, one request's global write can
+    overwrite another's before either finishes, corrupting which trace
+    id shows up in whose logs. contextvars won because each asyncio
+    Task gets its own independent copy of the variable, so it behaves
+    like "a global, but correctly scoped to only the current logical
+    chain of work," which is exactly what tracing one request through
+    concurrent code requires.
+
+uv, versus pip or poetry
+    Plain pip has no built-in project-level dependency file or lock
+    file of its own; on its own it just installs whatever is asked for
+    into whatever environment happens to be active. Poetry solved
+    project-level dependency management and lock files before uv
+    existed, but uses its own project file conventions and is
+    noticeably slower. uv won because it manages the virtual
+    environment, dependency resolution, and lock file all in one fast
+    tool, reading the same standard pyproject.toml format this project
+    already needs for packaging and tool configuration anyway.
+
+mypy strict mode, versus default mode
+    Default mode only checks code that already has type hints, and
+    silently permits untyped functions and implicit "Any" (a type that
+    turns off checking entirely for a value) to slip through
+    unnoticed. Strict mode was chosen for the mealsight package
+    specifically because this is foundation code that every other
+    module will import and depend on: a type error here does not stay
+    contained to one file, it potentially corrupts the assumptions
+    every future module makes about settings and logging.
+
+fail-fast at import, versus lazy validation
+    Lazy validation (only checking a secret is present the moment it's
+    first actually used) was rejected because it allows the whole
+    application to appear to start up successfully and only fail in
+    the middle of handling a real request, at an arbitrary and
+    inconvenient later time, with an error that may not even clearly
+    point back to "a required environment variable was never set."
+    Fail-fast means a missing secret is caught the moment the settings
+    module is first imported, before the application does anything
+    else, with a message that names the exact variable to fix.
+
+Hardcoded, benchmark-derived model IDs, versus making them
+environment-overridable
+    The four model fields (vision_model, extraction_model,
+    reasoning_model, audio_model) are declared with hardcoded default
+    string values, each with a benchmark-derived rationale in a
+    comment, rather than being required environment variables with no
+    default. Making them freely overridable via the environment with
+    no further guardrail would make it trivially easy for someone to
+    quietly swap in an unbenchmarked model (by setting one environment
+    variable) with no signal anywhere that doing so throws away the
+    actual measured accuracy numbers this phase's comments document.
+    Because they are still ordinary Settings fields (not truly
+    hardcoded and unreachable), an override is still technically
+    possible if genuinely needed, but the default, and the reasoning
+    for that default, are visible directly in the source rather than
+    silently absent.
+
+
+9. GLOSSARY
+=============================================================
+
+.env file
+    A plain text file, one KEY=VALUE pair per line, read at startup to
+    populate environment variables without typing them into the shell
+    by hand each time.
+
+asyncio Task
+    Asyncio's unit of concurrently scheduled work; each Task gets its
+    own independent copy of context variables, which is what makes
+    contextvars safe to use for per-request state under concurrency.
+
+await
+    The point in an async function where it pauses to let other work
+    run, and later resumes; contextvars survive across this pause
+    correctly, while explaining why plain globals are risky under
+    concurrency generally does not depend on await specifically, only
+    on interleaved execution.
+
+ContextVar / context variable
+    A value that is only visible within the current logical context
+    (in asyncio code, the current Task and everything it awaits into),
+    rather than shared globally by every piece of running code.
+
+circular import
+    A situation where module A imports from module B and module B
+    (directly or indirectly) imports from module A, which Python
+    cannot resolve cleanly.
+
+dependency (module dependency)
+    Module A depends on module B if A imports something from B.
+
+dependency-groups / dev dependencies
+    Packages needed only for developing and verifying code (testing,
+    linting, type checking), kept separate from the packages a
+    deployed copy of the application actually needs to run.
+
+fail fast
+    Detecting and stopping on a problem as early as possible, rather
+    than continuing to run in a broken state and failing later.
+
+F1 score
+    A single accuracy number combining precision and recall into one
+    score, used here to compare vision models against a labeled
+    evaluation set.
+
+installable package
+    Code registered with Python's package system so "import
+    packagename" works from anywhere, rather than only working when a
+    script happens to be run from the right folder.
+
+__init__.py
+    The file that marks a folder as a Python package; can be empty, or
+    can re-export names from modules inside that folder.
+
+lazy validation
+    Only checking that a required value is present or valid at the
+    moment it's first actually used, rather than up front.
+
+linter
+    A tool that reads source code without running it and flags likely
+    bugs or style violations (ruff, in this project).
+
+magic number
+    A literal value with no explanation of where it came from or why
+    it has that value, embedded directly in unrelated code.
+
+module-level singleton
+    An object created once, at the moment its module is first
+    imported, and reused as the same object everywhere else that
+    module is imported afterward.
+
+monkeypatching
+    Temporarily replacing or setting something (an environment
+    variable, an object's attribute) only for the duration of one
+    test, automatically reverted afterward by pytest.
+
+mypy strict mode
+    A stricter configuration of the mypy type checker that additionally
+    requires every function be fully typed and forbids implicit "Any"
+    typing, among other checks default mode does not enforce.
+
+processor (structlog processor)
+    One stage in structlog's fixed pipeline; each processor receives
+    the log event collected so far and returns a modified version for
+    the next stage.
+
+race condition
+    A bug where the correctness of concurrent code depends on the
+    unpredictable relative timing of separate pieces of work, often
+    surfacing as one piece of work's changes overwriting another's.
+
+RateLimitSpec
+    This project's small, immutable data class holding one model's rps
+    and tpm limit together.
+
+repr / __repr__
+    Python's built-in mechanism for producing a string representation
+    of an object; __repr__ is the method that controls what that
+    string looks like, and it is invoked automatically in many more
+    places (tracebacks, some debugging and logging tools) than just an
+    explicit repr() call.
+
+RPS
+    Requests per second: how many API calls can be sent in a one-second
+    window before a provider starts throttling or rejecting further
+    calls.
+
+secret
+    A value, such as an API key or password, that grants access to
+    something and must not be exposed publicly.
+
+SecretStr
+    A pydantic wrapper type for a string value that should not print
+    itself in full elsewhere in the codebase; its raw value must be
+    retrieved explicitly via get_secret_value().
+
+structured logging
+    Logging that emits each event as a set of named fields, rather
+    than a single free-form sentence, so fields can be reliably
+    searched and filtered by machines afterward.
+
+TPM
+    Tokens per minute: a cap on the total volume of text (input and
+    output combined) an API account can process per minute, separate
+    from how many individual requests that text is split across.
+
+trace id
+    An identifier chosen once per logical unit of work (here, once per
+    recommendation request) and attached to every log line produced
+    while handling that one request, so its full story can be found
+    later by searching for that one id.
+
+type coercion
+    Automatically converting a value from the type it was given in
+    (here, always a string, since environment variables are strings)
+    into the type actually declared for that field.
+
+uv
+    A single fast command-line tool that manages Python virtual
+    environments, dependency installation, and lock files together,
+    reading the standard pyproject.toml format.
+
+wheel
+    Python's standard packaged-and-built distribution format, produced
+    by a build backend like hatchling from a source package.
+
+
+10. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: How does this project manage configuration and secrets, and why
+fail fast?
+
+    Configuration is one pydantic-settings class, Settings, that loads
+    every value from environment variables (with .env file support for
+    local development), with real type checking and validation built
+    in rather than hand-rolled os.getenv calls scattered everywhere.
+    The two required secrets, the Mistral and Groq API keys, have no
+    default, so constructing Settings without them raises immediately.
+    I wrap that in a load_settings() function that catches pydantic's
+    validation error and re-raises a plain RuntimeError naming exactly
+    which environment variable is missing. This happens at import time,
+    the moment the settings module is first loaded, which means the
+    whole application refuses to start at all if it's missing something
+    it needs, with a clear message about what to fix, instead of
+    starting up looking healthy and only failing later, mid-request,
+    when some feature first tries to use that missing key.
+
+Q: How is a single request traced across async components, and why
+contextvars specifically?
+
+    I bind one trace id per logical request using a contextvars-based
+    helper, bind_trace_id(), and a structlog processor reads that same
+    contextvar back out and stamps it onto every log line automatically.
+    The reason it's a ContextVar and not a plain global variable is
+    concurrency: this system is async, so multiple requests can be
+    interleaved in the same process, and a plain global would get
+    overwritten by whichever request set it most recently, corrupting
+    which trace id shows up in whose logs. A ContextVar instead gives
+    each asyncio Task its own independent copy, so it behaves correctly
+    even when many logical chains of work are running interleaved. I
+    specifically tested this by binding a trace id in an outer coroutine,
+    forcing a real await, and then logging from a separately-defined
+    inner coroutine, to prove the value survives exactly the kind of
+    suspend-and-resume that real concurrent code goes through.
+
+Q: What does structured logging actually get you operationally?
+
+    Every log line is a set of named fields rather than a free-text
+    sentence: timestamp, level, service, event, plus trace_id when
+    bound, plus whatever extra fields a call site adds. In production
+    that gets rendered as JSON specifically because essentially every
+    real log-aggregation platform expects to parse logs as JSON, one
+    object per line, so it can index every field and let you build
+    searches and alerts against them directly, like "show me every
+    error-level event for the vision service in the last hour" or
+    "alert if duration_ms on vision calls exceeds some threshold." In
+    development the same events get a colored, human-readable console
+    format instead, purely for local readability, without changing
+    anything about what data is actually being logged.
+
+Q: Why encode a benchmark result as a config constant with a comment,
+instead of just not writing the harmful code in the first place?
+
+    DOWNSCALE_IMAGES = False exists specifically because "downscale
+    images to save bandwidth or tokens" is a very natural-sounding
+    optimization that someone could reach for later, with no idea it
+    was already tried and measured. A benchmark actually ran the vision
+    model against downscaled photos and found F1 accuracy dropped from
+    0.67 to 0.43 — a large, real accuracy cost, not a guess. I put a
+    named setting in place, defaulted to False, with a comment citing
+    those exact numbers, directly next to where a future developer
+    would naturally look if they had that idea. The setting isn't
+    protecting against code that exists yet; it's preserving the reason
+    a particular "obvious" optimization already failed, right where
+    someone would otherwise silently redo it.
+
+Q: What does mypy strict mode actually buy you, and what does it cost?
+
+    Default mypy only checks functions that already have type hints and
+    lets untyped code and implicit Any values pass through unexamined.
+    Strict mode closes that off: every function needs full parameter
+    and return type hints, and Any has to be written explicitly rather
+    than happening by accident. I applied it to the whole mealsight
+    package, not part of it, because this is foundation code that
+    everything else imports; a type mistake here doesn't stay local; it
+    propagates into every module that depends on settings or logging.
+    The cost is upfront friction: every function, including in the
+    tests, needs complete type annotations, and some third-party
+    libraries need small workarounds (I have one explicit type: ignore
+    comment where pydantic-settings' constructor signature doesn't
+    perfectly match what mypy strict expects for the _env_file keyword
+    argument). That's a small, visible, deliberate cost in exchange for
+    catching an entire category of bugs before runtime.
+
+Q: How does this foundation actually support the components that get
+built on top of it?
+
+    Two ways, concretely. First, every future module (vision, recipe
+    matching, the agent orchestration, MCP servers) will call
+    get_logger(name) once for its own logging, and get correct,
+    consistent, traceable structured output for free, without
+    reimplementing any logging setup itself. Second, the rate limiter
+    that's coming in the next phase can consume MODEL_RATE_LIMITS
+    directly: it's already shaped as a dict keyed by exact model id,
+    with rps and tpm together on one small object, so there's no
+    reshaping or re-parsing needed, just settings.get_rate_limit(model_id).
+    And because config and logging don't import any application code
+    themselves, they stay strict leaves in the dependency graph, so no
+    matter how complex the application code built on top gets, a
+    circular import involving the foundation itself is structurally
+    impossible.

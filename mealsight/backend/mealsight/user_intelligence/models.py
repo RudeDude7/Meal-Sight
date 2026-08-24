@@ -90,3 +90,21 @@ class RepetitionCheck(BaseModel):
     reason: str
     recommendation: RepetitionRecommendation
     last_cooked: date_ | None
+
+
+MealType = Literal["breakfast", "lunch", "dinner", "snack"]
+
+
+class ContextSignals(BaseModel):
+    """What get_context_signals returns: meal_type and
+    complexity_suggestion are both derived purely from the clock and the
+    calendar (see mealsight.user_intelligence.context's own hour/weekday
+    boundary constants); context_notes is what cooking_patterns actually
+    says about this day/hour, always at least one string even when
+    cooking_patterns has no rows at all yet."""
+
+    model_config = ConfigDict(frozen=True)
+
+    meal_type: MealType
+    complexity_suggestion: str
+    context_notes: list[str]

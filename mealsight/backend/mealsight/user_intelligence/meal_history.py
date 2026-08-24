@@ -12,9 +12,10 @@ import json
 from datetime import date as date_
 from typing import Any
 
-from mealsight.db import get_user_db
+from mealsight.db import get_recipe_db, get_user_db
 from mealsight.db.connection import Database
 from mealsight.user_intelligence._datetime_utils import parse_sqlite_timestamp
+from mealsight.user_intelligence.context import record_cooking_pattern
 from mealsight.user_intelligence.models import MealRecord
 from mealsight.user_intelligence.scoring import recompute_preference_scores
 
@@ -24,6 +25,14 @@ def _validate_rating(rating: int | None) -> None:
         return
     if not isinstance(rating, int) or isinstance(rating, bool) or not (1 <= rating <= 5):
         raise ValueError(f"rating must be an integer from 1 to 5, or null, got {rating!r}.")
+
+
+async def _lookup_cook_time_minutes(recipe_id: str | None, recipe_db: Database | None) -> float | None:
+    if recipe_id is None:
+        return None
+    recipe_db = recipe_db or get_recipe_db()
+    row = await recipe_db.fetch_one("SELECT cook_time_minutes FROM recipes WHERE id = ?", (recipe_id,))
+    return row["cook_time_minutes"] if row is not None else None
 
 
 def _row_to_meal_record(row: Any) -> MealRecord:
@@ -84,12 +93,17 @@ async def log_meal(
         ),
     )
 
+    row = await user_db.fetch_one("SELECT * FROM meal_history WHERE id = ?", (meal_id,))
+    assert row is not None  # just inserted, in the same connection
+    meal = _row_to_meal_record(row)
+
+    cook_time_minutes = await _lookup_cook_time_minutes(recipe_id, recipe_db)
+    await record_cooking_pattern(meal.cooked_at, cook_time_minutes, user_db=user_db)
+
     if rating is not None:
         await recompute_preference_scores(user_db=user_db, recipe_db=recipe_db)
 
-    row = await user_db.fetch_one("SELECT * FROM meal_history WHERE id = ?", (meal_id,))
-    assert row is not None  # just inserted, in the same connection
-    return _row_to_meal_record(row)
+    return meal
 
 
 async def rate_meal(

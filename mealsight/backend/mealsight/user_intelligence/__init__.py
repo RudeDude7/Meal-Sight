@@ -6,12 +6,15 @@ LLM calls anywhere. No MCP wrapper yet — these are called directly for
 now.
 """
 
+from mealsight.user_intelligence.context import get_context_signals, record_cooking_pattern
 from mealsight.user_intelligence.meal_history import get_meal_history, log_meal, rate_meal
 from mealsight.user_intelligence.models import (
     ADDITIVE_PREFERENCE_TYPES,
     BudgetSensitivity,
+    ContextSignals,
     CookingSkill,
     MealRecord,
+    MealType,
     PreferenceType,
     RepetitionCheck,
     RepetitionRecommendation,
@@ -30,18 +33,22 @@ __all__ = [
     "DEFAULT_PROFILE_VALUES",
     "PREFERENCE_SMOOTHING_PRIOR_WEIGHT",
     "BudgetSensitivity",
+    "ContextSignals",
     "CookingSkill",
     "MealRecord",
+    "MealType",
     "PreferenceType",
     "RepetitionCheck",
     "RepetitionRecommendation",
     "UserProfile",
     "check_repetition",
+    "get_context_signals",
     "get_meal_history",
     "get_user_profile",
     "log_meal",
     "rate_meal",
     "recompute_preference_scores",
+    "record_cooking_pattern",
     "remove_preference",
     "update_preferences",
 ]

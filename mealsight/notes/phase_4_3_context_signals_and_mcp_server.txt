@@ -1,0 +1,575 @@
+PHASE 4.3 STUDY NOTES: CONTEXT SIGNALS, AND THE USER-INTELLIGENCE MCP
+SERVER
+=============================================================
+
+These notes cover the third and final round of phase 4: one small new
+piece of business logic (get_context_signals / record_cooking_pattern,
+mealsight.user_intelligence.context) plus wrapping the entire
+user_intelligence package — this new module and everything phase
+4.1/4.2 already built — as MealSight's third MCP server. Everything
+below describes code that really exists right now, in
+backend/mealsight/user_intelligence/context.py and
+backend/mealsight/mcp_servers/user_intelligence/. This is the first
+session in this project to do both things at once: add real business
+logic AND wrap a whole package as an MCP server in the same round,
+rather than treating them as two separate phases the way 3.1/3.3 and
+4.1-4.2/this-phase otherwise have.
+
+
+1. WHAT THIS PHASE BUILT AND WHY IT COMES NOW
+=============================================================
+
+Phase 4.1 and 4.2 built everything user_intelligence.db's schema was
+ever meant to hold except one thing: cooking_patterns, the fourth table,
+sat exactly where pantry.db's own table once sat before phase 3.1 —
+created back in phase 1.3, never once written to. This phase is what
+finally makes it mean something: get_context_signals reads it, and
+log_meal (phase 4.2) now writes to it via the new record_cooking_pattern
+— the same "a table existing in schema.sql doesn't mean anything reads
+or writes it yet" gap this project has now closed three separate times
+(recipes.db by phase 2, pantry.db's shelf_life_reference by phase 3.1,
+now this).
+
+The MCP wrap comes in the same round as the new logic — rather than
+deferred to a following session the way 3.3 followed 3.1/3.2 — because
+by this point in the project there was no longer a large, multi-round
+body of untested business logic to build first: phase 4.1 and 4.2
+already gave user_intelligence a full, independently-tested round of
+its own, and get_context_signals is a genuinely small addition (one new
+module, no new tables, no new external dependency) next to that. The
+task's own framing reflects this: "add context signals, then wrap
+everything" as one instruction, not two.
+
+
+2. FILE MAP
+=============================================================
+
+backend/mealsight/user_intelligence/context.py  (NEW)
+    get_context_signals, record_cooking_pattern — section 3.
+
+backend/mealsight/user_intelligence/models.py  (EXTENDED)
+    Added MealType (the four-value Literal) and ContextSignals.
+
+backend/mealsight/user_intelligence/meal_history.py  (EXTENDED)
+    log_meal now looks up cook_time_minutes from recipes.db (when
+    recipe_id is given) and calls record_cooking_pattern — section 4.
+
+backend/mealsight/mcp_servers/user_intelligence/server.py
+    The FastMCP app (mcp = FastMCP("user-intelligence")) and all six
+    @mcp.tool functions — section 7.
+
+backend/mealsight/mcp_servers/user_intelligence/serialization.py
+    Converters for UserProfile, MealRecord, list[MealRecord],
+    RepetitionCheck, ContextSignals, re-exporting the three error
+    builders from mealsight.mcp_servers.errors (phase 3.3's shared
+    module, reused unmodified a third time).
+
+backend/mealsight/mcp_servers/user_intelligence/__main__.py
+    Lifecycle — section 9. Verifies the database connection, but
+    doesn't warn about anything being empty, unlike its two siblings.
+
+backend/mealsight/mcp_servers/user_intelligence/__init__.py
+    Re-exports mcp, identical convention to the other two servers.
+
+backend/pyproject.toml
+    One new line: mealsight-user-server, alongside mealsight-recipe-
+    server (2.4) and mealsight-pantry-server (3.3).
+
+backend/tests/test_user_intelligence/test_context.py  (NEW)
+    5 unit tests for get_context_signals/record_cooking_pattern.
+
+backend/tests/test_mcp_servers/test_user_intelligence/
+    conftest.py, test_tool_schemas.py, test_tools.py, test_no_stdout.py -
+    19 tests, all against the real FastMCP in-memory client.
+
+
+3. get_context_signals: THREE INDEPENDENT SIGNALS, NONE OF THEM WEATHER
+=============================================================
+
+The task was explicit that weather is out of scope, and this phase adds
+no weather API — worth stating directly, since mealsight.config.settings
+already carries an openweather_api_key field, deliberately deferred
+(that field's own comment says so), and it would have been easy to
+mistake "context signals" for the moment that field finally gets used.
+It doesn't; every signal in this module comes from the clock and from
+cooking_patterns, nothing external.
+
+Time boundaries, made explicit
+------------------------------------------------------
+Four hour-range constants, [start, end) each, chosen to cover all 24
+hours with no gap: breakfast 5:00-10:59, lunch 11:00-14:59, dinner
+17:00-20:59, and snack for everything else — both the mid-afternoon
+lull (15:00-16:59) and the long stretch from after dinner through early
+morning (21:00-4:59). "Snack" isn't a leftover catch-all bolted on
+after the fact; it's the deliberate answer for "not one of the other
+three," which is what makes every hour of the day classify to
+something rather than leaving a boundary condition unhandled.
+
+Day-based complexity, expressed as a suggestion not a filter
+------------------------------------------------------
+Friday through Sunday (day_of_week in {4, 5, 6}, Python's own
+Monday=0...Sunday=6 convention) returns a suggestion naming room for
+something more elaborate; Monday through Thursday suggests favoring
+something quick. The task's own wording — "Express as a suggestion
+string, not a hard filter" — is honored literally: the return value is
+a plain, quotable sentence ("Friday — there's room for a more elaborate
+recipe if you want one."), never a boolean or an enum a caller might be
+tempted to branch on as if it were a rule. Nothing in this function
+ever excludes a recipe from consideration; it only informs.
+
+The behavioral note, and what "sensible on an empty table" actually
+means
+------------------------------------------------------
+Reads the one cooking_patterns row (if any) for the resolved
+day_of_week/hour_of_day cell and turns it into one plain sentence:
+"You've cooked around this time on Fridays 4 times before, averaging
+32 minutes" when there's real history, or a plain "No cooking history
+recorded for Friday around this hour yet" when there isn't — the same
+"never an empty collection or an error when there's genuinely nothing
+to report" instinct phase 3.1's get_pantry and phase 4.1's get_user_
+profile already established for their own empty-database case.
+context_notes is always a list with at least one string, specifically
+so a caller never has to special-case "nothing came back" separately
+from "here's what came back."
+
+
+4. WIRING record_cooking_pattern INTO log_meal
+=============================================================
+
+Every log_meal call now does one more thing after inserting the
+meal_history row: look up cook_time_minutes (from the just-logged
+meal's own recipe, via recipes.db, when recipe_id was given — None
+otherwise, since a manually-logged meal has no recipe to look a
+duration up from), then call record_cooking_pattern(meal.cooked_at,
+cook_time_minutes). cook_count always increments — a cooking event
+genuinely happened at this day/hour regardless of whether its duration
+is known — but average_cook_time_minutes only updates when
+cook_time_minutes actually is. This is a deliberate, honest gap: a
+manually-logged meal (or one whose recipe has no recorded cook time)
+contributes real presence data to cooking_patterns without pretending
+to contribute a duration it doesn't have.
+
+The running average itself is a plain weighted mean against cook_count,
+not a separately-tracked "how many of these had a known duration"
+counter — cooking_patterns' own schema (phase 1.3) has no such column,
+and adding one wasn't in scope for this phase. This is a real, named
+approximation (documented directly in record_cooking_pattern's own
+docstring): every prior cook_count is treated as though it had
+contributed to the existing average, which is only exactly true when
+every past cook event at that cell actually had a known duration. Good
+enough for a rough "about how long this usually takes" signal; not
+represented as more precise than that anywhere in this module.
+
+
+5. THE THIN TRANSPORT SHELL, A THIRD TIME
+=============================================================
+
+Nothing new to establish here — the discipline is identical to phase
+2.4's recipe-engine server and phase 3.3's pantry-manager server:
+validate, call the one existing function, convert its result to a dict,
+catch errors into one of three shared structured shapes, nothing else.
+What's worth noting about doing this a third time is how little
+friction it took: every one of the six tools maps to exactly one
+existing user_intelligence function, and the one place this server's
+signature diverges even slightly from its underlying function
+(update_preferences's value parameter, section 7) turned out to need no
+new design at all — Any, typed directly, is what FastMCP already
+does the right thing with (verified live, section 12), since a
+preference's real type genuinely does depend on which preference_type
+was given.
+
+The shared errors.py module (extracted in phase 3.3 specifically so a
+second server wouldn't duplicate it) got used here completely
+unmodified — the third server importing the exact same three functions
+the first two already do, with zero changes needed to that module for
+this phase at all. That's the payoff of the phase 3.3 refactor showing
+up concretely: adding a third consumer required editing nothing in the
+shared module itself.
+
+
+6. THE SIX TOOLS
+=============================================================
+
+get_user_profile()
+------------------------------------------------------
+Thin wrap, no arguments at all — the one tool in this whole project so
+far with an empty parameter schema (confirmed directly in this phase's
+own schema test). Always succeeds, even on a profile that's never been
+touched.
+
+update_preferences(preference_type, value)
+------------------------------------------------------
+value is typed directly as Any — deliberately, not a placeholder for a
+type that should have been more specific. What value has to look like
+genuinely depends on preference_type (a string-or-list-of-strings for
+the two additive fields, a positive int for two scalar fields, one of a
+few literal strings for two more, any string or null for the last) —
+there is no single concrete type that could describe all seven
+correctly, and the underlying mealsight.user_intelligence.
+update_preferences function already does the real per-field validation
+(phase 4.1). This tool's own job is exactly what the thin-shell
+discipline says it should be: catch that function's ValueError and
+turn it into a structured validation_error naming preference_type as
+the parameter — not attempt to duplicate the validation logic itself at
+the MCP boundary.
+
+log_meal(...)
+------------------------------------------------------
+The task's own two mandatory boundary statements land here and on
+check_repetition. This tool's docstring says, in capital letters, that
+it is called only AFTER cooking has actually been confirmed as having
+happened — never when a recipe is merely recommended or planned —
+mirroring pantry_manager's own remove_items boundary from phase 3.3
+almost exactly, and for the identical underlying reason: calling this
+prematurely doesn't just create one wrong row, it skews every
+downstream signal that reads meal_history (cuisine_preferences,
+check_repetition, get_context_signals' own behavioral notes) that this
+whole phase and phase 4.2 built. rating is optional here exactly as it
+is in the underlying function — there is no separate rate_meal tool on
+this server (the task's six-tool list doesn't include one), so a caller
+that wants to rate a meal later than when it was logged has no MCP path
+to do that yet; that's a real, current gap, not an oversight papered
+over in the docstring.
+
+get_meal_history(days_back, cuisine_filter, rating_filter)
+------------------------------------------------------
+Thin wrap, no argument-shape gap at all versus the underlying function
+— the one tool this phase didn't need to make any transport-level
+decision about beyond the standard try/except.
+
+check_repetition(recipe_id, check_window_days)
+------------------------------------------------------
+The task's second mandatory boundary statement: recommendation is a
+SIGNAL TO WEIGH, not a hard veto — stated explicitly, including the
+literal word "veto", so an agent reading this tool's description in
+isolation can't mistake "too_repetitive" for an instruction to refuse
+the recipe outright. Raises the underlying ValueError into a structured
+not_found_error the same way recipe_engine's get_recipe and pantry_
+manager's own lookups already do for an unknown id.
+
+get_context_signals(current_time, day_of_week)
+------------------------------------------------------
+The one tool wrapping genuinely new logic (section 3) rather than
+something already built and tested in a prior session. current_time is
+typed as datetime | None directly — confirmed live (section 12) that
+FastMCP/pydantic accepts a plain ISO 8601 string on the wire and
+coerces it automatically, the same way an earlier session confirmed
+nested pydantic models work as tool parameters without any hand-written
+schema. No error path exists for this tool at all beyond the generic
+internal_error catch-all — every input this function can receive
+(including no input) produces a valid result, by construction.
+
+
+7. ERROR HANDLING
+=============================================================
+
+Same three shared shapes as recipe_engine and pantry_manager, imported
+from the identical mealsight.mcp_servers.errors module, zero
+modification needed. Two ValueError catches this phase adds, both new
+mappings onto that shared vocabulary: update_preferences and log_meal
+both catch the underlying function's ValueError and turn it into a
+validation_error naming the specific parameter that was actually wrong
+(preference_type for the former, "rating" for the latter — hardcoded,
+since log_meal's underlying function only ever raises ValueError for
+that one field). check_repetition catches its underlying ValueError
+into not_found_error, the same convention every recipe-lookup-by-id
+function in this project has used since phase 2.1. get_user_profile,
+get_meal_history, and get_context_signals have no ValueError catch at
+all, because none of their underlying functions have a raised-on-
+purpose failure mode to catch — the same reasoning phase 4.2's own
+notes already worked through for why pantry_manager and user_
+intelligence's error-catching shapes correctly differ from recipe_
+engine's despite sharing one error vocabulary.
+
+
+8. LIFECYCLE
+=============================================================
+
+Same sync-main-wrapping-async-run shape every server in this project
+uses. The one real difference from its two siblings: recipe_engine's
+__main__.py warns if recipes is empty (a seeded reference dataset,
+genuinely useless when missing); pantry_manager's warns if shelf_life_
+reference is empty (also seeded reference data). user_intelligence has
+no seeded reference dataset anywhere in its four tables at all —
+user_profile, meal_history, preference_scores, and cooking_patterns are
+all meant to start completely empty and grow from real use, the same
+position pantry.db's own pantry table was already in before phase 3.1
+(and cooking_patterns itself was in, within this very database, until
+this phase). So _verify_database_reachable does exactly what its name
+says and nothing more: opens the real connection now, at startup, logs
+how many meal_history rows currently exist purely as a confirmation the
+connection actually works — no warning branch exists here at all,
+because there's genuinely nothing to warn about on a server whose whole
+job is to start empty and learn.
+
+
+9. HOW THIS CONNECTS TO THE REST
+=============================================================
+
+Three MCP servers now exist — recipe-engine (2.4), pantry-manager
+(3.3), user-intelligence (this phase) — sharing one error vocabulary
+and one thin-transport-shell discipline, ready for an agent (still not
+built) to discover and call across all three in one conversation: get_
+user_profile and get_context_signals to know who it's serving and when,
+search_recipes/match_ingredients (recipe-engine) filtered by that
+profile's dietary_restrictions/disliked_ingredients and ranked by its
+cuisine_preferences, check_repetition to avoid suggesting something too
+recent, get_pantry/flag_expiring (pantry-manager) to ground a
+suggestion in what's actually on hand, and — once cooking is genuinely
+confirmed, never before — remove_items (pantry-manager) and log_meal
+(this server) both firing, the exact "cooking a recipe is naturally
+both 'take these ingredients out of the pantry' and 'add this to the
+meal history'" pairing phase 4.2's own notes already anticipated.
+Nothing about any of the three servers' underlying business-logic
+modules changed to make this phase possible — this session's only new
+business logic (section 3-4) is small and additive, on top of a
+package (phase 4.1/4.2) that was already fully built and tested before
+this round ever started.
+
+
+10. THE TESTS
+=============================================================
+
+test_context.py (5 tests)
+------------------------------------------------------
+Meal-type boundaries checked at every actual transition hour (5, 10,
+11, 14, 15, 16, 17, 20, 21, 4) rather than just one representative hour
+per bucket — the same "check the actual edges, not just an interior
+point" discipline this project applied to phase 3's freshness/expiry
+thresholds. Weekday-versus-weekend complexity suggestion checked
+directly against real Monday/Friday/Saturday dates. Empty-
+cooking_patterns behavior confirmed to produce exactly one sensible
+note, not zero notes and not an error. cooking_patterns actually
+getting populated (and its cook_count actually incrementing) verified
+by calling the real log_meal, not by calling record_cooking_pattern
+directly — proving the wiring (section 4), not just the function in
+isolation.
+
+conftest.py's central problem, and how it's solved (MCP tests)
+------------------------------------------------------
+Same shape as phase 3.3's own pantry_manager test conftest: server.py's
+tools call mealsight.db.get_user_db() directly, so _fresh_user_db
+monkeypatches settings.user_intelligence_db_path (and, since log_meal/
+check_repetition genuinely read recipes.db, settings.recipes_db_path
+too) and re-initializes both schemas per test.
+
+test_tool_schemas.py (4 tests): all six tools listed with real
+descriptions; every tool's inputSchema property names matching exactly,
+including get_user_profile's genuinely empty parameter set; log_meal's
+and check_repetition's descriptions mechanically checked for the task's
+two required boundary statements actually being present in the text an
+agent would read, not just intended by this author.
+
+test_tools.py (9 tests): one happy path per tool; update_preferences's
+unknown-field and out-of-range-value cases both returning a structured
+validation_error naming the actual offending parameter; log_meal's
+out-of-range rating doing the same; check_repetition's unknown-recipe
+case returning a structured not_found result.
+
+test_no_stdout.py (1 test): a mix of six happy-path and three
+validation/not-found-path calls across all six tools in one test,
+capsys confirming stdout stayed empty throughout.
+
+
+11. VERIFICATION
+=============================================================
+
+ruff/mypy --strict/full pytest all clean (335 tests total, no
+regressions in anything phase 1 through 4.2 already built). A real
+subprocess session — the server spawned as a genuinely separate process
+via FastMCP's StdioTransport, not the in-memory test client — drove
+list_tools, get_user_profile, update_preferences, log_meal (with a
+rating, against a real seeded recipe), get_context_signals, and check_
+repetition in sequence against a fresh temp user_intelligence.db/
+recipes.db pair, printing every request and response; check_repetition
+correctly returned too_repetitive (score 1.0) on the very next call
+after logging that exact recipe today, proving the whole meal_history
+-> check_repetition read path works end-to-end through a real MCP
+session, not just in an in-memory test. A raw-byte stdout check — hand-
+rolling the JSON-RPC initialize/tools-list handshake directly over the
+subprocess's own pipes, bypassing any MCP client library's parsing —
+confirmed zero non-protocol bytes ever reached stdout, with the new
+startup log line (user_intelligence_db_verified) landing on stderr
+only.
+
+A small, live confirmation before writing server.py at all
+------------------------------------------------------
+Before committing to typing update_preferences's value parameter as
+Any, this phase ran a short, throwaway FastMCP test (the same kind of
+live check an earlier session ran to confirm nested pydantic models
+work as tool parameters) — a one-tool app with a bare Any-typed
+argument, called through a real client with a list, then with an int.
+FastMCP produced a permissive {} JSON-schema property (accepting any
+JSON value) and correctly passed both a list and an int straight
+through to the tool function unchanged. That confirmed Any was a real,
+supported answer to "this parameter's type genuinely depends on another
+parameter's value," not an untested guess.
+
+
+12. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+update_preferences's value typed as Any versus a union of every
+possible preference value type
+    A union (str | list[str] | int | CookingSkill | BudgetSensitivity |
+    None) would give FastMCP more to validate at the schema level, at
+    the cost of accepting an internally inconsistent combination (e.g.
+    a CookingSkill-shaped string paired with preference_type=
+    "household_size") that the underlying function would still have to
+    reject anyway — the schema can't express "value's real type depends
+    on preference_type's own value." Any, verified live (section 11) to
+    work correctly with FastMCP/pydantic, defers 100% of that real
+    validation to the one place that already does it correctly
+    (mealsight.user_intelligence.update_preferences, phase 4.1) rather
+    than half-doing it at the transport layer and half in the
+    underlying function.
+
+No dedicated rate_meal tool on this server, despite the underlying
+function existing
+    The task's six-tool list doesn't include one, and this phase
+    followed that list precisely rather than adding a seventh tool on
+    its own judgment — the same discipline phase 2.4 and 3.3 both
+    followed for their own given tool lists. This is a real, named
+    limitation (section 6's log_meal notes it directly): an agent
+    talking to only this server has no way to rate a meal after the
+    fact, only at the moment it's logged.
+
+Leaving cook_time_minutes contribution optional per meal rather than
+requiring it as a log_meal argument
+    Covered in section 4. Requiring a cook_time_minutes argument on
+    log_meal (or on the MCP tool) would guarantee every cooking_patterns
+    cell has a real, exact average — at the cost of forcing every
+    caller to supply a duration even for a manually-logged meal with no
+    recipe behind it, or to invent one. Deriving it opportunistically
+    from the recipe's own cook_time_minutes when available, and simply
+    not touching the average when it isn't, keeps log_meal's own
+    argument list exactly what the task specified while still letting
+    cooking_patterns fill in over time from the common case (a real
+    recipe_id) without ever fabricating a number nothing actually
+    measured.
+
+_verify_database_reachable logging a plain confirmation versus a
+recipes/shelf_life-style "empty and that's bad" warning
+    Covered in section 9. The other two servers' startup warnings exist
+    because an empty recipes table or an empty shelf_life_reference
+    table represents a genuinely broken deployment (a seed step that
+    should have run and didn't). None of user_intelligence.db's four
+    tables have an equivalent seed step at all — they're all meant to
+    start at zero and grow from real use — so writing a warning here
+    would either always fire on a brand-new install (false alarm) or
+    require inventing some other threshold for "how empty is too
+    empty," a threshold nothing about this phase's actual requirements
+    called for.
+
+
+13. GLOSSARY
+=============================================================
+
+(Every term phase 2.4's and 3.3's own glossaries already defined — MCP,
+FastMCP, in-memory client, JSON-RPC, stdio transport, thin transport
+shell, tool, shared errors module, transport-only type — applies
+identically here and isn't repeated. New terms below.)
+
+context signal
+    One of the three independent pieces of situational information
+    get_context_signals returns (meal_type, complexity_suggestion,
+    context_notes) — each derived purely from the clock and/or
+    cooking_patterns, deliberately never from any external data source
+    like weather.
+
+cooking_patterns cell
+    One (day_of_week, hour_of_day) row in the cooking_patterns table —
+    the unit both get_context_signals reads from and record_cooking_
+    pattern writes to, tracking how many times a meal was logged in
+    that cell and (when known) the average cook time among those
+    events.
+
+suggestion (versus filter)
+    A plain-language recommendation returned as ordinary text
+    (complexity_suggestion is the concrete example) that a caller is
+    free to override, as opposed to a hard constraint the underlying
+    logic itself enforces — the explicit distinction the task required
+    for day-based complexity, and the same distinction check_
+    repetition's recommendation field carries for a completely
+    different signal.
+
+
+14. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: get_context_signals has to return something sensible even on a
+completely empty cooking_patterns table. Walk me through how you made
+sure that's actually true, not just assumed.
+
+    The query itself (a single SELECT for one specific day_of_week/
+    hour_of_day cell) naturally returns nothing on an empty table —
+    fetch_one gives back None, not an error — so the real risk wasn't a
+    crash, it was returning something unhelpful, like an empty
+    context_notes list a caller would have to special-case. I made the
+    behavioral-note function always produce exactly one string either
+    way: a real observation when a matching row exists, or an explicit
+    "no cooking history recorded for this day around this hour yet"
+    when it doesn't — so context_notes is always non-empty and always
+    directly usable as-is. I have a test that builds a genuinely fresh
+    database, calls get_context_signals with no setup at all, and
+    asserts there's exactly one note and that it reads as a real "no
+    history" statement, not just that the call doesn't raise.
+
+Q: Why is update_preferences's value parameter typed as Any instead of
+something more specific — doesn't that give up on real input
+validation at the MCP layer?
+
+    It gives up on validation at the MCP layer on purpose, because
+    there's no single concrete type that's actually correct here —
+    what value has to look like depends entirely on which preference_
+    type was given, and pydantic's schema system has no way to express
+    "this field's shape depends on that other field's value." A union
+    of every possible value type would look more specific in the schema
+    but wouldn't actually catch the real mistakes (pairing a household_
+    size-shaped int with preference_type="cooking_skill" would still
+    pass a union check). The real validation already exists, correctly,
+    in mealsight.user_intelligence.update_preferences from phase 4.1 —
+    per-field range and enum checks with real error messages — so this
+    tool's job is just to catch that function's ValueError and surface
+    it as a structured error, not to duplicate logic that already
+    lives in exactly the right place. I confirmed Any actually works
+    the way I expected with FastMCP first, with a small throwaway test,
+    before committing to it as the real design.
+
+Q: Your two boundary-statement requirements — log_meal only after
+cooking is confirmed, check_repetition as a signal not a veto — both
+ended up as docstring text. How do you know an agent will actually
+respect that, versus just hoping it reads carefully?
+
+    I don't have a way to enforce either one programmatically — nothing
+    stops a caller from calling log_meal for a recipe it only
+    recommended, the same way nothing stops a pantry_manager caller
+    from calling remove_items before cooking actually happened back in
+    phase 3.3. What I can control is making the statement impossible to
+    miss: both docstrings say it in capital letters, as the first thing
+    after the one-line summary, not buried after several paragraphs of
+    detail — and I have tests that mechanically check the actual words
+    ("after", "confirmed", "never" for log_meal; the literal word
+    "veto" for check_repetition) are present in what an MCP client
+    actually receives as the tool's description, not just present in
+    my own intention when I wrote it. That's the honest limit of what a
+    docstring-only contract can guarantee — real enforcement would need
+    something like a required "confirmed: true" argument, which wasn't
+    part of what this phase's task actually specified.
+
+Q: Three MCP servers exist now, all sharing one errors module. What did
+adding the third one actually cost, versus the first two?
+
+    Almost nothing to the shared module itself — mealsight.mcp_servers.
+    errors.py, extracted back in phase 3.3 specifically so a second
+    server wouldn't need its own copy, needed zero changes for this
+    third server to use it. I imported the same three functions the
+    other two servers already import, and every one of this server's
+    six tools follows the identical validate-call-serialize-catch shape
+    those two established. The only genuinely new decision this phase
+    had to make on the transport side was update_preferences's Any
+    typing — everything else was applying an already-proven pattern
+    to a new set of underlying functions, which is exactly the payoff
+    that refactor was for: the cost of a third server turned out to be
+    almost entirely about the new business logic (context.py) it also
+    happened to need, not about the MCP wrapping itself.

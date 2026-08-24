@@ -8,7 +8,7 @@ import pytest
 from mealsight.db.connection import Database
 from mealsight.user_intelligence.preferences import remove_preference, update_preferences
 
-_SYNONYMS = {"green onion": "scallion"}
+_SYNONYMS = {"scallion": "green onion"}
 
 
 async def test_dietary_restrictions_append_and_deduplicate(user_db: Database) -> None:
@@ -40,7 +40,7 @@ async def test_canonically_equivalent_dislikes_collapse_to_one_entry(user_db: Da
         "disliked_ingredients", "green onion", user_db=user_db, synonym_map=_SYNONYMS
     )
 
-    assert profile.disliked_ingredients == ["scallion"]
+    assert profile.disliked_ingredients == ["green onion"]
 
 
 async def test_scalar_fields_replace_rather_than_accumulate(user_db: Database) -> None:

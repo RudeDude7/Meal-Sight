@@ -1,10 +1,14 @@
 """Typed shapes for the user-intelligence profile: the pydantic schema
 layered over user_profile's key/value rows, and the literal types
-update_preferences validates against.
+update_preferences validates against. Also the meal-history and
+repetition-check shapes log_meal/rate_meal/get_meal_history/
+check_repetition return.
 """
 
 from __future__ import annotations
 
+from datetime import date as date_
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -46,3 +50,43 @@ class UserProfile(BaseModel):
     cooking_skill: CookingSkill
     budget_sensitivity: BudgetSensitivity
     cuisine_preferences: dict[str, float]
+
+
+class MealRecord(BaseModel):
+    """One meal_history row: what was cooked, when, and how it was
+    rated. rating is None for a meal logged but not yet rated —
+    rate_meal is the separate call that fills it in later."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: int
+    recipe_id: str | None
+    recipe_name: str
+    cuisine: str | None
+    meal_type: str | None
+    date: date_
+    rating: int | None
+    servings_made: int | None
+    ingredients_used: list[str] | None
+    notes: str | None
+    cooked_at: datetime
+
+
+RepetitionRecommendation = Literal["acceptable", "suggest_alternative", "too_repetitive"]
+
+
+class RepetitionCheck(BaseModel):
+    """What check_repetition returns for one candidate recipe:
+    repetition_score climbs with how strong the repetition signal is
+    (0.0 none, 1.0 an exact repeat within the window), reason is a
+    human-readable explanation of whichever signal actually fired, and
+    last_cooked is the most recent date this exact recipe was ever
+    logged — independent of the check window, None if it's never been
+    cooked at all."""
+
+    model_config = ConfigDict(frozen=True)
+
+    repetition_score: float
+    reason: str
+    recommendation: RepetitionRecommendation
+    last_cooked: date_ | None

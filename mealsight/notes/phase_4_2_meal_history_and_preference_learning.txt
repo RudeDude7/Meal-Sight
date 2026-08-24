@@ -1,0 +1,541 @@
+PHASE 4.2 STUDY NOTES: MEAL HISTORY AND PREFERENCE LEARNING
+=============================================================
+
+These notes cover the second round of phase 4: turning what actually
+gets cooked and rated into a signal MealSight can act on — cuisine and
+protein preference scores, and a repetition check that can tell an
+agent "you just made this" before it ever gets the chance to recommend
+it again. Everything below describes code that really exists right now,
+in backend/mealsight/user_intelligence/ and backend/tests/
+test_user_intelligence/. Still no MCP wrapper — same deliberate
+sequencing phase 4.1 (and phase 3.1 before it) followed.
+
+
+1. A QUICK CHECK FIRST: DID resolve_canonical ACTUALLY DISAGREE WITH
+   ITSELF ACROSS PACKAGES?
+=============================================================
+
+Before writing anything new this round, this session's task opened
+with a specific correctness check on phase 4.1's own work: phase 4.1's
+disliked-ingredients demo stored "green onion" canonicalizing down to
+"scallion" — the reverse of every other place in this project that
+touches the same synonym table.
+
+The finding: mealsight.user_intelligence.preferences does not
+reimplement resolve_canonical or load_synonym_map — it imports the
+exact same two functions mealsight.pantry.update already uses, calling
+them in the identical order, defaulting to the identical real table
+(recipes.db's ingredient_synonyms) when no synonym_map is supplied. There
+is no code path anywhere that could make user_intelligence and pantry
+disagree about what "scallion" canonicalizes to, because there is only
+one resolve_canonical, used unmodified by both. Checking the real seed
+data (backend/mealsight/seed/data/ingredient_synonyms.json) confirmed
+the actual direction: every entry is {"canonical_name": "green onion",
+"synonym": "scallion"/"scallions"/"spring onion"} — "scallion" is the
+synonym, "green onion" is canonical, exactly matching mealsight.pantry's
+own test fixture ({"scallion": "green onion"} in tests/test_pantry/
+test_update.py).
+
+The actual bug was narrower than "resolve_canonical disagrees with
+itself": phase 4.1's own test fixture in tests/test_user_intelligence/
+test_preferences.py had the direction backwards ({"green onion":
+"scallion"}), producing a demo/test result that looked plausible but
+was the reverse of what the real synonym table would ever actually
+produce. Fixed by flipping that one hand-built dict to match the real
+table's direction (and mealsight.pantry's own precedent for it) and
+updating the two assertions that depended on it — no production code
+changed at all, since none of it was actually wrong. This is worth
+recording as its own small case study: the instinct to suspect the
+shared function first, and confirm by reading the real seed data rather
+than assuming either side's test fixture was the ground truth, is what
+actually found the narrower, real answer.
+
+
+2. WHAT THIS PHASE BUILT AND WHY IT COMES NOW
+=============================================================
+
+Phase 4.1 built get_user_profile/update_preferences/remove_preference —
+what a user explicitly says about themselves. This phase builds the
+other half user_intelligence.db's schema was always meant to hold:
+meal_history (what actually got cooked and how it was rated) and
+preference_scores (what that history implies, computed rather than
+stated). The two are deliberately different kinds of signal — phase 4.1
+is "I said I'm vegan"; this phase is "I've rated five Thai dinners 5
+stars and one Mexican dinner 5 stars, but the Thai preference is the
+one worth trusting more, because there are five of them, not one."
+
+This phase comes after 4.1, not before, for a smaller reason than
+phase 4.1 came after phase 3: check_repetition needs meal_history to
+already be a real, queryable table with real rows in it, and recompute_
+preference_scores needs a real recipe lookup pattern to already exist —
+both of which this phase is the first to actually need, but neither of
+which required phase 4.1 specifically to exist first. The real
+dependency is on phase 2's recipes.db schema (for cuisine/ingredients)
+and phase 3.1/4.1's established "load a reference table into memory,
+never join across databases" pattern, reused a third and fourth time.
+
+
+3. FILE MAP
+=============================================================
+
+backend/mealsight/user_intelligence/models.py  (EXTENDED)
+    Added MealRecord (one meal_history row, typed) and RepetitionCheck/
+    RepetitionRecommendation (check_repetition's return shape).
+
+backend/mealsight/user_intelligence/scoring.py
+    recompute_preference_scores, derive_protein,
+    load_recipe_ingredient_names, PREFERENCE_SMOOTHING_PRIOR_WEIGHT —
+    sections 4-5.
+
+backend/mealsight/user_intelligence/meal_history.py
+    log_meal, rate_meal, get_meal_history — section 6-7.
+
+backend/mealsight/user_intelligence/repetition.py
+    check_repetition — section 8.
+
+backend/mealsight/user_intelligence/_datetime_utils.py  (NEW)
+    parse_sqlite_timestamp — a small, deliberate duplicate of
+    mealsight.pantry._datetime_utils' identically-named function, not an
+    import of it, following the exact same "duplicate a tiny private
+    helper rather than import across a package boundary" precedent
+    mealsight.pantry.category already set for a different helper.
+
+backend/mealsight/user_intelligence/__init__.py  (EXTENDED)
+    Re-exports everything from all five modules now.
+
+backend/tests/test_user_intelligence/conftest.py  (EXTENDED)
+    Added a second fresh Database fixture (recipe_db) and insert_recipe,
+    since this phase's functions — unlike phase 4.1's — genuinely need a
+    real recipes.db, not just a hand-built synonym dict.
+
+backend/tests/test_user_intelligence/test_meal_history.py,
+test_scoring.py, test_repetition.py
+    26 new tests (44 total in the package now).
+
+
+4. PREFERENCE SCORE RECOMPUTATION: FULL, NOT INCREMENTAL, AND WHY
+=============================================================
+
+Every rating write — rate_meal, or log_meal when rating is supplied
+directly — triggers recompute_preference_scores, which throws away
+preference_scores entirely for the dimension it's touching and rebuilds
+every row from every currently-rated meal in meal_history, in one pass.
+
+The alternative — adjust a running mean by one new data point — was
+rejected specifically because rate_meal isn't purely additive: it can
+re-rate an already-rated meal, which means an incremental update would
+need to correctly subtract the old (already-shrunk-toward-neutral)
+contribution before adding the new one back in, and getting that
+subtraction right for a value that's already gone through section 4's
+own smoothing is exactly the kind of arithmetic that looks right for
+every case actually tested and wrong for the first one that wasn't. A
+full recompute can't drift from what meal_history actually contains, by
+construction, at a cost — one query over the whole rated history, plus
+one batch recipe-ingredients query — this table will never be large
+enough (one household's own cooking history) to make expensive.
+
+The smoothing constant
+------------------------------------------------------
+PREFERENCE_SMOOTHING_PRIOR_WEIGHT = 3.0, used as: shrunk_score =
+(raw_mean * n + PRIOR_WEIGHT * 0.5) / (n + PRIOR_WEIGHT) — a standard
+Bayesian-shrinkage shape, treating the constant as PRIOR_WEIGHT
+"assumed neutral" pseudo-ratings blended in with whatever real ratings
+actually exist. A single 5-star rating (raw normalized score 1.0, n=1)
+shrinks to (1.0×1 + 3×0.5) / 4 = 0.625 — visibly positive, but nowhere
+near "confirmed strong preference." Ten 5-star ratings at the identical
+raw mean shrink only to (1.0×10 + 3×0.5) / 13 ≈ 0.885 — the prior's
+influence fades toward irrelevance as real evidence accumulates, which
+is exactly the "confidence" property the task asked for: a cuisine
+with one rating lands visibly closer to 0.5 than one with ten ratings
+at the same mean. 3 isn't derived from any dataset — it's a judgment
+call for "roughly three ratings' worth of default skepticism," small
+enough that a handful of real ratings quickly dominates it, large
+enough that one single rating never looks like a settled preference.
+Verified directly against real numbers in this phase's own end-to-end
+run (section 10): 5 thai ratings (mean 0.95) landed at 0.781, 2 italian
+ratings (mean 0.875) at 0.65, 1 mexican rating (mean 1.0, a perfect
+score) at only 0.625 — the single perfect rating shrinking to below
+both of the lower-mean, higher-confidence cuisines.
+
+Unrated meals never contribute at all — the recompute's own query is
+`WHERE rating IS NOT NULL`, so a meal logged but never rated (the
+entire point of rating being optional on log_meal, section 6) simply
+doesn't exist as far as scoring is concerned, rather than being counted
+as some default neutral rating that would quietly dilute every real
+signal.
+
+
+5. DERIVING PROTEIN, AND REUSING recipe_parsing.PROTEIN_TERMS A SECOND
+   TIME
+=============================================================
+
+cuisine scoring needs nothing beyond meal_history.cuisine itself — it's
+denormalized onto every row at log_meal time, so no recipes.db read is
+needed for that dimension at all. protein scoring is different: nothing
+in meal_history says "this meal's protein was chicken," so it has to be
+derived, per rated meal, from that meal's recipe's actual ingredients —
+which live in recipes.db, a different physical database file.
+
+derive_protein(ingredient_names) is the one small piece of real logic
+this phase adds: run each ingredient name through normalize_ingredient
+(phase 2.1's normalizer, reused a third time now — matching, then
+phase 3.1's pantry, then phase 4.1's disliked_ingredients, now this),
+then check each against PROTEIN_TERMS (mealsight.seed.recipe_parsing,
+phase 1.4/2.2's own hand-curated list, used unmodified — the task's
+explicit instruction) with the identical whole-word discipline phase
+2.2 already had to add there after finding "egg" matching inside
+"reggiano" as a raw substring. Running every ingredient through
+normalize_ingredient first is not something the task explicitly asked
+for, but it's what actually makes PROTEIN_TERMS's own "egg" and "eggs"
+both present as separate entries harmless in practice: normalize_
+ingredient singularizes plurals, so a real ingredient name normalizes
+down to "egg" before the check ever runs, and "eggs" as a literal
+PROTEIN_TERMS entry simply never has anything left to match against —
+one ingredient's two textual forms converge to one scoring bucket
+instead of splitting a real preference signal across "egg" and "eggs"
+as if they were different things.
+
+load_recipe_ingredient_names(recipe_db, recipe_ids) is the batch
+version of the exact same cross-database pattern phase 3.1 established
+for the synonym table and phase 4.1 reused for it again: collect every
+distinct recipe_id a recompute actually needs, one IN (...) query
+against recipes.db, build a plain {recipe_id: [ingredient names]} dict,
+then use that dict entirely in Python from that point on. Never a SQL
+join — recipes.db and user_intelligence.db are separate physical files,
+the same structural fact phase 1.3 established and every phase since
+has respected.
+
+A rated meal with no recipe_id at all (a manually-logged meal, "made
+something with what was in the fridge") — or one whose ingredients
+genuinely don't contain any PROTEIN_TERMS word — simply doesn't
+contribute to the protein dimension. This is the "where identifiable"
+the task's own wording specified: not every meal has an identifiable
+protein, and being silent about those meals for this one dimension is
+correct, not a gap to work around.
+
+
+6. log_meal AND rate_meal
+=============================================================
+
+log_meal takes every meal_history column as an explicit argument,
+writes one row, and — this is the one subtlety — recomputes preference
+scores immediately if rating was supplied directly to it, exactly as if
+rate_meal had been called right afterward. This matters because a meal
+can genuinely be rated at the moment it's logged (cooked and reviewed
+same-day) or much later (cooked tonight, rated after actually eating
+it, or never rated at all) — the task's own wording ("rating is
+optional — a meal can be logged when cooked and rated later") is
+explicit that both paths are real, so both paths trigger the identical
+recomputation rather than only one of them keeping scores fresh.
+
+rate_meal is the separate, standalone call for the "rated later" path —
+and also doubles as the way to change or clear an already-set rating
+(passing rating=None clears it, and — because scoring only ever counts
+WHERE rating IS NOT NULL — that meal simply drops out of whatever
+dimension it was contributing to on the very next recompute, with no
+special "un-rate" code path needed). Both functions share one
+_validate_rating helper: None is always fine, anything else must be a
+real int from 1 to 5 — isinstance(value, bool) is checked and excluded
+explicitly, since Python's bool is a subclass of int and True/False
+would otherwise silently pass an integer range check.
+
+
+7. get_meal_history
+=============================================================
+
+A plain, filtered read: days_back (default 14) bounds the query to
+`date >= date('now', '-N days')`, cuisine_filter and rating_filter are
+both optional exact-match filters, and results come back most-recent-
+first (date descending, then cooked_at descending as a tiebreak for two
+meals logged the same day). An empty result on a database with nothing
+logged at all is a plain empty list, not an error — the same "empty
+collection over exception, since there's nothing actually wrong here"
+choice phase 3.1's get_pantry and phase 4.1's get_user_profile both
+already made for their own equivalent case.
+
+
+8. check_repetition: THREE LEVELS, CHECKED IN ORDER
+=============================================================
+
+check_repetition(recipe_id, check_window_days) reads the candidate
+recipe's cuisine and ingredients from recipes.db (raising ValueError,
+naming the id, if it doesn't exist — the same not-found convention
+every recipe-lookup function in this project has used since phase 2.1),
+then checks three signals in order, the first one that fires deciding
+the whole result:
+
+    Level 1 — exact repeat. Any meal_history row for this exact
+    recipe_id within the window. Strongest possible signal:
+    repetition_score 1.0, recommendation "too_repetitive". Because
+    last_cooked (the most recent date this recipe was EVER logged,
+    computed once up front, independent of the window) can only be at
+    least as recent as any window occurrence, checking "does a window
+    row exist for this id" and then reporting last_cooked's own value
+    for "how many days ago" needs no separate window-bounded date
+    computation — they're guaranteed consistent by construction.
+
+    Level 2 — protein repetition. Only checked if the candidate recipe
+    has an identifiable protein (section 5) at all. Counts how many
+    OTHER meals (window_rows can no longer contain the candidate
+    recipe itself, since level 1 already returned if it did) in the
+    window share that same derived protein — checking each window
+    meal's own protein the same way, falling back to its own logged
+    ingredients_used when it has no recipe_id to look ingredients up
+    for. Fires when that count exceeds settings.max_same_protein_per_
+    week (strictly more than, not at least — the task's own wording):
+    repetition_score 0.7, recommendation "suggest_alternative".
+
+    Level 3 — cuisine dominance. Only checked if the candidate has a
+    known cuisine. Requires at least two window meals with a known
+    cuisine at all (_MIN_WINDOW_MEALS_FOR_CUISINE_CHECK — a single
+    cuisine-known meal in the window would otherwise always look like
+    "100% of the window," which isn't a meaningful signal), then fires
+    if the candidate's cuisine accounts for at least half
+    (_CUISINE_DOMINANCE_THRESHOLD) of them: repetition_score 0.5,
+    recommendation "suggest_alternative".
+
+Nothing firing at all — including a recipe that's never been cooked —
+returns repetition_score 0.0, recommendation "acceptable", and
+last_cooked None whenever there's truly no logged history for that
+recipe_id at all. An empty meal_history table overall behaves
+identically: every query in this function is empty-table-safe (a
+fetch_one that finds nothing returns None, a fetch_all that finds
+nothing returns an empty list), so a check against a recipe with zero
+history anywhere simply falls through all three levels to "acceptable"
+rather than erroring.
+
+
+9. HOW THIS CONNECTS TO THE REST
+=============================================================
+
+get_user_profile (phase 4.1) and get_meal_history/check_repetition
+(this phase) together are what an agent (still not built) would call
+before ever recommending a specific recipe: dietary_restrictions and
+disliked_ingredients rule things out outright, cuisine_preferences and
+protein preference_scores (this phase's own output, read back through
+get_user_profile's existing cuisine_preferences field — nothing in
+phase 4.1 had to change for that to work, since it was always designed
+to read preference_scores live) rank what's left, and check_repetition
+catches "but you just had this" before it ever gets suggested. log_meal
+is the obvious pairing with phase 3.1's remove_items — cooking a recipe
+is naturally both "take these ingredients out of the pantry" and "add
+this to the meal history," though nothing in this phase calls into
+mealsight.pantry directly, the same cross-database-flow-is-the-agent's-
+job principle every prior phase has kept.
+
+
+10. VERIFICATION: WHAT THE SMOOTHING ACTUALLY PRODUCES ON REAL NUMBERS
+=============================================================
+
+Beyond ruff/mypy --strict/pytest (all clean, 315 tests total), this
+phase's own verification seeded 8 real meals across 3 cuisines
+(5 thai, 2 italian, 1 mexican, all rated 4 or 5 stars) and printed every
+resulting preference_scores row directly, specifically so the smoothing
+constant's actual behavior could be judged on real output rather than
+just trusted from the formula: thai (5 ratings, mean 0.95) → 0.781;
+italian (2 ratings, mean 0.875) → 0.65; mexican (1 rating, mean 1.0 — a
+literal perfect score) → 0.625, ending up BELOW both lower-mean,
+higher-confidence cuisines. That last number is the whole point of
+section 4's smoothing made concrete: a single perfect rating is real
+positive signal, but it is deliberately not allowed to outrank a
+slightly-less-perfect mean backed by real repeated evidence.
+
+check_repetition was verified against a recipe cooked 2 days ago
+(repetition_score 1.0, "too_repetitive", last_cooked correctly reported
+2 days back) and a recipe with zero meal_history rows at all
+(repetition_score 0.0, "acceptable", last_cooked null) — both printed
+directly as the RepetitionCheck's own JSON, not just asserted in a test.
+
+
+11. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+Full recompute versus incremental score updates
+    Covered in section 4. An incremental update is a real possibility
+    that was specifically rejected because rate_meal supports re-rating
+    (and clearing) an already-rated meal, and correctly un-doing a
+    prior shrunk contribution before re-adding a new one is a strictly
+    harder, more error-prone piece of arithmetic than "read everything,
+    recompute everything" — for a table that will never be large enough
+    for the performance difference to matter in practice.
+
+PREFERENCE_SMOOTHING_PRIOR_WEIGHT = 3.0 versus a different constant, or
+none at all
+    No smoothing at all was rejected outright — the task's own
+    requirement ("a cuisine with one 5-star rating is not a strong
+    preference") is specifically the thing raw, unsmoothed means can't
+    express: a single 5-star rating and ten 5-star ratings would produce
+    an identical score of 1.0 with no averaging at all. A much larger
+    prior weight (say, 10) was considered and rejected as making even a
+    moderate amount of real evidence (5-6 ratings) still look mostly
+    like a guess; 3 was chosen as light enough that section 4's own
+    worked example (5 ratings clearly outranking 2, which outranks 1,
+    even though the 1-rating case has the highest raw mean of the
+    three) demonstrates real, visible differentiation on a realistic
+    amount of data, not just in the limit of many more ratings than a
+    single household will ever generate.
+
+Normalizing every ingredient name through normalize_ingredient before
+matching PROTEIN_TERMS, versus matching the raw ingredient text directly
+    Covered in section 5. The task only explicitly asked to reuse
+    PROTEIN_TERMS, not to run ingredients through the normalizer first —
+    but PROTEIN_TERMS itself contains both "egg" and "eggs" as separate
+    entries, and matching raw text would let a recipe's "2 eggs, beaten"
+    match on the literal word "eggs" while a differently-worded recipe's
+    "1 egg" matches on "egg" — two protein preference buckets for one
+    real ingredient, silently splitting what should be one signal.
+    Normalizing first means both forms converge to "egg" before the
+    check runs, so PROTEIN_TERMS's "eggs" entry becomes a no-op in
+    practice — a small addition beyond the letter of the task, made
+    because the alternative would have been a real, if subtle, scoring
+    bug.
+
+Protein repetition threshold as "strictly more than
+max_same_protein_per_week" versus "at least"
+    Chosen to match the task's own wording exactly ("more than...
+    times"), meaning a protein appearing exactly max_same_protein_per_
+    week times (3, by default) does NOT yet trigger the suggestion —
+    the fourth occurrence is what tips it over. Tested directly: one
+    test seeds exactly max_same_protein_per_week other chicken meals
+    and confirms the check does NOT fire; a second seeds one more than
+    that and confirms it does.
+
+Cuisine dominance as a 50%-of-window-with-known-cuisine share versus a
+raw count threshold
+    A raw count (e.g. "3 or more meals of the same cuisine") was
+    considered and rejected because it doesn't scale with how much
+    history actually exists in the window — 3 Italian meals out of 4
+    total is a real dominant pattern, 3 out of 20 isn't. A share-based
+    threshold (at least half) scales correctly regardless of how many
+    meals happen to be logged, with an explicit minimum-count guard
+    (_MIN_WINDOW_MEALS_FOR_CUISINE_CHECK = 2) so a single logged meal —
+    which is always "100% of the window" under a share metric — can
+    never trigger this level on its own.
+
+A second, small _datetime_utils.py duplicating pantry's identically-
+named helper, versus importing across the package boundary
+    Covered briefly in the file map. The alternative — `from
+    mealsight.pantry._datetime_utils import parse_sqlite_timestamp` —
+    would avoid a three-line duplicate, at the cost of user_intelligence
+    depending on a leading-underscore (explicitly private) name from a
+    sibling package it has no other relationship to. mealsight.pantry.
+    category already faced this identical choice for a different
+    private helper (mealsight.seed.recipe_parsing's own whole-word
+    matcher) and chose duplication over the cross-package private
+    import; this phase followed that same established precedent rather
+    than introducing a second, different answer to an already-decided
+    question.
+
+
+12. GLOSSARY
+=============================================================
+
+data_points
+    The real number of ratings that went into one preference_scores
+    row's score — never inflated by PREFERENCE_SMOOTHING_PRIOR_WEIGHT's
+    pseudo-observations, which exist only inside the score computation
+    itself, not as a stored count.
+
+full recompute
+    Rebuilding every preference_scores row for a dimension from scratch,
+    from every currently-rated meal in meal_history, rather than
+    adjusting existing rows incrementally — see section 4/11 for why
+    this phase chose it.
+
+repetition level
+    One of the three ordered checks check_repetition runs (exact
+    repeat, protein repetition, cuisine dominance) — the first one that
+    fires determines the entire result; later levels are never even
+    checked once an earlier one has already returned.
+
+smoothing / shrinkage
+    Pulling a computed score toward a neutral midpoint (0.5) in
+    proportion to how little real evidence backs it — see section 4's
+    PREFERENCE_SMOOTHING_PRIOR_WEIGHT for this project's specific
+    formula and constant.
+
+
+13. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: The task asked you to verify something before writing any new code —
+that resolve_canonical produces the same result whether it's called
+from user_intelligence or from matching. How did you actually confirm
+that, rather than just eyeballing the code?
+
+    I started from the fact that user_intelligence.preferences doesn't
+    have its own copy of resolve_canonical or load_synonym_map at all —
+    it imports the exact same two functions mealsight.pantry already
+    uses, so there's structurally no way for the two packages to
+    compute a different answer for the same input; there's only one
+    function, not two that happen to agree. Given that, the only way
+    the reported symptom (green onion canonicalizing to "scallion")
+    could be real is if the synonym_map itself was built backwards
+    somewhere — so I went and read the actual seed data,
+    ingredient_synonyms.json, directly, rather than trusting either
+    package's test fixtures as ground truth. That confirmed the real
+    table's direction: "scallion" is the synonym, "green onion" is
+    canonical. Once I had that, it was a five-second comparison to see
+    that mealsight.pantry's own test fixture already had it right and
+    user_intelligence's test fixture had it backwards — a bug in one
+    session's own test data, not in the shared function everyone
+    actually calls.
+
+Q: Why does protein score recomputation need to read recipes.db at all,
+when cuisine scoring doesn't?
+
+    Because meal_history stores cuisine directly — it's a plain column
+    on every row, filled in at log_meal time — but it has no "protein"
+    column at all; nothing about a meal_history row says what protein
+    was in it. The only place that information actually lives is the
+    recipe's own ingredient list, in recipes.db, a physically different
+    database file. So protein scoring has to reach across that boundary
+    for every rated meal that has a recipe_id, batch-loading every
+    distinct recipe's ingredients in one query rather than one query per
+    meal, then deriving the protein in plain Python from that
+    in-memory dict — the same "load a reference table once, then work
+    against it in Python, never a SQL join" pattern this project has
+    used for cross-database reference data since phase 3.1's synonym
+    table dependency.
+
+Q: Walk me through why a single perfect 5-star rating for a cuisine can
+end up with a LOWER score than a cuisine with a slightly lower average
+rating but more ratings behind it.
+
+    That's the smoothing doing exactly what it's meant to do. A raw,
+    unsmoothed mean would treat "5 stars, one time" as indistinguishable
+    from "5 stars, ten times," which is wrong — one data point isn't
+    evidence of a real preference the way ten is. So every score gets
+    pulled toward a neutral 0.5 in proportion to how little real
+    evidence backs it, using a small fixed "prior weight" of 3 assumed-
+    neutral pseudo-ratings blended into the real ones. With one real
+    5-star rating, those three assumed-neutral ratings still make up
+    3/4 of the blend, pulling the score down to 0.625. With ten real
+    5-star ratings, the same three assumed-neutral ratings are only
+    3/13 of the blend, so the score stays close to the true mean. I
+    actually saw this directly in this phase's own verification run: 5
+    thai ratings at a 0.95 mean scored 0.781, while 1 mexican rating at
+    a perfect 1.0 mean scored only 0.625 — lower than both the thai and
+    the 2-rating italian score, even though its raw mean was the
+    highest of the three.
+
+Q: check_repetition checks three things in a specific order. Why that
+order, and does checking one level ever affect what the next level
+sees?
+
+    The order is strongest-signal-first: an exact repeat of the same
+    recipe is unambiguous — you cooked this specific dish recently, full
+    stop — so it's checked first and short-circuits everything else if
+    it fires. Protein repetition is checked next because it's a real
+    but slightly softer signal (you've had a lot of chicken lately, even
+    if not this exact chicken dish), and cuisine dominance last because
+    it's the broadest, least specific signal (you've been eating a lot
+    of Thai food, even across different actual dishes and proteins).
+    And yes, the order matters functionally, not just for priority: by
+    the time the protein-repetition check runs, I already know the
+    candidate recipe itself isn't in the window (level 1 would have
+    returned already if it were), so every window meal counted in level
+    2 is guaranteed to be a genuinely different meal — I don't need a
+    separate "exclude the candidate itself" check in level 2's own
+    counting logic, because level 1 having already returned is what
+    guarantees that's true.

@@ -41,3 +41,24 @@ def test_aromatics_and_core_flavor_default_to_important() -> None:
 def test_only_one_ingredient_is_ever_critical() -> None:
     result = assign_importances("Beef Stew", ["Beef", "Chicken Stock", "Carrots", "Onion"])
     assert result.count("critical") <= 1
+
+
+def test_term_match_is_whole_word_not_raw_substring() -> None:
+    # Real bug found in Phase 2.2 verification: "egg" (a PROTEIN_TERMS
+    # entry) matched as a raw substring inside "Parmigiano-Reggiano"
+    # ("reggiano" contains "egg"), wrongly making a cheese garnish the
+    # recipe's one critical ingredient in a dish with no actual egg.
+    result = assign_importances(
+        "Spicy Arrabiata Penne",
+        ["Penne Rigate", "Olive Oil", "Garlic", "Chopped Tomatoes", "Basil", "Parmigiano-Reggiano"],
+    )
+    assert result[5] != "critical"
+
+
+def test_protein_ingredient_is_not_downgraded_to_optional_by_a_seasoning_word_prefix() -> None:
+    # "Salt Cod" contains the genuine whole word "salt" (a seasoning
+    # term), but it's a defining protein ingredient, not a seasoning —
+    # a real protein match must win over an incidental seasoning-word
+    # collision.
+    result = assign_importances("Saltfish and Ackee", ["Salt Cod", "Ackee", "Onion"])
+    assert result[0] == "important"

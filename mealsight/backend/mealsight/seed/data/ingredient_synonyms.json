@@ -3,88 +3,593 @@
     "note": "canonical_name is the preferred/standard ingredient name; synonym is an alternate name that should resolve to it. Seeded from two sources: (1) US/UK and international naming variants common in recipe text, and (2) phrasing the vision benchmark (docs/vision_benchmark_report.md) showed the vision model actually producing, including container-stripped forms like 'milk carton'. Deliberately does NOT include pairs that would collapse genuinely distinct ingredients — see backend/tests/test_seed/test_synonyms_distinctness.py for the explicit list of pairs this file must never contain (potato/sweet potato, cream/cream cheese, and others)."
   },
   "synonyms": [
-    {"canonical_name": "bell pepper", "synonym": "capsicum"},
-    {"canonical_name": "bell pepper", "synonym": "sweet pepper"},
-    {"canonical_name": "bell pepper", "synonym": "capsicums"},
-    {"canonical_name": "green onion", "synonym": "scallion"},
-    {"canonical_name": "green onion", "synonym": "scallions"},
-    {"canonical_name": "green onion", "synonym": "spring onion"},
-    {"canonical_name": "green onion", "synonym": "spring onions"},
-    {"canonical_name": "cilantro", "synonym": "coriander"},
-    {"canonical_name": "cilantro", "synonym": "coriander leaves"},
-    {"canonical_name": "cilantro", "synonym": "fresh coriander"},
-    {"canonical_name": "eggplant", "synonym": "aubergine"},
-    {"canonical_name": "eggplant", "synonym": "aubergines"},
-    {"canonical_name": "chickpeas", "synonym": "garbanzo beans"},
-    {"canonical_name": "chickpeas", "synonym": "garbanzos"},
-    {"canonical_name": "chickpeas", "synonym": "chickpea"},
-    {"canonical_name": "heavy cream", "synonym": "half and half"},
-    {"canonical_name": "heavy cream", "synonym": "half-and-half"},
-    {"canonical_name": "heavy cream", "synonym": "carton of cream"},
-    {"canonical_name": "heavy cream", "synonym": "whipping cream"},
-    {"canonical_name": "ground beef", "synonym": "mince"},
-    {"canonical_name": "ground beef", "synonym": "minced beef"},
-    {"canonical_name": "ground beef", "synonym": "beef mince"},
-    {"canonical_name": "milk", "synonym": "milk carton"},
-    {"canonical_name": "peanut butter", "synonym": "jar of peanut butter"},
-    {"canonical_name": "zucchini", "synonym": "courgette"},
-    {"canonical_name": "zucchini", "synonym": "courgettes"},
-    {"canonical_name": "shrimp", "synonym": "prawn"},
-    {"canonical_name": "shrimp", "synonym": "prawns"},
-    {"canonical_name": "arugula", "synonym": "rocket"},
-    {"canonical_name": "powdered sugar", "synonym": "icing sugar"},
-    {"canonical_name": "powdered sugar", "synonym": "confectioners sugar"},
-    {"canonical_name": "powdered sugar", "synonym": "confectioner's sugar"},
-    {"canonical_name": "all-purpose flour", "synonym": "plain flour"},
-    {"canonical_name": "all-purpose flour", "synonym": "all purpose flour"},
-    {"canonical_name": "baking soda", "synonym": "bicarbonate of soda"},
-    {"canonical_name": "baking soda", "synonym": "bicarb"},
-    {"canonical_name": "baking soda", "synonym": "bicarb soda"},
-    {"canonical_name": "self-rising flour", "synonym": "self-raising flour"},
-    {"canonical_name": "self-rising flour", "synonym": "self raising flour"},
-    {"canonical_name": "sugar", "synonym": "granulated sugar"},
-    {"canonical_name": "sugar", "synonym": "caster sugar"},
-    {"canonical_name": "sugar", "synonym": "white sugar"},
-    {"canonical_name": "butter", "synonym": "margarine"},
-    {"canonical_name": "butter", "synonym": "butter tub"},
-    {"canonical_name": "butter", "synonym": "butter spread"},
-    {"canonical_name": "butter", "synonym": "tub of butter"},
-    {"canonical_name": "onion", "synonym": "bag of onions"},
-    {"canonical_name": "pasta", "synonym": "box of pasta"},
-    {"canonical_name": "tomatoes", "synonym": "can of tomatoes"},
-    {"canonical_name": "tomatoes", "synonym": "canned tomatoes"},
-    {"canonical_name": "olive oil", "synonym": "bottle of olive oil"},
-    {"canonical_name": "yeast", "synonym": "packet of yeast"},
-    {"canonical_name": "cheese", "synonym": "block of cheese"},
-    {"canonical_name": "yogurt", "synonym": "container of yogurt"},
-    {"canonical_name": "yogurt", "synonym": "yoghurt"},
-    {"canonical_name": "chili", "synonym": "chilli"},
-    {"canonical_name": "chili pepper", "synonym": "chilli pepper"},
-    {"canonical_name": "chili powder", "synonym": "chilli powder"},
-    {"canonical_name": "cornstarch", "synonym": "corn starch"},
-    {"canonical_name": "cornstarch", "synonym": "cornflour"},
-    {"canonical_name": "goat cheese", "synonym": "chevre"},
-    {"canonical_name": "goat cheese", "synonym": "chavroux"},
-    {"canonical_name": "parmesan", "synonym": "parmigiano reggiano"},
-    {"canonical_name": "parmesan", "synonym": "parmesan cheese"},
-    {"canonical_name": "vanilla extract", "synonym": "vanilla essence"},
-    {"canonical_name": "green onion", "synonym": "salad onion"},
-    {"canonical_name": "beet", "synonym": "beetroot"},
-    {"canonical_name": "cotija cheese", "synonym": "cotija"},
-    {"canonical_name": "romaine lettuce", "synonym": "cos lettuce"},
-    {"canonical_name": "black beans", "synonym": "turtle beans"},
-    {"canonical_name": "green beans", "synonym": "string beans"},
-    {"canonical_name": "kidney beans", "synonym": "red kidney beans"},
-    {"canonical_name": "cannellini beans", "synonym": "white kidney beans"},
-    {"canonical_name": "confit garlic", "synonym": "garlic confit"},
-    {"canonical_name": "gruyere", "synonym": "gruyère"},
-    {"canonical_name": "dark chocolate", "synonym": "dark chocolate chips"},
-    {"canonical_name": "shallot", "synonym": "shallots"},
-    {"canonical_name": "shallot", "synonym": "eschalot"},
-    {"canonical_name": "flat-leaf parsley", "synonym": "italian parsley"},
-    {"canonical_name": "powdered sugar", "synonym": "10x sugar"},
-    {"canonical_name": "cider vinegar", "synonym": "apple cider vinegar"},
-    {"canonical_name": "hot sauce", "synonym": "hotsauce"},
-    {"canonical_name": "worcestershire sauce", "synonym": "worcester sauce"}
+    {
+      "canonical_name": "bell pepper",
+      "synonym": "capsicum"
+    },
+    {
+      "canonical_name": "bell pepper",
+      "synonym": "sweet pepper"
+    },
+    {
+      "canonical_name": "bell pepper",
+      "synonym": "capsicums"
+    },
+    {
+      "canonical_name": "green onion",
+      "synonym": "scallion"
+    },
+    {
+      "canonical_name": "green onion",
+      "synonym": "scallions"
+    },
+    {
+      "canonical_name": "green onion",
+      "synonym": "spring onion"
+    },
+    {
+      "canonical_name": "green onion",
+      "synonym": "spring onions"
+    },
+    {
+      "canonical_name": "cilantro",
+      "synonym": "coriander"
+    },
+    {
+      "canonical_name": "cilantro",
+      "synonym": "coriander leaves"
+    },
+    {
+      "canonical_name": "cilantro",
+      "synonym": "fresh coriander"
+    },
+    {
+      "canonical_name": "eggplant",
+      "synonym": "aubergine"
+    },
+    {
+      "canonical_name": "eggplant",
+      "synonym": "aubergines"
+    },
+    {
+      "canonical_name": "chickpeas",
+      "synonym": "garbanzo beans"
+    },
+    {
+      "canonical_name": "chickpeas",
+      "synonym": "garbanzos"
+    },
+    {
+      "canonical_name": "chickpeas",
+      "synonym": "chickpea"
+    },
+    {
+      "canonical_name": "heavy cream",
+      "synonym": "half and half"
+    },
+    {
+      "canonical_name": "heavy cream",
+      "synonym": "half-and-half"
+    },
+    {
+      "canonical_name": "heavy cream",
+      "synonym": "carton of cream"
+    },
+    {
+      "canonical_name": "heavy cream",
+      "synonym": "whipping cream"
+    },
+    {
+      "canonical_name": "ground beef",
+      "synonym": "mince"
+    },
+    {
+      "canonical_name": "ground beef",
+      "synonym": "minced beef"
+    },
+    {
+      "canonical_name": "ground beef",
+      "synonym": "beef mince"
+    },
+    {
+      "canonical_name": "milk",
+      "synonym": "milk carton"
+    },
+    {
+      "canonical_name": "peanut butter",
+      "synonym": "jar of peanut butter"
+    },
+    {
+      "canonical_name": "zucchini",
+      "synonym": "courgette"
+    },
+    {
+      "canonical_name": "zucchini",
+      "synonym": "courgettes"
+    },
+    {
+      "canonical_name": "shrimp",
+      "synonym": "prawn"
+    },
+    {
+      "canonical_name": "shrimp",
+      "synonym": "prawns"
+    },
+    {
+      "canonical_name": "arugula",
+      "synonym": "rocket"
+    },
+    {
+      "canonical_name": "powdered sugar",
+      "synonym": "icing sugar"
+    },
+    {
+      "canonical_name": "powdered sugar",
+      "synonym": "confectioners sugar"
+    },
+    {
+      "canonical_name": "powdered sugar",
+      "synonym": "confectioner's sugar"
+    },
+    {
+      "canonical_name": "all-purpose flour",
+      "synonym": "plain flour"
+    },
+    {
+      "canonical_name": "all-purpose flour",
+      "synonym": "all purpose flour"
+    },
+    {
+      "canonical_name": "baking soda",
+      "synonym": "bicarbonate of soda"
+    },
+    {
+      "canonical_name": "baking soda",
+      "synonym": "bicarb"
+    },
+    {
+      "canonical_name": "baking soda",
+      "synonym": "bicarb soda"
+    },
+    {
+      "canonical_name": "self-rising flour",
+      "synonym": "self-raising flour"
+    },
+    {
+      "canonical_name": "self-rising flour",
+      "synonym": "self raising flour"
+    },
+    {
+      "canonical_name": "sugar",
+      "synonym": "granulated sugar"
+    },
+    {
+      "canonical_name": "sugar",
+      "synonym": "caster sugar"
+    },
+    {
+      "canonical_name": "sugar",
+      "synonym": "white sugar"
+    },
+    {
+      "canonical_name": "butter",
+      "synonym": "margarine"
+    },
+    {
+      "canonical_name": "butter",
+      "synonym": "butter tub"
+    },
+    {
+      "canonical_name": "butter",
+      "synonym": "butter spread"
+    },
+    {
+      "canonical_name": "butter",
+      "synonym": "tub of butter"
+    },
+    {
+      "canonical_name": "onion",
+      "synonym": "bag of onions"
+    },
+    {
+      "canonical_name": "pasta",
+      "synonym": "box of pasta"
+    },
+    {
+      "canonical_name": "tomatoes",
+      "synonym": "can of tomatoes"
+    },
+    {
+      "canonical_name": "tomatoes",
+      "synonym": "canned tomatoes"
+    },
+    {
+      "canonical_name": "olive oil",
+      "synonym": "bottle of olive oil"
+    },
+    {
+      "canonical_name": "yeast",
+      "synonym": "packet of yeast"
+    },
+    {
+      "canonical_name": "cheese",
+      "synonym": "block of cheese"
+    },
+    {
+      "canonical_name": "yogurt",
+      "synonym": "container of yogurt"
+    },
+    {
+      "canonical_name": "yogurt",
+      "synonym": "yoghurt"
+    },
+    {
+      "canonical_name": "chili",
+      "synonym": "chilli"
+    },
+    {
+      "canonical_name": "chili pepper",
+      "synonym": "chilli pepper"
+    },
+    {
+      "canonical_name": "chili powder",
+      "synonym": "chilli powder"
+    },
+    {
+      "canonical_name": "cornstarch",
+      "synonym": "corn starch"
+    },
+    {
+      "canonical_name": "cornstarch",
+      "synonym": "cornflour"
+    },
+    {
+      "canonical_name": "goat cheese",
+      "synonym": "chevre"
+    },
+    {
+      "canonical_name": "goat cheese",
+      "synonym": "chavroux"
+    },
+    {
+      "canonical_name": "parmesan",
+      "synonym": "parmigiano reggiano"
+    },
+    {
+      "canonical_name": "parmesan",
+      "synonym": "parmesan cheese"
+    },
+    {
+      "canonical_name": "vanilla extract",
+      "synonym": "vanilla essence"
+    },
+    {
+      "canonical_name": "green onion",
+      "synonym": "salad onion"
+    },
+    {
+      "canonical_name": "beet",
+      "synonym": "beetroot"
+    },
+    {
+      "canonical_name": "cotija cheese",
+      "synonym": "cotija"
+    },
+    {
+      "canonical_name": "romaine lettuce",
+      "synonym": "cos lettuce"
+    },
+    {
+      "canonical_name": "black beans",
+      "synonym": "turtle beans"
+    },
+    {
+      "canonical_name": "green beans",
+      "synonym": "string beans"
+    },
+    {
+      "canonical_name": "kidney beans",
+      "synonym": "red kidney beans"
+    },
+    {
+      "canonical_name": "cannellini beans",
+      "synonym": "white kidney beans"
+    },
+    {
+      "canonical_name": "confit garlic",
+      "synonym": "garlic confit"
+    },
+    {
+      "canonical_name": "gruyere",
+      "synonym": "gruyère"
+    },
+    {
+      "canonical_name": "dark chocolate",
+      "synonym": "dark chocolate chips"
+    },
+    {
+      "canonical_name": "shallot",
+      "synonym": "shallots"
+    },
+    {
+      "canonical_name": "shallot",
+      "synonym": "eschalot"
+    },
+    {
+      "canonical_name": "flat-leaf parsley",
+      "synonym": "italian parsley"
+    },
+    {
+      "canonical_name": "powdered sugar",
+      "synonym": "10x sugar"
+    },
+    {
+      "canonical_name": "cider vinegar",
+      "synonym": "apple cider vinegar"
+    },
+    {
+      "canonical_name": "hot sauce",
+      "synonym": "hotsauce"
+    },
+    {
+      "canonical_name": "worcestershire sauce",
+      "synonym": "worcester sauce"
+    },
+    {
+      "canonical_name": "rice",
+      "synonym": "white rice"
+    },
+    {
+      "canonical_name": "rice",
+      "synonym": "long grain rice"
+    },
+    {
+      "canonical_name": "carrot",
+      "synonym": "baby carrot"
+    },
+    {
+      "canonical_name": "carrot",
+      "synonym": "carrot with greens"
+    },
+    {
+      "canonical_name": "potato",
+      "synonym": "baby potato"
+    },
+    {
+      "canonical_name": "radish",
+      "synonym": "red radish"
+    },
+    {
+      "canonical_name": "celery",
+      "synonym": "celery stick"
+    },
+    {
+      "canonical_name": "cheese",
+      "synonym": "cheese slice"
+    },
+    {
+      "canonical_name": "chicken",
+      "synonym": "chicken meat"
+    },
+    {
+      "canonical_name": "sweetcorn",
+      "synonym": "corn"
+    },
+    {
+      "canonical_name": "sweetcorn",
+      "synonym": "sweet corn"
+    },
+    {
+      "canonical_name": "sugar",
+      "synonym": "crystallized sugar"
+    },
+    {
+      "canonical_name": "sugar",
+      "synonym": "pack crystallized sugar"
+    },
+    {
+      "canonical_name": "sugar",
+      "synonym": "pack sugar"
+    },
+    {
+      "canonical_name": "sugar",
+      "synonym": "sugar crystal"
+    },
+    {
+      "canonical_name": "sugar",
+      "synonym": "sugar cube"
+    },
+    {
+      "canonical_name": "sugar substitute",
+      "synonym": "glass sugar or similar"
+    },
+    {
+      "canonical_name": "sugar substitute",
+      "synonym": "glass sugar substitute"
+    },
+    {
+      "canonical_name": "apple",
+      "synonym": "green apple"
+    },
+    {
+      "canonical_name": "semi skimmed milk",
+      "synonym": "half fat milk"
+    },
+    {
+      "canonical_name": "semi skimmed milk",
+      "synonym": "halfvolle milk"
+    },
+    {
+      "canonical_name": "heavy cream",
+      "synonym": "half and half cream"
+    },
+    {
+      "canonical_name": "heavy cream",
+      "synonym": "half and half milk"
+    },
+    {
+      "canonical_name": "heavy cream",
+      "synonym": "half and half or cream"
+    },
+    {
+      "canonical_name": "heavy cream",
+      "synonym": "half cream"
+    },
+    {
+      "canonical_name": "ham",
+      "synonym": "ham slice"
+    },
+    {
+      "canonical_name": "butter",
+      "synonym": "margarine butter"
+    },
+    {
+      "canonical_name": "onion",
+      "synonym": "sweet onion"
+    },
+    {
+      "canonical_name": "yogurt",
+      "synonym": "yogurt cup"
+    },
+    {
+      "canonical_name": "yogurt",
+      "synonym": "yogurt drink"
+    },
+    {
+      "canonical_name": "yogurt",
+      "synonym": "yogurt or dairy product"
+    },
+    {
+      "canonical_name": "yogurt",
+      "synonym": "yogurt or similar"
+    },
+    {
+      "canonical_name": "yogurt",
+      "synonym": "yogurt or similar dairy product"
+    },
+    {
+      "canonical_name": "yogurt",
+      "synonym": "yogurt or similar product"
+    },
+    {
+      "canonical_name": "yogurt",
+      "synonym": "yogurt or plant based yogurt"
+    },
+    {
+      "canonical_name": "yogurt",
+      "synonym": "sweetened yogurt drink"
+    },
+    {
+      "canonical_name": "granola",
+      "synonym": "granola or cereal"
+    },
+    {
+      "canonical_name": "granola",
+      "synonym": "granola or cereal mix"
+    },
+    {
+      "canonical_name": "granola",
+      "synonym": "granola or muesli"
+    },
+    {
+      "canonical_name": "granola",
+      "synonym": "granola or muesli mix"
+    },
+    {
+      "canonical_name": "granola",
+      "synonym": "granola or nut"
+    },
+    {
+      "canonical_name": "granola",
+      "synonym": "granola or similar dry mix"
+    },
+    {
+      "canonical_name": "granola",
+      "synonym": "what appear to be granola or nut"
+    },
+    {
+      "canonical_name": "orange juice",
+      "synonym": "orange juice concentrate"
+    },
+    {
+      "canonical_name": "peach",
+      "synonym": "peach or similar fruit"
+    },
+    {
+      "canonical_name": "dill pickle",
+      "synonym": "pickle"
+    },
+    {
+      "canonical_name": "dill pickle",
+      "synonym": "pickle or preserve"
+    },
+    {
+      "canonical_name": "dill pickle",
+      "synonym": "pickle or preserved vegetable"
+    },
+    {
+      "canonical_name": "dill pickle",
+      "synonym": "pickled vegetable"
+    },
+    {
+      "canonical_name": "dill pickle",
+      "synonym": "pickled vegetable or jam"
+    },
+    {
+      "canonical_name": "dill pickle",
+      "synonym": "pickled cucumber or similar item"
+    },
+    {
+      "canonical_name": "dill pickle",
+      "synonym": "what appear to be pickled vegetable or olive"
+    },
+    {
+      "canonical_name": "jam",
+      "synonym": "jam or preserve"
+    },
+    {
+      "canonical_name": "jam",
+      "synonym": "what appear to be jam or preserve"
+    },
+    {
+      "canonical_name": "jam",
+      "synonym": "preserve"
+    },
+    {
+      "canonical_name": "sweetened condensed milk",
+      "synonym": "sweetened condensed milk or similar"
+    },
+    {
+      "canonical_name": "peanut butter",
+      "synonym": "peanut butter or similar spread"
+    },
+    {
+      "canonical_name": "salad greens",
+      "synonym": "salad mix"
+    },
+    {
+      "canonical_name": "salad greens",
+      "synonym": "green salad"
+    },
+    {
+      "canonical_name": "salad greens",
+      "synonym": "green salad mix"
+    },
+    {
+      "canonical_name": "salad greens",
+      "synonym": "head leafy greens"
+    },
+    {
+      "canonical_name": "tomato puree",
+      "synonym": "tomato or tomato paste"
+    },
+    {
+      "canonical_name": "tomato puree",
+      "synonym": "tomato or tomato product"
+    },
+    {
+      "canonical_name": "tomato puree",
+      "synonym": "tomato paste or sauce"
+    }
   ]
 }

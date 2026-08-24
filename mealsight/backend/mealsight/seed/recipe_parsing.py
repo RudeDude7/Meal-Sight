@@ -235,6 +235,22 @@ def _normalize_ingredient_name(name: str) -> str:
     return " ".join(name.strip().lower().split())
 
 
+def _matches_any_term_whole_word(name: str, terms: frozenset[str]) -> bool:
+    """Whole-word/whole-phrase containment, not raw substring containment.
+
+    Phase 2.2 verification found a real bug from plain `term in name`
+    substring checks: "egg" (a PROTEIN_TERMS entry) matched inside
+    "Parmigiano-Reggiano" (the substring "reggiano"[1:4] happens to spell
+    "egg"), wrongly making a cheese garnish the recipe's one "critical"
+    ingredient. \\b word-boundary matching only matches a term where it
+    actually starts and ends a word (or, for a multi-word term like
+    "black pepper", starts and ends that whole phrase) — "egg" no longer
+    matches inside "reggiano" since there's no word boundary between the
+    "r" before it and the "i" after it.
+    """
+    return any(re.search(rf"\b{re.escape(term)}\b", name) for term in terms)
+
+
 def assign_importances(recipe_name: str, ingredient_names: list[str]) -> list[Importance]:
     """Assigns critical/important/optional to each ingredient in a recipe,
     in the same order as ingredient_names, using an explicit rule set —
@@ -244,7 +260,13 @@ def assign_importances(recipe_name: str, ingredient_names: list[str]) -> list[Im
       1. At most one ingredient is "critical": the first one (in ingredient
          order) whose name appears in the recipe's own title, or — if none
          does — the first one that matches a known protein/defining term.
-      2. Anything matching GARNISH_AND_SEASONING_TERMS is "optional".
+      2. Anything matching GARNISH_AND_SEASONING_TERMS is "optional" —
+         *unless* it also matches a PROTEIN_TERMS word, in which case the
+         protein match wins and it's "important" instead. Without this,
+         "Salt Cod" gets marked optional purely because it contains the
+         genuine whole word "salt", even though it's a defining protein
+         ingredient, not a seasoning — the word "salt" doing double duty
+         as both a seasoning and a real ingredient's prefix.
       3. Everything else is "important" (aromatics, sauces, and other core
          flavor components fall here by default).
     """
@@ -258,7 +280,7 @@ def assign_importances(recipe_name: str, ingredient_names: list[str]) -> list[Im
             break
     if critical_index is None:
         for index, name in enumerate(normalized):
-            if any(term in name for term in PROTEIN_TERMS):
+            if _matches_any_term_whole_word(name, PROTEIN_TERMS):
                 critical_index = index
                 break
 
@@ -266,7 +288,9 @@ def assign_importances(recipe_name: str, ingredient_names: list[str]) -> list[Im
     for index, name in enumerate(normalized):
         if index == critical_index:
             importances.append("critical")
-        elif any(term in name for term in GARNISH_AND_SEASONING_TERMS):
+        elif _matches_any_term_whole_word(
+            name, GARNISH_AND_SEASONING_TERMS
+        ) and not _matches_any_term_whole_word(name, PROTEIN_TERMS):
             importances.append("optional")
         else:
             importances.append("important")
@@ -292,6 +316,7 @@ MEAT_TERMS = frozenset(
         "shrimp", "prawn", "fish", "salmon", "tuna", "cod", "crab", "lobster",
         "squid", "octopus", "anchovy", "anchovies", "gelatin", "lard",
         "chorizo", "mince", "ground beef", "ground pork", "ground turkey",
+        "meat",
     }
 )
 

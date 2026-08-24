@@ -1,0 +1,898 @@
+PHASE 2 STUDY NOTES: THE RECIPE ENGINE
+=============================================================
+
+These notes cover the second backend phase: the ingredient matching
+algorithm, the verification pass that found and fixed real bugs in it
+(and in data left over from phase 1.4), and the five Recipe Engine tools
+built on top of all of it. Everything below describes code and data that
+really exist right now, in backend/mealsight/matching/,
+backend/mealsight/recipe_engine/, backend/mealsight/seed/, and
+backend/tests/.
+
+This phase happened in three rounds, and the notes are organized the
+same way: first the matcher itself, then the verification pass that
+found real defects in it (Phase 2.2, a name that shows up directly in
+several docstrings and test files in this codebase), then the nutrition-
+coverage gap that verification pass surfaced plus the Recipe Engine tools
+built afterward.
+
+
+1. WHAT THIS PHASE BUILT AND WHY IT COMES NOW
+=============================================================
+
+Phase 1 built the plumbing (databases, config, logging) and phase 1.4
+filled recipes.db with 250 real recipes plus three reference tables
+(substitutions, ingredient_synonyms, nutrition_reference). None of that
+data does anything on its own - something has to actually compare a
+recipe's ingredient list against what's really in someone's pantry and
+decide whether the recipe is makeable. That's what this phase builds:
+mealsight.matching, the core algorithm, and mealsight.recipe_engine, five
+plain-Python tools that use it (and the recipe data directly) to answer
+the concrete questions an agent will eventually need answered - which
+recipes fit these constraints, what's actually in one of them, how do I
+cook it for six people instead of four, what does it add up to
+nutritionally, and what do I use instead of the one ingredient I don't
+have.
+
+Every single function in both packages is deterministic and rule-based -
+no LLM call anywhere, same as phase 1.4's seed pipeline. The reasoning
+for that is identical to before: this logic needs to produce the same
+answer for the same input every time, needs to be fast and free to run
+per-request rather than per-token-billed, and needs to be debuggable by
+reading a rule instead of guessing why a model said what it said.
+
+
+2. FILE MAP
+=============================================================
+
+backend/mealsight/matching/normalize.py
+    normalize_ingredient - turns messy free-text ("Freshly chopped
+    parsley", "a can of chopped tomatoes") into a stable, comparable
+    form. PROTECTED_TERMS - the multi-word ingredients that must never
+    collapse into one of their own component words.
+
+backend/mealsight/matching/specificity.py
+    compare_specificity, find_full_specificity_match,
+    find_partial_specificity_match - the asymmetric cut/variety logic
+    added in this phase's verification round (section 6).
+
+backend/mealsight/matching/synonyms.py
+    load_synonym_map, resolve_canonical - resolves a normalized name to
+    its canonical form via ingredient_synonyms, with a load-once
+    in-memory cache. reset_synonym_cache exists for tests.
+
+backend/mealsight/matching/substitutions.py
+    SubstitutionOption, load_substitution_map - the same load-once cache
+    shape, for the substitutions table.
+
+backend/mealsight/matching/models.py
+    The pydantic result shapes: MatchedItem, SubstitutableItem,
+    PartialMatchItem, MissingItem, MatchResult.
+
+backend/mealsight/matching/matcher.py
+    match_recipe - the actual algorithm. Also
+    substitute_satisfies_dietary_restrictions and FLAVOR_IMPACT_RANK,
+    both promoted to public names in this phase so recipe_engine could
+    reuse them instead of reimplementing.
+
+backend/mealsight/seed/recipe_parsing.py
+    Modified in phase 2.2 - see section 5. assign_importances and
+    derive_dietary_tags' term-matching moved from raw substring
+    containment to whole-word matching.
+
+backend/mealsight/seed/load_nutrition.py
+    Rewritten in phase 2.3 - coverage_report and the new
+    vision_vocabulary_coverage_report, both now resolving through
+    synonyms the same way a real lookup would (section 7).
+
+backend/mealsight/seed/vision_vocabulary.py
+    New in phase 2.3. extract_vision_ingredient_names - parses the real
+    checkpointed vision-benchmark output on disk into a frequency-
+    weighted Counter of raw ingredient-name guesses.
+
+backend/mealsight/seed/data/nutrition_data.json
+    540 entries (was 136 at the start of this phase).
+
+backend/mealsight/seed/data/ingredient_synonyms.json
+    147 entries (was 83).
+
+backend/mealsight/recipe_engine/models.py
+    RecipeSummary, RecipeDetail, RecipeIngredient, ScaledRecipe,
+    ScaledIngredient, NutritionResult, SubstitutionResult,
+    SubstitutionSuggestion.
+
+backend/mealsight/recipe_engine/search.py
+    search_recipes, get_recipe.
+
+backend/mealsight/recipe_engine/scaling.py
+    scale_recipe, and the countable/measurable/non-scaling unit lists.
+
+backend/mealsight/recipe_engine/nutrition.py
+    calculate_nutrition, and UNIT_TO_GRAMS.
+
+backend/mealsight/recipe_engine/substitutions.py
+    find_substitutions.
+
+scripts/audit_recipe_data.py
+    The one-off data-integrity audit that kicked off phase 2.2 (nutrition
+    coverage, dietary tag safety, cook time sanity, sample recipes).
+
+scripts/demo_matcher.py
+    Runs the matcher against real seeded recipes with a real pantry.
+
+docs/KNOWN_ISSUES.md
+    Two findings from this phase deliberately not fixed - see section 11.
+
+backend/tests/test_matching/
+    test_normalize.py, test_synonyms.py, test_specificity.py,
+    test_matcher.py - 61 tests total.
+
+backend/tests/test_recipe_engine/
+    conftest.py, test_search.py, test_scaling.py, test_nutrition.py,
+    test_substitutions.py - 22 tests total.
+
+backend/tests/test_seed/test_nutrition_coverage.py
+    New in phase 2.3 - the coverage-regression guard (section 7).
+
+backend/tests/test_seed/test_importance.py
+    Two new tests added in phase 2.2 for the substring-matching bugs.
+
+
+3. THE INGREDIENT MATCHING PROBLEM
+=============================================================
+
+Why you can't just compare ingredient strings directly
+------------------------------------------------------
+A recipe says "Chopped tomatoes." A pantry item says "tomato." A vision
+model looking at a photo says "canned tomatoes." All three mean the same
+real thing, but as plain strings they're all different, and a naive
+string-equality check would call the recipe unmakeable even though the
+pantry clearly has what's needed. Solving this well needs three separate
+layers, in order: normalize away the noise that isn't part of an
+ingredient's identity (packaging, prep verbs, plurals - section 4);
+resolve real synonyms, different names for the literal same thing
+(section 5's "scallion" versus "green onion"); and handle specificity,
+where two names refer to the same ingredient but at different levels of
+detail (section 6's "chicken" versus "chicken thighs"). Only after all
+three does it make sense to ask "does the pantry have what this recipe
+needs."
+
+
+4. NORMALIZATION
+=============================================================
+
+normalize_ingredient (mealsight/matching/normalize.py) lowercases,
+strips punctuation, removes container/packaging words (carton, jar,
+bottle, bottled, jarred, canned, boxed, bagged, of, a - the "bottled"/
+"jarred"/"boxed"/"bagged" adjectival forms were a gap found and fixed in
+phase 2.3, section 7), removes preparation modifiers that don't change
+identity (chopped, diced, minced, sliced, fresh, frozen, cooked, raw,
+plus several more found by inspecting real seeded ingredient text -
+freshly, cubed, grated, beaten, chilled, and others), and singularizes
+plurals.
+
+The one rule that overrides everything else: PROTECTED_TERMS, a frozen
+set of multi-word ingredients (sweet potato, cream cheese, green onion,
+coconut milk, soy sauce, hot sauce, and about twenty more) that must
+never be decomposed down to one of their own words. A sweet potato is
+not a potato; cream cheese is not cream; hot sauce is not just any sauce
+served hot. Before container/prep-word stripping ever runs,
+_protect_multi_word_terms glues any contiguous run of words matching a
+protected phrase into one token, so the later stripping pass can't reach
+inside and break it apart.
+
+    PROTECTED_TERMS includes ("hot", "sauce") specifically because
+    "hot" was already in the generic preparation-modifier list (for
+    "hot water", "hot milk" - genuinely the same thing served hot).
+    Without the override, "hot sauce" collapsed all the way down to
+    bare "sauce" - a real bug found in phase 2.3 that had been silently
+    breaking one particular synonym pair (canonical "hot sauce", synonym
+    "hotsauce") since phase 1.4, invisible until coverage checking
+    started actually exercising synonym resolution.
+
+
+5. SYNONYM RESOLUTION
+=============================================================
+
+resolve_canonical (mealsight/matching/synonyms.py) is a single dict
+lookup: an already-normalized name in, its canonical form out, unchanged
+if it isn't a known synonym of anything. load_synonym_map loads every
+(canonical_name, synonym) pair from ingredient_synonyms.json once per
+process and caches it - the same load-once-per-process shape
+mealsight.db.connection uses for its Database singletons. Lookup is
+exact-match on the normalized form, never substring, specifically so a
+synonym entry for "chicken" can never make "chicken stock" resolve as if
+it partially matched "chicken."
+
+
+6. SPECIFICITY MATCHING
+=============================================================
+
+The problem this solves
+------------------------------------------------------
+Phase 2.2's demo run against a real pantry (eggs, rice, soy sauce,
+garlic, onion, spinach, chicken thighs, olive oil, butter, milk) scored
+Chicken Alfredo Primavera 0.00 with can_cook=False, reporting "missing
+critical: chicken" - even though the pantry clearly had chicken, just as
+chicken thighs specifically. Normalization alone can't fix this: "thigh"
+isn't a container word or a meaningless prep verb, it's a real fact about
+which cut of chicken this is, and stripping it away would be wrong for
+other purposes. This needed its own comparison logic, added in phase
+2.2's fix: mealsight/matching/specificity.py.
+
+The rule
+------------------------------------------------------
+compare_specificity takes two already-normalized names and returns
+"full", "partial", or "none":
+
+    If the pantry item has every word the recipe requirement has, plus
+    extra words that are all recognized CUT_VARIETY_TERMS (a cut of
+    meat/fish - thigh, breast, fillet, drumstick, and about a dozen
+    more - or a color/size variety - red, yellow, white, baby) - the
+    pantry item is MORE specific than the requirement, and that's a full
+    match. "chicken thighs" satisfies "chicken"; "salmon fillet"
+    satisfies "salmon"; "red onion" satisfies "onion".
+
+    If it's the other way - the recipe requirement has the extra
+    cut/variety words the pantry item lacks - the pantry item is LESS
+    specific, and that's a partial match: scored at
+    settings.substitution_match_weight (0.7), surfaced in a dedicated
+    partial_matches list on MatchResult with a note explaining the user
+    may not have the right cut.
+
+CUT_VARIETY_TERMS is deliberately kept disjoint from PROTECTED_TERMS'
+vocabulary (no word used to build a protected phrase - sweet, cream,
+coconut, green, spring - ever appears in CUT_VARIETY_TERMS), and
+compare_specificity has a defensive check on top of that: it refuses to
+call two names a specificity match if the fuller one's exact word
+combination is itself a protected term, even if one of its words happens
+to coincide with a cut/variety word. In today's data that check never
+actually fires - it's a backstop against a future edit to either list
+accidentally creating an overlap, not something that's needed yet.
+
+Priority order in the matcher
+------------------------------------------------------
+match_recipe checks, per ingredient, in this order: exact canonical
+match, then full specificity match, then a table-driven substitution
+(section 8's substitutions.json), then a partial specificity match, then
+finally missing. A table-driven substitution outranks a partial
+specificity match on the reasoning that an authored substitution comes
+with a real ratio and flavor-impact note, which is a better
+recommendation than just "you have a less specific version of this."
+
+
+7. THE PHASE 2.2 VERIFICATION PASS AND THE BUGS IT FOUND
+=============================================================
+
+Phase 2.2 was a deliberate re-check of what phase 2.1 and phase 1.4 had
+built, not new feature work - and it found three real, previously-
+shipped bugs, all from the exact same root cause: term-matching that
+checked for a raw substring instead of a whole word.
+
+"egg" inside "reggiano"
+------------------------------------------------------
+assign_importances (mealsight/seed/recipe_parsing.py) picks one
+ingredient per recipe as "critical" - the first one matching the
+recipe's own title, or failing that, the first one matching a
+PROTEIN_TERMS word. The check used to be plain `term in name` - and
+"reggiano" (from "Parmigiano-Reggiano") contains the substring "egg" at
+positions 1-4, purely by coincidence of spelling, with no real egg
+anywhere in the dish. Spicy Arrabiata Penne, a tomato-and-chili pasta,
+ended up with parmesan cheese as its one "critical" ingredient instead
+of the pasta or the sauce. Fixed with _matches_any_term_whole_word,
+using \b-bounded regex matching instead of raw containment - "egg" no
+longer matches inside "reggiano" since there's no word boundary between
+the "r" before it and the "i" after it.
+
+"salt" inside "Salt Cod"
+------------------------------------------------------
+A different failure mode, needing a different fix: "Salt Cod" (a real,
+critical protein ingredient - salt-cured dried fish) contains the
+genuine whole word "salt", which is also a GARNISH_AND_SEASONING_TERMS
+entry. Whole-word matching alone doesn't fix this, because "salt"
+really is a standalone word here, not a substring collision. The actual
+fix: a protein-term match now always outranks a garnish-term match, so
+an ingredient matching both (like "Salt Cod", matching "cod" as a
+protein and "salt" as a seasoning) is treated as a real ingredient, not
+downgraded to optional. This also incidentally fixed "Unsalted Butter",
+which had the same "salt" collision.
+
+"meat" missing from MEAT_TERMS
+------------------------------------------------------
+The very first thing scripts/audit_recipe_data.py's dietary-tag-safety
+check found (before any of the above): Kapsalon, a recipe containing
+"Doner Meat", was tagged vegetarian. MEAT_TERMS listed specific meat
+names (chicken, beef, goat, mince, and so on) but never the generic word
+"meat" itself, so "Doner Meat" matched nothing on the blocklist. Fixed
+by adding "meat" to MEAT_TERMS - verified against the full corpus first
+to confirm no other ingredient (goat meat, mincemeat) would newly
+collide, since both of those already matched via "goat" and "mince"
+respectively.
+
+Importance-heuristic investigation
+------------------------------------------------------
+Separately, phase 2.2 investigated a specific complaint: Spanish
+Tortilla scored 0.60/can_cook=True while missing potato, when potato is
+what defines a Spanish tortilla (a potato omelette). Reviewing ten
+randomly sampled recipes (Python's random.seed(42) against the real
+corpus) found two clear substring-matching bugs (both fixed above) and a
+separate, genuine limitation: assign_importances can only ever mark
+something "critical" via a literal title-text match or a PROTEIN_TERMS
+match - there's no equivalent list for non-protein staples (potato,
+rice, pasta shape names) that can define a dish just as much as a
+protein can. Potato in Spanish Tortilla, and a similar gap in two other
+sampled recipes (Fettucine alfredo, Baingan Bharta, where no ingredient
+became critical at all), are the same root limitation. This was
+deliberately left unfixed - see section 11 - since a real fix needs a
+genuinely subjective judgment call about which staples count, and the
+task's own instruction was not to over-engineer a fix without a clear,
+mechanical pattern the way the substring bugs had one.
+
+
+8. THE SUBSTITUTIONS DATASET AND MATCH SCORING
+=============================================================
+
+(The substitutions.json data itself - 57 entries, dietary_notes safety
+testing, the ghee/honey traps - was built in phase 1.4 and is unchanged
+here; see that phase's notes for the full data-quality story. This
+section covers how match_recipe actually uses it.)
+
+For each recipe ingredient not directly matched or specificity-matched,
+match_recipe looks up substitution_map[canonical] and filters to options
+where the substitute is (a) something the pantry actually has, resolved
+through the same normalize-then-synonym-resolve pipeline, and (b) safe
+under every requested dietary restriction, checked via
+substitute_satisfies_dietary_restrictions - which reuses
+mealsight.seed.recipe_parsing.derive_dietary_tags directly on the
+substitute's own name, rather than trusting a separate authored field.
+The lowest flavor_impact-ranked eligible option wins (minimal beats
+noticeable beats significant).
+
+Scoring:
+
+    base = (matched_count + substitutable_count*0.7 + partial_count*0.7)
+           / total_required_ingredients
+    penalty = 0.3 * count_of_missing_critical_ingredients
+    score = clamp(base - penalty, 0.0, 1.0)
+    can_cook = score >= 0.5 AND no critical ingredient missing
+
+(0.7 and 0.3 and 0.5 are settings.substitution_match_weight,
+settings.critical_missing_penalty, and settings.min_ingredient_match
+respectively - real, configured thresholds, not hardcoded literals.)
+can_cook requires both conditions, not just the score threshold, because
+a recipe can mathematically clear 0.5 while still being missing
+something the whole dish doesn't work without - nine matched ingredients
+out of ten, with the tenth being a missing critical one, scores 0.6 by
+the formula above but must still not be cookable.
+
+
+9. THE NUTRITION COVERAGE SAGA
+=============================================================
+
+First pass: 25.6% to 100% (recipe corpus only)
+------------------------------------------------------
+Phase 2.2's audit found nutrition_reference covering only 25.6% of
+distinct recipe ingredients (74.4% weighted by how often each one
+actually appears). Most of the gap was genuinely missing data - 373 new
+entries were added (nutrition_data.json, 136 to 509 entries at that
+point), reaching 100% distinct and 100% occurrence-weighted coverage
+against the 250-recipe corpus. A real internal-consistency bug was found
+along the way: nutrition_data.json itself had 8 pairs of near-duplicate
+keys (e.g. "onion" and "onions", "flour" and "plain flour") that
+silently collapsed into one row when loaded (a plain Python dict
+comprehension keeps only the last key it sees), quietly discarding half
+the authored data for each pair.
+
+Second pass: the population itself was wrong
+------------------------------------------------------
+Phase 2.3 started from one specific finding: "white rice" had no
+nutrition_reference row, despite the recipe-corpus coverage figure
+already reading 100%. The reason: that 100% figure only ever measured
+ingredient strings appearing in TheMealDB's own recipe text. The vision
+model (built in an earlier phase, benchmarked in
+scripts/benchmark_vision.py) produces its own vocabulary - "white rice",
+"chicken thigh", "scallions" - that never appears in TheMealDB at all,
+so a coverage check scoped only to the recipe corpus can read 100% while
+still being unusable for anything photo-derived.
+
+mealsight/seed/vision_vocabulary.py was built to close this measurement
+gap: extract_vision_ingredient_names parses the real, checkpointed
+output of every benchmark run (backend/.cache/vision_benchmark_
+checkpoint.jsonl, gitignored, produced by actually running
+scripts/benchmark_vision.py) into a frequency-weighted Counter of raw
+ingredient-name guesses, handling every prompt-variant's output shape
+(plain numbered lists, "item | confidence: high | location: ..."
+annotations, bracketed "<item> | ..." forms) and filtering genuine
+preamble sentences ("Here is the list of food items I can clearly see
+in the image:") without discarding real bare-line items that happen to
+lack a numbering prefix.
+
+Extracting and checking that vocabulary surfaced a second, more
+structural bug: the coverage check itself never applied synonym
+resolution. It compared raw normalized recipe-ingredient strings
+directly against raw nutrition_reference keys - which happened to work
+for the recipe corpus (mostly) but silently broke the moment a synonym
+was actually involved. Concretely: a nutrition row for "green onion"
+had been filed under "scallion" instead (its own literal key, not the
+table's actual canonical target) during the first coverage pass, and
+this was invisible until resolution was actually exercised. Once
+load_nutrition.py's coverage_report was rewritten to resolve through
+ingredient_synonyms the same way a real nutrition lookup would (normalize,
+then resolve_canonical, then check nutrition_reference), nine more of
+these same mismatches surfaced at once - all pre-existing, all from
+phase 1.4's original 83-entry synonym file, where the canonical names
+chosen (American spellings: eggplant, shrimp, arugula, chili, baking
+soda, powdered sugar, self rising flour, cider vinegar) never actually
+matched the nutrition rows filed under their British-spelled equivalents
+(aubergine, prawn, rocket, chilli, bicarbonate soda, icing sugar,
+self-raising flour, apple cider vinegar). Every one of these was a
+rename - one real ingredient, one row, filed under whichever name its
+own synonym table actually calls canonical - rather than a new,
+duplicate entry.
+
+Real numbers, before and after each correction
+------------------------------------------------------
+Naive lowercase-only normalizer (the original measurement): 25.6%
+distinct / 74.4% weighted.
+
+Matcher's real normalizer applied consistently, no synonym resolution
+yet: 25.7% distinct / 75.9% weighted - barely moved, confirming most of
+the original gap was real missing data, not measurement error.
+
+531 nutrition entries added, still no synonym resolution in the
+check: 100.0% / 100.0% (recipe corpus).
+
+Synonym resolution turned on in the coverage check: dropped to 98.1% /
+98.1% - not a regression in the data, a correction in the measurement,
+immediately surfacing the nine mismatched-canonical rows above.
+
+After renaming all nine (plus the "hot sauce" case from section 4) to
+their real canonical names: 483/483 (100.0%) distinct, 2648/2648
+(100.0%) weighted - recipe corpus, final.
+
+Vision vocabulary, measured for the first time ever in this phase:
+51/150 (34.0%) distinct, 1583/1849 (85.6%) weighted. The gap between
+those two numbers is the story: a large fraction of distinct vision
+outputs are one-off hedging noise from weaker prompt variants under
+test ("red with content unclear", "what appear to be red sauce or
+puree", brand-name label misreads like "Chavroux cheese") that no
+synonym table or nutrition row can sensibly resolve, but the bulk of
+actual occurrences - the ingredients the model actually, confidently
+named - are well covered.
+
+64 new ingredient_synonyms.json entries were added (83 to 147) mapping
+real vision-vocabulary phrasing to existing canonicals (white rice,
+long grain rice -> rice; baby carrot -> carrot; half and half cream/
+milk/or cream -> heavy cream; and so on), and a further ~28 nutrition
+rows were added or renamed, reaching the numbers above. Deliberately not
+touched: brown rice and jasmine rice, which already had their own
+accurate dedicated rows before this phase and would have lost precision
+if redirected to generic "rice" just for consistency with the white-rice
+fix.
+
+The coverage-regression guard
+------------------------------------------------------
+backend/tests/test_seed/test_nutrition_coverage.py now checks both
+populations separately: recipe-corpus occurrence-weighted coverage must
+stay at or above 90%, vision-vocabulary occurrence-weighted coverage at
+or above 80% (deliberately lower than the recipe-corpus bar, since a
+meaningful chunk of real vision output is inherent, unresolvable
+hedging noise, documented inline in the test). Both checks read the
+real, already-seeded database (and, for the vision check, the real
+checkpoint file on disk) rather than a synthetic fixture; both skip
+cleanly rather than failing on a machine where the prerequisite hasn't
+been generated yet.
+
+
+10. THE RECIPE ENGINE TOOLS
+=============================================================
+
+search_recipes
+------------------------------------------------------
+Queries recipes by cook time, cuisine, and meal_type in SQL directly,
+then filters by dietary_filters in Python (dietary_tags is stored as a
+JSON column, not queryable by SQL directly). This filter is a hard
+exclusion, not a ranking signal: a recipe missing even one requested tag
+is dropped from the result set entirely, never included but sorted
+lower - there's no such thing as "almost vegan" in this function.
+Recipes with a null cook_time_minutes are excluded from a max_cook_time
+filter outright, since there's no way to confirm they actually satisfy
+it. Returns compact RecipeSummary objects - no ingredient matching here,
+that's what mealsight.matching is for.
+
+get_recipe
+------------------------------------------------------
+Fetches one recipe in full and parses its JSON columns (ingredients,
+steps, dietary_tags) into a typed RecipeDetail. Raises ValueError,
+naming the id, if it doesn't exist - the same convention
+match_recipe_by_id already established in mealsight.matching.
+
+scale_recipe
+------------------------------------------------------
+Scales every ingredient's quantity from a recipe's servings_base to a
+target serving count, following three rules directly from the task:
+
+    Quantities are always shown as human-readable fractions ("1/4 cup"),
+    never raw decimals ("0.25 cups") - _format_quantity uses Python's
+    Fraction.limit_denominator(8), snapping to the nearest common cooking
+    fraction (eighths or coarser).
+
+    Countable units (clove, can, slice, stick, piece, packet, bunch, or
+    no unit at all - a bare "1 onion") round to a whole number after
+    scaling, with a minimum of 1 - real cloves of garlic don't come in
+    fractions, and scaling down should never make a real ingredient
+    disappear. 1.5 cloves scaled by 0.25 (4 servings down to 1) is
+    0.375, which rounds to 1, not 0.
+
+    To-taste and dash-style quantities (dash, pinch, handful, or no
+    quantity at all) are left completely unscaled - there's nothing
+    numeric there to multiply in the first place.
+
+Cook time is only adjusted when the scale factor exceeds 2x or falls
+below 0.5x, using a deliberately mild, sublinear formula
+(scale_factor**0.3) rather than pretending to compute a precise new
+time - doubling a recipe doesn't double how long it takes to cook, but a
+much bigger or smaller batch does take somewhat more or less time, and
+this heuristic says so explicitly in a returned note rather than
+silently changing a number.
+
+calculate_nutrition
+------------------------------------------------------
+Resolves every ingredient through the exact same normalize-then-
+synonym-resolve pipeline the matcher uses, looks up its
+nutrition_reference row, converts its quantity to grams via an explicit
+UNIT_TO_GRAMS table, and sums calories/protein/carbs/fat/fiber/sodium,
+divided by the requested serving count.
+
+The unit-to-grams conversion is a deliberately simple, generic
+approximation - volume units (cup, tbsp, ml) are treated at roughly
+water density, and countable units (clove, can, piece) use one rough
+average weight each - since there's no per-ingredient density table in
+this project. This is a real, documented limitation (a cup of flour and
+a cup of honey do not weigh the same in reality), not something this
+function tries to hide.
+
+Coverage is reported on every single result: ingredients_covered,
+ingredients_total, coverage_pct, and a plain-English coverage_note that
+says outright when a total was computed from partial data ("Nutrition
+calculated from 7 of 8 ingredients (88% coverage) - totals likely
+understate the real values"). The three dietary tags (high_protein,
+low_carb, low_calorie) are only ever applied when coverage_pct exceeds
+80% - a real test in this phase constructs a genuinely high-protein
+recipe, drags its coverage down to 25% with three deliberately uncovered
+filler ingredients, and confirms the tag is suppressed even though the
+underlying protein value would clear the threshold on its own. A tag
+built from a hole in the data is worse than no tag, since it looks
+exactly as confident as one built from complete data.
+
+find_substitutions
+------------------------------------------------------
+Looks up every substitutions.json row for one ingredient, sorted by
+flavor_impact (minimal first), same as the matcher's own substitute
+ranking. reason (unavailable, allergic, dietary, dislike) is recorded on
+the result for context, but the actual hard filtering is driven by a
+separate dietary_restrictions argument, reusing
+substitute_satisfies_dietary_restrictions - the exact same function and
+the exact same tag vocabulary (dairy_free, nut_free, and so on) the
+matcher itself uses for the identical purpose, rather than a second,
+parallel allergy-and-diet system invented just for this one function.
+
+
+11. HOW THIS CONNECTS TO THE REST, AND WHAT'S DEFERRED
+=============================================================
+
+Downstream connections: an agent (a later phase, not built yet) is the
+obvious caller of every function in this phase - search_recipes to find
+candidates under hard constraints, mealsight.matching.match_recipe_by_id
+to score each one against a real pantry, get_recipe/scale_recipe/
+calculate_nutrition/find_substitutions to answer follow-up questions
+about whichever recipe gets chosen. Nothing in this phase has an MCP
+wrapper yet - these are plain, directly-callable Python functions, with
+the wrapper explicitly deferred to a later session.
+
+Two findings from this phase were deliberately left unfixed, recorded in
+docs/KNOWN_ISSUES.md rather than silently left implicit:
+
+    derive_dietary_tags' EGG_TERMS check still uses raw substring
+    matching (the same class of bug assign_importances had, fixed in
+    section 7) - "eggplant" would falsely match "egg". Currently masked
+    because the seeded corpus says "aubergine", not "eggplant" -
+    genuinely live, just not yet triggered by the data on hand.
+
+    Non-protein defining ingredients (potato in Spanish Tortilla) never
+    reach "critical" importance, since assign_importances only ever
+    checks title-text and PROTEIN_TERMS. Deliberately not fixed without
+    a clearer, less subjective pattern to follow - see section 7's
+    importance-heuristic investigation.
+
+
+12. THE TESTS
+=============================================================
+
+test_matching/ (61 tests)
+------------------------------------------------------
+test_normalize.py checks every PROTECTED_TERMS entry survives intact and
+never collapses to its own bare component (sweet potato versus potato,
+cream cheese versus cream), plus container/prep-word stripping and
+plural singularization against real seeded ingredient text.
+
+test_synonyms.py checks exact-match resolution (bell pepper/capsicum
+unify; potato and sweet potato do not) and that resolution is exact, not
+substring ("chicken" resolving to something must not make "chicken
+stock" resolve the same way).
+
+test_specificity.py parametrizes compare_specificity directly across
+every case from the task spec (chicken thighs/chicken full, chicken/
+chicken thighs partial, sweet potato/potato none both directions, ground
+beef/beef full, coconut milk/milk none, red onion/onion full, green
+onion/onion none, salmon/salmon fillet full) plus full match_recipe
+integration tests confirming the score and partial_matches list come out
+right end to end.
+
+test_matcher.py hand-verifies scoring arithmetic on constructed cases -
+full match, one critical missing forcing can_cook False even though the
+raw score clears 0.5, several optional items missing still allowing
+can_cook True, a zero-ingredient recipe scoring 0.0 without a division-
+by-zero, dietary-restricted substitution rejection and acceptance, and
+that a substitute must actually be available in the pantry, not just
+exist in the substitutions table.
+
+test_recipe_engine/ (22 tests)
+------------------------------------------------------
+test_search.py directly asserts the dietary filter is exclusionary
+("a recipe missing the required tag must be excluded outright, not
+merely ranked lower" is the literal assertion message), that unknown
+cook time excludes a recipe from a max_cook_time filter, and that
+get_recipe raises naming the missing id.
+
+test_scaling.py asserts a scaled quantity comes back as "1/2" not "0.5",
+that 1.5 cloves scaled to 0.375 becomes "1" with no "/" in it anywhere,
+that to-taste and dash quantities pass through completely untouched, and
+that cook time is only adjusted outside the 0.5x-2x band (both a case
+inside the band, unadjusted, and a case above it, adjusted).
+
+test_nutrition.py is the one that most directly protects the "never
+present partial data as complete" rule: one test computes a genuinely
+high-protein result, verifies the underlying protein value really does
+clear settings.high_protein_threshold_g, then confirms the tag list
+comes back empty anyway once coverage is dragged down to 25% - proving
+the suppression rule actually fires, not just that it's never been
+triggered.
+
+test_substitutions.py confirms flavor-impact ranking, and specifically
+that a reason="dietary" call with dietary_restrictions=["dairy_free"]
+excludes a dairy substitute that an otherwise-identical
+reason="unavailable" call (no restriction) would happily include.
+
+A latent test-isolation bug, found and fixed while writing these tests
+------------------------------------------------------
+mealsight.matching.synonyms and mealsight.matching.substitutions each
+cache their loaded map process-wide, keyed by nothing - intended for a
+single long-running application process, not a test suite that
+constructs a fresh, different Database per test. Nothing in the test
+suite had ever actually exercised load_synonym_map or
+load_substitution_map against a real Database before this phase (the
+matcher's own tests always pass hand-built dicts directly), so the bug
+had never surfaced. test_recipe_engine/conftest.py now has an autouse
+fixture that calls reset_synonym_cache() and reset_substitution_cache()
+before every test, specifically so whichever test happens to run first
+doesn't silently decide what every later test in the same process sees.
+
+test_nutrition_coverage.py (in test_seed/, not test_matching or
+test_recipe_engine)
+------------------------------------------------------
+Covered in full in section 9. Two tests, each skipping cleanly (not
+failing) when its prerequisite doesn't exist on the current machine -
+recipes.db for the recipe-corpus check, the vision benchmark checkpoint
+file for the vision-vocabulary check.
+
+
+13. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+Whole-word matching versus keeping raw substring containment
+    Covered in section 7. Raw substring containment is simpler code but
+    genuinely wrong whenever a shorter term happens to spell out inside
+    a longer, unrelated word - "egg" inside "reggiano" being the
+    concrete case that actually shipped. \b-bounded regex matching costs
+    almost nothing and closes the entire class of bug at once, not just
+    the one instance that happened to be found.
+
+Renaming mismatched nutrition rows versus adding duplicate new rows
+    Covered in section 9. Once a canonical/nutrition-row mismatch was
+    found (scallion/green onion, and the nine phase-1.4-era pairs),
+    the alternative was leaving the old, unreachable row in place and
+    adding a fresh row under the correct canonical name instead. That
+    would have left two rows describing the same real ingredient, with
+    no guarantee they'd ever be edited together again - a rename keeps
+    exactly one source of truth per ingredient, matching how the
+    "scallion" mistake was itself found and fixed.
+
+Specificity matching as its own module versus folding it into normalize.py
+    Cut/variety words (thigh, breast, red, baby) are deliberately never
+    stripped by normalize_ingredient itself, since a recipe that
+    specifically wants a boneless chicken breast is not indifferent to
+    getting thighs instead for every purpose - only the matcher's own
+    "is this pantry item good enough" comparison should treat them as
+    interchangeable-with-a-caveat. Keeping that judgment in its own
+    module (specificity.py) rather than baking it into normalization
+    keeps normalize_ingredient's job single and clear: turn messy text
+    into a stable string, nothing more.
+
+Frozen vision-vocabulary snapshot versus reading the real checkpoint file
+    A test that reads a small, committed, frozen list of past vision
+    outputs would run identically on every machine, with no dependency
+    on a gitignored artifact. This phase instead reads the real
+    checkpoint file directly (skipping cleanly if it's absent), on the
+    reasoning that the whole point of this check is catching a future
+    vision-prompt change that introduces new vocabulary - a frozen
+    snapshot can only ever check against vocabulary already known at the
+    time it was frozen, and would need manual refreshing to catch
+    anything new, defeating the actual purpose stated in the task this
+    check was built to satisfy.
+
+An explicit unit-to-grams table versus a per-ingredient density table
+    Covered in section 10. A per-ingredient density table (a cup of
+    flour weighs less than a cup of honey) would be more accurate, but
+    this project has no such table, and building one accurately for
+    hundreds of ingredients is its own substantial project. A single,
+    documented, generic approximation is what's actually available, and
+    it's labeled as approximate rather than presented as precise.
+
+reason (a label) versus a full allergen/dietary ontology in
+find_substitutions
+    The task's five-tool spec only names find_substitutions(ingredient_
+    name, reason) directly, but reason alone can't say which specific
+    dietary restriction or allergen actually applies. Rather than
+    inventing a second, parallel restriction vocabulary just for this
+    one function, it reuses dietary_restrictions and the exact same tag
+    set (dairy_free, nut_free, and so on) the rest of this phase already
+    established - one restriction vocabulary for the whole application,
+    not a different one per tool.
+
+
+14. GLOSSARY
+=============================================================
+
+canonical name
+    The standard, preferred name an ingredient resolves to - see phase
+    1.4's notes for the fuller definition; this phase is where a
+    canonical/nutrition-row mismatch first became something the code
+    could actually detect.
+
+cut/variety term
+    A word denoting a specific cut, form, or variety of the same
+    ingredient (thigh, breast, fillet, red, baby) - as opposed to a word
+    that creates a genuinely different ingredient (sweet, cream,
+    coconut). The distinction this phase's specificity matching is built
+    around.
+
+occurrence-weighted coverage
+    What fraction of total ingredient *occurrences* (not just distinct
+    ingredient names) have a matching reference row - see phase 1.4's
+    notes for the original definition; this phase is where a second,
+    separate population (vision vocabulary, not just the recipe corpus)
+    started being measured this way too.
+
+partial match
+    A pantry item that's a less-specific form of what a recipe
+    specifically requires (plain "chicken" against a recipe wanting
+    "chicken thighs") - usable, but not confirmed to be the exact
+    cut/variety wanted.
+
+specificity match
+    Either direction of the cut/variety comparison this phase's
+    mealsight.matching.specificity module implements - full (pantry item
+    at least as specific) or partial (pantry item less specific).
+
+whole-word matching
+    Checking whether a term appears in a string as a complete word (or
+    phrase), using boundaries where the term starts and ends - as
+    opposed to raw substring containment, which will also match a term
+    that merely happens to spell out inside a longer, unrelated word.
+
+
+15. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: Walk me through what happens when a recipe needs "chicken" and the
+pantry has "chicken thighs" - why did that ever fail, and how does it
+work now?
+
+    Normalizing "chicken thighs" gives you "chicken thigh" - "thigh"
+    isn't a container word or a meaningless prep verb, it's a real fact
+    about the cut, so the normalizer correctly leaves it in. That means
+    a plain equality check against normalized "chicken" fails, and the
+    original matcher reported it as fully missing, including flagging
+    it critical-missing when the ingredient was importance="critical" -
+    which is exactly the bug I found running the matcher against a real
+    pantry. The fix was a dedicated comparison, not a normalizer change:
+    compare_specificity checks whether the pantry item's extra words,
+    relative to the requirement, are all recognized cut or variety
+    terms - thigh, breast, fillet, and so on. If they are, the pantry
+    item is at least as specific as what was asked for, so it counts as
+    a full match. I kept this logic out of the normalizer specifically
+    because a recipe that wants a boneless chicken breast isn't
+    indifferent to getting thighs instead for every purpose - only the
+    "is this good enough" comparison should treat them as
+    interchangeable, with the reverse direction (recipe wants thighs,
+    pantry only has plain chicken) scored as a partial match instead of
+    a full one, since there's genuinely less confidence there.
+
+Q: You found the same "raw substring instead of whole word" bug twice -
+once in importance assignment, once you're flagging as still-open in
+dietary tagging. Why fix one and not the other in the same session?
+
+    Because they were found in different tasks with different explicit
+    scopes, and the fix itself, while mechanically simple, changes
+    output for the entire seeded recipe corpus and needs its own
+    re-seed and re-verification pass every time. The importance bug -
+    "egg" matching inside "reggiano" - was found and fixed as part of a
+    task specifically about the importance heuristic. The dietary-tag
+    version of the same bug (the same "egg" pattern would falsely match
+    "eggplant") turned up while I was already in that code reasoning
+    about the fix, but fixing it wasn't what was asked, and doing it
+    anyway would have meant re-auditing dietary tag safety across the
+    whole corpus as an unrequested side effect. I recorded it in
+    docs/KNOWN_ISSUES.md instead, with exactly what a fix would involve,
+    specifically so it doesn't just quietly disappear until someone
+    trips over it in production the way the importance bug was tripped
+    over in a demo run.
+
+Q: The nutrition coverage figure went from a reported 100% down to 98.1%
+before you brought it back up. Doesn't a coverage number getting worse
+mean something regressed?
+
+    No real data got worse - the measurement got more honest. The
+    original 100% was computed by comparing raw normalized ingredient
+    strings straight against raw nutrition_reference keys, with no
+    synonym resolution in the loop at all. That happened to work for
+    most of the recipe corpus, but it meant a nutrition row filed under
+    the wrong key - "scallion" instead of "green onion", which is what
+    the synonym table actually calls it - would never be caught, because
+    the check never exercised the exact same synonym-resolution path a
+    real nutrition lookup would use. The moment I fixed the coverage
+    check to resolve through synonyms properly, nine previously-invisible
+    mismatches like that surfaced at once, all left over from phase
+    1.4's original synonym file choosing American canonical spellings
+    that never matched the British-spelled nutrition rows underneath
+    them. The dip to 98.1% was the check finally measuring the real
+    thing; renaming those nine rows to their actual canonical names is
+    what brought it back to a genuine 100%, not a papered-over one.
+
+Q: calculate_nutrition converts ingredient quantities to grams using a
+fixed unit table. What's the actual limitation there, and would you fix
+it?
+
+    The table treats volume units - a cup, a tablespoon - as roughly
+    water density, and countable units - a clove, a can - as one rough
+    average weight each. That's genuinely wrong for plenty of real
+    ingredients: a cup of flour is much lighter than a cup of honey, and
+    "one clove of garlic" varies a fair amount in real life. I documented
+    that directly in the module rather than hiding it, and the function
+    still reports ingredient coverage separately from unit-conversion
+    accuracy - coverage answers "did we have nutrition data for this
+    ingredient at all," not "was the gram estimate precise." I'd fix the
+    density problem with a real per-ingredient density table if this
+    needed to support anything closer to clinical accuracy, but building
+    one correctly for hundreds of ingredients is a real, separate body of
+    work, and a documented, generic approximation is an honest stand-in
+    until that's actually needed.
+
+Q: can_cook needs both a score threshold and "no critical ingredient
+missing." Why not just fold the critical-missing penalty into the score
+and check the score alone?
+
+    Because the two conditions protect against different failure modes,
+    and folding them into one number can hide the more dangerous one. A
+    recipe missing nine unimportant ingredients out of ten unimportant
+    ones can mathematically clear the same score as a recipe missing one
+    single critical ingredient, depending on exactly how the arithmetic
+    lines up - and I actually have a test built around exactly that:
+    nine matched ingredients, one missing critical one, which nets a
+    0.6 score under the formula, comfortably above the 0.5 threshold,
+    and can_cook still has to come back False. If can_cook only checked
+    the score, that recipe would get recommended as cookable while
+    genuinely missing the one ingredient the dish doesn't work without.
+    Checking both conditions means a critical gap can never be quietly
+    outweighed by a pile of unimportant matches.

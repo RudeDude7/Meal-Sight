@@ -43,6 +43,8 @@ _CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL)
 
 _JPEG_MAGIC = b"\xff\xd8\xff"
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+_WEBP_RIFF_MAGIC = b"RIFF"
+_WEBP_FORMAT_MAGIC = b"WEBP"
 
 
 def estimate_text_tokens(text: str) -> int:
@@ -53,13 +55,18 @@ def estimate_text_tokens(text: str) -> int:
 
 
 def detect_image_media_type(image_bytes: bytes) -> str:
-    """Detects JPEG/PNG from the actual byte signature, not a filename —
-    a caller could hand this an image with any (or no) filename attached."""
+    """Detects JPEG/PNG/WEBP from the actual byte signature, not a
+    filename — a caller could hand this an image with any (or no)
+    filename attached. WEBP is a RIFF container, so it's identified by
+    two separate magic-byte windows (the "RIFF" tag at offset 0, the
+    "WEBP" format tag at offset 8) rather than one contiguous prefix."""
     if image_bytes[: len(_JPEG_MAGIC)] == _JPEG_MAGIC:
         return "image/jpeg"
     if image_bytes[: len(_PNG_MAGIC)] == _PNG_MAGIC:
         return "image/png"
-    raise ValueError("Unrecognized image format — expected JPEG or PNG magic bytes")
+    if image_bytes[:4] == _WEBP_RIFF_MAGIC and image_bytes[8:12] == _WEBP_FORMAT_MAGIC:
+        return "image/webp"
+    raise ValueError("Unrecognized image format — expected JPEG, PNG, or WEBP magic bytes")
 
 
 def _strip_code_fences(text: str) -> str:

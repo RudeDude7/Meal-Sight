@@ -1,0 +1,582 @@
+PHASE 5.1 STUDY NOTES: THE VISION PERCEPTION LAYER
+=============================================================
+
+These notes cover the first round of phase 5: turning a fridge/pantry
+photo into structured, pantry-ready data. Everything below describes
+code that really exists right now, in backend/mealsight/perception/ and
+backend/tests/test_perception/. No agent wiring yet — the same
+deliberate sequencing every prior phase's first round has followed
+(business logic and its own tests first, MCP/agent integration later).
+This is also the first phase in the whole project to depend on a real,
+already-spent benchmark (docs/vision_benchmark_report.md,
+scripts/benchmark_vision.py) rather than building its own reference
+data or reasoning from first principles.
+
+
+1. WHAT THIS PHASE BUILT AND WHY IT COMES NOW
+=============================================================
+
+Phase 1.2 built the provider abstraction layer (get_vision_provider,
+analyze_image) and a real, expensive benchmark determined which model
+and which prompt actually work: mistral-medium-2505 with the
+"B-conservative" prompt, at native resolution, mean F1 0.64. That
+benchmark exists but nothing in the codebase had ever called
+analyze_image with intent to build a real pantry item out of the
+result — the provider layer could describe a photo, but nothing turned
+that description into something mealsight.pantry.update_pantry could
+actually consume. This phase closes that gap: analyze_fridge_photo,
+one function, validates a photo, calls the vision provider with the
+benchmarked prompt (extended, not replaced), and hands back typed,
+pantry-ready items.
+
+This comes now, after phase 3's pantry module and phase 4's user_
+intelligence module are both fully built, for a concrete reason: this
+phase's own post-processing step — deriving each item's category
+locally rather than asking the model for it — depends directly on
+mealsight.pantry.category.resolve_category, which didn't exist before
+phase 3.1. Vision perception was always going to be the last piece
+built on top of the pantry/matching machinery, not the first, because
+it's the one place all of that machinery gets used together against
+real, uncontrolled input (a real photo) rather than the somewhat
+cleaner input every prior phase's own tests hand it.
+
+The task itself opened with an explicit constraint worth restating
+directly, since it shaped every design decision below: the model and
+prompt are benchmark-determined and were not to be substituted. This
+phase's own job was narrower than "build the best possible vision
+pipeline" — it was "wrap the already-proven configuration in real
+validation, real post-processing, and real failure handling, without
+touching what's already been shown to work."
+
+
+2. FILE MAP
+=============================================================
+
+backend/mealsight/perception/models.py
+    RawIdentifiedItem/RawVisionPerception (what the model is asked for
+    — no category) and IdentifiedItem/VisionPerception (what
+    analyze_fridge_photo actually returns, category filled in
+    locally). Section 3.
+
+backend/mealsight/perception/prompt.py
+    VISION_PERCEPTION_PROMPT — the benchmarked PROMPT_CONSERVATIVE,
+    extended. Section 4.
+
+backend/mealsight/perception/validation.py
+    validate_image, ImageValidationError, SUPPORTED_IMAGE_FORMATS,
+    MIN_IMAGE_DIMENSION_PX. Section 5.
+
+backend/mealsight/perception/processor.py
+    analyze_fridge_photo, to_pantry_item_inputs. Sections 7-8.
+
+backend/mealsight/perception/__init__.py
+    Re-exports everything, same convention as every other package
+    __init__.py in this codebase.
+
+backend/mealsight/providers/mistral.py  (EDITED)
+    detect_image_media_type now recognizes WEBP, not just JPEG/PNG.
+    Section 6.
+
+backend/pyproject.toml
+    Pillow added as a real backend dependency (previously only used ad
+    hoc by scripts/, via `uv run --with Pillow`).
+
+backend/tests/test_perception/
+    conftest.py (a fresh pantry.db Database per test, a FakeVisionProvider,
+    real Pillow-generated JPEG/WEBP bytes for validation tests to
+    decode), test_validation.py, test_processor.py — 14 tests, zero
+    live API calls.
+
+
+3. TWO SCHEMAS, NOT ONE, AND WHY
+=============================================================
+
+RawIdentifiedItem/RawVisionPerception is what the model is asked to
+produce and what its JSON response is validated against — name,
+quantity, unit, freshness, confidence. No category field exists on this
+schema at all, which is what actually enforces "category is NOT
+requested from the model": there is no field for the model's own
+category guess to land in even if it tried to supply one. IdentifiedItem/
+VisionPerception is the second, separate schema analyze_fridge_photo
+actually returns, identical to the raw shape except category is now
+present, filled in after the model call by mealsight.pantry.category.
+resolve_category — never copied from anything the model said.
+
+Keeping these as two distinct pydantic models, rather than one schema
+with an optional category field the model might or might not fill in,
+is what makes the boundary structurally enforced rather than merely
+documented: pydantic's own default extra="ignore" behavior means even
+if the model's raw JSON did include a stray "category" key, RawIdentifiedItem.
+model_validate would silently drop it — verified directly in this
+phase's own test suite (test_categories_are_locally_derived_not_from_the_model
+smuggles a bogus category value into the raw JSON and confirms the
+model's guess never survives into the final result).
+
+
+4. THE EXTENDED PROMPT: WHAT CHANGED, WHAT DIDN'T
+=============================================================
+
+VISION_PERCEPTION_PROMPT starts from PROMPT_CONSERVATIVE exactly as it
+exists in scripts/diagnose_vision.py — the "B-conservative" prompt
+scripts/benchmark_vision.py's own multi-sample benchmark ranked highest
+(mean F1 0.64, mistral-medium-2505, native resolution). Two things
+changed, one thing didn't:
+
+Changed: the original prompt asked for one pipe-delimited line per item
+("<name> | confidence: <level>"), parsed by scripts/diagnose_vision.
+py's own parse_item_lines. This phase asks for the same core
+information (name, confidence) plus quantity, unit, and freshness,
+returned as real structured JSON instead — needed because mealsight.
+perception.processor parses into a real pydantic schema
+(RawVisionPerception), not a second copy of the original benchmark's
+own line-parsing regex logic.
+
+Also changed, deliberately: category was never part of the original
+prompt's output shape either, so this isn't a removal — but the new
+prompt's own closing line ("Do not include a category or food-group
+field at all") makes the omission explicit rather than merely implicit,
+specifically because a model asked for a fuller JSON object is more
+likely to volunteer an unrequested field than a model constrained to
+one bare item name per line ever was.
+
+NOT changed, word for word: the explicit permission to respond "I
+cannot identify any items with confidence." docs/vision_benchmark_
+report.md's own findings tie prompt A's catastrophic 0.00 F1 failures
+directly to the ABSENCE of exactly this permission — a model with no
+sanctioned way to say "I'm not sure" hallucinates a full generic fridge
+inventory instead of admitting uncertainty. This phase's prompt keeps
+that same escape hatch, just restated as valid JSON
+({"identified_items": [], "total_items_found": 0, ...}) instead of a
+literal sentence, so the conservative framing's core safety property
+survives the format change intact.
+
+
+5. VALIDATION BEFORE SPENDING AN API CALL
+=============================================================
+
+validate_image runs entirely locally — no network call — checking, in
+order: file size against settings.max_image_size_mb (cheapest check,
+run before ever asking Pillow to decode anything), that the bytes
+actually decode as an image at all (Pillow's own UnidentifiedImageError
+becomes ImageValidationError), that the decoded format is one of
+JPEG/PNG/WEBP, and that both dimensions clear MIN_IMAGE_DIMENSION_PX
+(200px, the identical threshold scripts/diagnose_vision.py's own
+SMALL_IMAGE_DIMENSION_PX already established for "too small to
+plausibly show real fridge/pantry contents" — reused as a judgment
+call, not re-derived from new data).
+
+This is the one place this phase added a real dependency: Pillow,
+previously only ever invoked ad hoc by scripts/ (`uv run --with
+Pillow`), now a genuine backend/pyproject.toml dependency. The
+alternative — hand-rolling magic-byte and dimension parsing for three
+image formats — was rejected as reinventing something a well-tested
+library already does correctly; see section 12.
+
+Every one of this phase's own tests for the rejection paths confirms
+not just that the right exception is raised, but that it's raised
+BEFORE the (mocked) vision provider is ever called — FakeVisionProvider
+tracks every call it receives, and the oversized/wrong-format tests
+assert that list stays empty.
+
+
+6. A REAL GAP FOUND WHILE WIRING THIS UP: WEBP WASN'T SUPPORTED END TO
+   END
+=============================================================
+
+The task named JPEG/PNG/WEBP as the three formats to validate for.
+mealsight.providers.mistral.detect_image_media_type, the function
+analyze_image actually calls to build the real API request's data URL,
+only recognized JPEG and PNG magic bytes — a WEBP image that passed
+this phase's own validate_image cleanly would have hit a raw,
+unhandled ValueError the moment analyze_image tried to build the actual
+request, well past the point this phase's own graceful-degradation
+handling (section 7) was designed to catch it gracefully rather than
+let an unexpected exception type slip through uncaptured by name.
+
+The fix: detect_image_media_type now also recognizes WEBP's real
+signature — a RIFF container, identified by two separate magic-byte
+windows rather than one contiguous prefix (the literal bytes "RIFF" at
+offset 0, "WEBP" at offset 8, with a 4-byte file-size field sitting
+between them). Four lines, in the one place the provider layer already
+does this kind of detection, rather than duplicating image-format
+sniffing a second time inside mealsight.perception itself. This is
+exactly the kind of gap this project has repeatedly chosen to fix at
+its actual source rather than paper over at a higher layer — the same
+instinct phase 2.4 applied to search_recipes's max_cook_time and phase
+3.1 applied nowhere near as directly, but the principle is the same:
+when the task's own requirement exposes a real correctness gap in an
+existing shared module, the fix belongs in that module, not faked
+around it.
+
+
+7. GRACEFUL DEGRADATION: NEVER RAISES
+=============================================================
+
+analyze_fridge_photo has exactly two try/except blocks and no bare
+`except:` anywhere. The first wraps validate_image alone: an
+ImageValidationError becomes an empty VisionPerception whose notes
+field is the validation error's own message, verbatim — so a caller
+sees exactly why the photo was rejected, not a generic failure. The
+second wraps the entire provider call and response-parsing sequence
+together (provider.analyze_image, then JSON parsing, then schema
+validation) — a ProviderError (rate limit, timeout, unavailable, an
+invalid response the provider layer's own retry-and-repair already
+gave up on), a raw json.JSONDecodeError, or a pydantic ValidationError
+all collapse into the identical empty-result-plus-note shape, followed
+by one final bare `except Exception` as the outermost, genuinely-
+unexpected-only backstop — the same three-tier catch shape (specific
+expected exceptions, then a broad Exception catch-all, never a bare
+except:) every MCP server in this project already uses for the
+identical reason.
+
+The task's own framing for why this matters is worth restating
+directly: "The agent must be able to continue with audio and text
+alone." A vision failure here is not this phase's own failure to
+recover from — it's one input channel among several a future agent
+will combine, and the correct behavior for one channel failing is
+"report why, then let the caller decide," never "crash the whole
+perception step." Nothing about mealsight.pantry.update_pantry's own
+NEVER-DELETES-ABSENT-ITEMS guarantee (phase 3.1) needs vision to
+succeed either — an empty VisionPerception converts through
+to_pantry_item_inputs into an empty list, which is a completely
+harmless, no-op call into update_pantry if a caller passes it straight
+through.
+
+
+8. POST-PROCESSING: CANONICALIZATION, LOCAL CATEGORY, AND "DIRECTLY
+   CONSUMABLE"
+=============================================================
+
+Every raw item's name goes through the identical normalize_ingredient +
+resolve_canonical pipeline every other part of this project already
+uses (phase 2.1's matcher, phase 3.1's update_pantry, phase 4.1's
+disliked_ingredients) — the fourth and fifth reuse of this exact
+two-call sequence, not a sixth reimplementation of "scallions" and
+"green onion" meaning the same thing. Category comes from resolve_
+category (phase 3.1), given the already-canonicalized name and a
+shelf_life_map loaded once via load_shelf_life_map — the same "load a
+reference table into memory once, use it in Python" pattern this
+project has used for every cross-database dependency since phase 3.1's
+own synonym-table problem.
+
+to_pantry_item_inputs is the literal, callable answer to "output must
+be directly consumable by update_pantry": it converts VisionPerception.
+identified_items into a real list[PantryItemInput], performing the one
+necessary field rename (this schema's freshness becomes PantryItemInput's
+freshness_status) and leaving PantryItemInput's own "fresh" default to
+apply whenever the model reported no freshness observation at all —
+never guessed at here, the same "null stays null" discipline the task
+asked for applied one level further down the pipeline than where it's
+first enforced (raw quantity/unit/freshness are never defaulted to
+anything either; they pass through analyze_fridge_photo unchanged from
+whatever the model actually said, including staying null).
+
+
+9. HOW THIS CONNECTS TO THE REST
+=============================================================
+
+An agent (still not built) is the obvious eventual caller:
+analyze_fridge_photo on a photo, to_pantry_item_inputs on the result,
+straight into mealsight.pantry.update_pantry — the exact "vision
+analysis identifies a photo's contents, update_pantry merges them in"
+pairing PantryItemInput's own docstring has described since phase 3.1
+("typically the output of a vision analysis pass over a fridge/pantry
+photo"), now a real, tested, callable path rather than a documented
+intention. Nothing about mealsight.pantry, mealsight.matching, or
+mealsight.providers' own public APIs changed to make this phase
+possible, except the one real, narrow WEBP fix in section 6 — every
+other piece this phase depends on (resolve_category, normalize_
+ingredient, resolve_canonical, load_shelf_life_map, get_vision_
+provider) is exactly what phase 1-3 already built and tested.
+
+
+10. THE TESTS
+=============================================================
+
+conftest.py's FakeVisionProvider stands in for the real Mistral vision
+call entirely — a plain class with an async analyze_image method that
+returns a pre-baked TextResponse or raises a pre-baked exception,
+recording every call it receives so a test can assert whether the
+(fake) provider was ever actually reached. Patched in via monkeypatch.
+setattr("mealsight.perception.processor.get_vision_provider", ...) —
+the module-level name as imported into processor.py, not the original
+definition site, the same "patch where a name is looked up, not where
+it's defined" discipline every prior phase's own provider/singleton
+mocking has needed.
+
+test_validation.py (6 tests): a real Pillow-generated JPEG and WEBP
+both pass; an oversized image (settings.max_image_size_mb monkeypatched
+down to a tiny value) is rejected naming the size; a real, decodable
+GIF is rejected naming the format (proving the format check fires on a
+genuinely valid image of the wrong kind, not just on garbage bytes);
+genuinely undecodable bytes are rejected; an image below
+MIN_IMAGE_DIMENSION_PX on either side is rejected naming the minimum.
+
+test_processor.py (8 tests): a valid response parses and canonicalizes
+(a raw "scallions" comes back as "green onion" via a hand-built
+synonym_map, the same testability pattern every other pantry-adjacent
+function in this project already supports); an oversized image and a
+completely non-image byte string are both confirmed rejected with the
+FakeVisionProvider never actually called; a response missing quantity/
+unit fields entirely still parses (RawIdentifiedItem's own Optional
+defaults absorb it); a provider failure (ProviderUnavailable) returns
+an empty result with a note, not a raised exception; an invalid-JSON
+response does the same; a smuggled "category" field in the raw JSON is
+confirmed ignored in favor of the real, locally-derived value; and
+to_pantry_item_inputs' own shape (the freshness -> freshness_status
+rename, the real category present) is checked directly.
+
+
+11. VERIFICATION: THE REAL API, AND WHAT F1 ACTUALLY DID
+=============================================================
+
+ruff/mypy --strict/full pytest all clean (349 tests total, no
+regressions in anything phase 1 through 4.3 already built — including
+tests/test_providers, confirmed unaffected by the WEBP fix). Against
+the real Mistral API, analyze_fridge_photo ran on test_data/images/
+photo_01.jpg through photo_05.jpg, printing the complete structured
+VisionPerception for each — clean, sensible items throughout, locally-
+derived categories, nulls genuinely left null rather than guessed.
+
+Scored against test_data/eval_cases/image_ground_truth.csv using the
+real assign_matches bipartite matcher from scripts/benchmark_vision.py
+(not a reimplementation — imported directly), two independent runs
+produced mean F1 0.641 and 0.617, averaging to roughly 0.63 against the
+documented 0.64 baseline for the name-only benchmark. Both runs fall
+well inside the run-to-run noise this project's own benchmark report
+already flags as normal (its own STDDEV_FLAG_THRESHOLD is 0.10, and
+these two runs differ from each other by about 0.024) — the honest
+conclusion, and the one this phase's task specifically asked to be
+checked for, is that asking for quantity, unit, and freshness alongside
+each item's name did NOT meaningfully degrade name-identification
+accuracy.
+
+A verification-script bug, not a product bug
+------------------------------------------------------
+The first full verification run appeared to hang after printing every
+result — all five images' full output and the summary block printed
+correctly, but the process never exited, eventually getting killed by
+the shell timeout. Isolated by bisection (a raw provider.analyze_image
+call closed cleanly in ~3 seconds; loading the synonym map and shelf-
+life map both completed instantly; asyncio.run(main()) itself returned
+and the print after it executed — yet the process still hung) down to
+one specific cause: the verification script's own get_pantry_db()/
+get_recipe_db() singleton connections were never closed. aiosqlite runs
+a background worker thread per open connection, and a Python process
+won't exit while a non-daemon thread is still alive — so every
+verification script from here on needs to call mealsight.db.close_all()
+(alongside mealsight.providers.close(), already established practice)
+in a finally block, not just at the end of the happy path. Confirmed
+by adding exactly that: the identical script, unchanged otherwise,
+exited cleanly with code 0. Worth recording for the same reason a
+similar hang was recorded during phase 3.3's own verification: a script
+that produces the right output but never exits is a real, if narrow,
+category of bug, and this specific cause (unclosed aiosqlite
+connections keeping a background thread alive) hadn't shown up in any
+prior phase's verification because no earlier phase's script both
+opened a real Database AND ran long enough for the hang to be
+noticeable rather than masked by the script's own short runtime.
+
+
+12. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+Two separate pydantic schemas (raw vs. final) versus one schema with an
+optional category field
+    Covered in section 3. One schema with category: str | None = None
+    would work in the sense that the model would never be told the
+    field name, but it leaves the door open for a future prompt edit to
+    accidentally start requesting it, or for a model to volunteer one
+    anyway with nothing structurally stopping it from being accepted.
+    Two schemas make "the model literally cannot supply a category that
+    survives" a property of the type system, not a documentation
+    promise — confirmed directly by the smuggled-field test in section
+    10.
+
+Extending the benchmarked prompt's OUTPUT FORMAT (pipe-delimited lines
+-> JSON) versus keeping the original line format and parsing three more
+fields out of free text per line
+    The original format could theoretically have been extended with
+    more pipe-delimited fields ("<name> | confidence: <level> |
+    quantity: <n> | unit: <u> | freshness: <f>"), avoiding any format
+    change at all. Rejected because parsing free-text pipe-delimited
+    fields back into typed quantity (a float) and confidence (a closed
+    enum) reliably is strictly harder and more fragile than asking for
+    real JSON and validating it against a real pydantic schema — this
+    project already has a proven JSON-completion-plus-repair pattern
+    (mealsight.providers.mistral.complete_json) for text completions,
+    and structured JSON is the more natural fit for a five-field-per-
+    item response than an ever-longer pipe-delimited line would be. The
+    one part of the original prompt this change could NOT touch without
+    breaking the whole point of reusing a benchmarked prompt — the
+    explicit "I cannot identify anything" permission — was preserved
+    word for word specifically because it wasn't a formatting detail;
+    it was the one thing docs/vision_benchmark_report.md ties directly
+    to preventing catastrophic 0.00 F1 failures.
+
+Fixing WEBP support in mealsight.providers.mistral versus converting
+WEBP to JPEG/PNG inside mealsight.perception before ever calling the
+provider
+    A conversion step (decode with Pillow, re-encode as JPEG) would
+    have worked without touching providers/mistral.py at all — but it's
+    strictly more code, an unnecessary re-encoding pass on every WEBP
+    image (a real, if small, quality/fidelity cost on top of the
+    now-known-to-matter downscaling sensitivity docs/vision_benchmark_
+    report.md already documented), and it would leave detect_image_
+    media_type's own real limitation undiscovered and unfixed for the
+    next caller who hands it a WEBP image directly. Four lines fixing
+    the actual gap, in the one place image-format detection already
+    happens, was the smaller and more honest change.
+
+Pillow as a real dependency versus hand-rolled format/dimension parsing
+    Covered in section 5. JPEG, PNG, and WEBP each have their own
+    binary header format for dimensions, and getting all three right
+    (including edge cases like a JPEG with multiple SOF markers, or a
+    WEBP's several possible chunk layouts) is exactly the kind of
+    "small correctness surface that's actually much bigger than it
+    looks" problem a battle-tested library is worth a real dependency
+    for — especially one this project already trusts and already uses
+    elsewhere (scripts/diagnose_vision.py, scripts/benchmark_vision.py
+    both already lean on PIL.Image for identical reasons).
+
+
+13. GLOSSARY
+=============================================================
+
+canonical name
+    See phase 1.4/2.1/3.1's notes for the fuller definition — this
+    phase is the second place (after phase 3.1's pantry rows) a
+    canonical name is what actually gets stored as an item's identity,
+    rather than whatever raw text a model or a human originally typed.
+
+graceful degradation
+    This phase's own term for analyze_fridge_photo's core guarantee:
+    every failure mode (bad input, provider failure, unparseable
+    response, anything else unexpected) returns a normal, valid, empty
+    VisionPerception with an explanatory note, never an exception —
+    section 7.
+
+raw schema / final schema
+    RawVisionPerception (what the model produces, no category) versus
+    VisionPerception (what analyze_fridge_photo returns, category
+    filled in locally) — section 3's two-schema design, not two names
+    for the same shape.
+
+structurally enforced (versus documented)
+    A guarantee the type system itself makes true — RawIdentifiedItem
+    having no category field at all, rather than a category field the
+    model is merely asked (in the prompt) not to fill in — the
+    distinction section 3 and section 12 both lean on.
+
+
+14. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: The task said the model and prompt were already benchmark-determined
+and shouldn't be substituted. How did you make sure you actually
+followed that, rather than drifting from it while adding the new
+fields?
+
+    I started from the literal text of PROMPT_CONSERVATIVE in scripts/
+    diagnose_vision.py rather than writing a new prompt from the
+    benchmark's description of it, and I kept the one sentence docs/
+    vision_benchmark_report.md's own findings specifically credit for
+    preventing catastrophic failures — the explicit permission to say
+    "I cannot identify anything with confidence" — word for word,
+    restated as JSON rather than paraphrased. The only things I actually
+    changed were the output format (JSON instead of pipe-delimited
+    lines, needed so I could parse into a real schema) and the fields
+    requested (adding quantity/unit/freshness, explicitly declining to
+    add category). I verified the model itself was untouched by reading
+    settings.VISION_MODEL directly rather than hardcoding a model string
+    in this phase's own code, so there's no way for this module to
+    silently diverge from whatever the config says is the benchmarked
+    model.
+
+Q: You found and fixed a real bug in mealsight.providers.mistral while
+building this — WEBP wasn't actually supported end to end. How did you
+find it, and why fix it there instead of working around it in your own
+module?
+
+    I found it by reading detect_image_media_type's actual
+    implementation before writing my own validate_image, specifically
+    because the task named JPEG/PNG/WEBP as the three formats to accept
+    — I wanted to confirm the full pipeline, not just my own local
+    check, actually supported all three. It only recognized JPEG and
+    PNG magic bytes; a WEBP image that passed my own validation cleanly
+    would have hit a raw ValueError the moment the provider layer tried
+    to build the actual API request. I fixed it in mistral.py rather
+    than converting WEBP to JPEG inside my own module because the real
+    gap was in image-format detection, which already lives in exactly
+    one place in this codebase — duplicating a second, perception-local
+    WEBP detector (or a conversion step) would have left the actual bug
+    unfixed for any other future caller of analyze_image with a WEBP
+    image, and would have meant re-encoding every WEBP photo through
+    Pillow for no reason beyond working around a four-line gap.
+
+Q: analyze_fridge_photo never raises, even on a provider failure. Walk
+me through the actual exception handling, and why it's structured the
+way it is rather than one broad try/except around the whole function.
+
+    There are two separate try/except blocks, not one, because the two
+    failure categories need different messages: an ImageValidationError
+    from the pre-flight check gets its own specific message (why THIS
+    image was rejected) surfaced directly into the result's notes
+    field, while anything that goes wrong during or after the actual
+    provider call — a rate limit, a timeout, an invalid response the
+    provider's own retry-and-repair already gave up on, a JSON parse
+    failure, a schema validation failure — collapses into one generic
+    "vision analysis was unavailable" note, since by that point the
+    caller doesn't need to know exactly which of several possible
+    provider-layer failures occurred, just that the photo-derived data
+    isn't available this time. Both blocks end the same way structurally
+    though: specific expected exception types caught first, then one
+    final bare `except Exception` — never a bare `except:` — as the
+    outermost backstop for anything genuinely unexpected, the identical
+    three-tier shape every MCP server in this project already uses for
+    the same reason: an agent combining this with other input channels
+    needs "continue without this one" to actually be reachable code, not
+    just documented intent.
+
+Q: You ran the real F1 comparison twice and got 0.641 and 0.617 against
+a 0.64 baseline. How did you decide that wasn't a real regression?
+
+    Because the size of the difference is smaller than the noise this
+    project's own benchmark methodology already expects and flags for.
+    scripts/benchmark_vision.py runs every (model, prompt, image)
+    combination three times specifically because a single sample is
+    noisy, and it flags any cell whose stddev across those three reps
+    exceeds 0.10 as HIGH VARIANCE — meaning swings of that size between
+    independent runs of the identical configuration are already known,
+    documented, normal behavior for this model at temperature 0. My two
+    runs differed from each other by about 0.024, and both sat within
+    about 0.02-0.04 of the 0.64 baseline — nowhere near that 0.10
+    threshold. If I'd only run it once and gotten 0.617, I might have
+    reported "close to baseline, can't fully rule out a small
+    regression"; running it twice and seeing it land on both sides of
+    0.64 is what actually let me say the extended prompt didn't degrade
+    name accuracy, rather than just hoping a single sample was
+    representative.
+
+Q: Your first full verification run printed everything correctly but
+the process wouldn't exit. What was actually happening, and how is that
+different from a bug in the perception code itself?
+
+    I bisected it rather than guessing: I confirmed a raw provider.
+    analyze_image call closed cleanly on its own, confirmed loading the
+    synonym map and shelf-life map both completed instantly, and
+    confirmed asyncio.run(main()) itself actually returned — the print
+    statement immediately after it executed. That ruled out every piece
+    of actual perception logic; the hang was happening after all of my
+    code had already finished running, which meant it had to be a
+    process-level issue, not a logic bug. The real cause was that my
+    verification script never closed the mealsight.db singleton
+    connections it opened — aiosqlite keeps a background worker thread
+    alive per open connection, and a Python process won't exit while
+    any non-daemon thread is still running, so the interpreter just sat
+    there waiting for a thread nothing was ever going to stop. Adding
+    close_all() in a finally block, alongside the provider client close
+    I already had, fixed it immediately — confirmed by rerunning the
+    identical script and getting a clean exit code 0. It's a real
+    category of bug, just one that lives entirely in test/verification
+    scaffolding rather than in mealsight.perception itself.

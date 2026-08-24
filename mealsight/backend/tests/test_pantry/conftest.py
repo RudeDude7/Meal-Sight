@@ -14,11 +14,19 @@ import pytest
 
 from mealsight.db.connection import SCHEMA_DIR, Database
 from mealsight.db.init import init_database
+from mealsight.matching.synonyms import reset_synonym_cache
 from mealsight.pantry.shelf_life import reset_shelf_life_cache
 
 
 @pytest.fixture(autouse=True)
 def _reset_caches() -> None:
+    # reset_synonym_cache matters here too, not just reset_shelf_life_
+    # cache: test_section_coverage.py is the first test in this
+    # directory that reads the *real* recipes.db synonym table rather
+    # than passing a hand-built map directly, so a stale cache left
+    # over from another test could otherwise leak into it — the same
+    # cross-test cache hazard phase 2.3/2.4 both had to guard against.
+    reset_synonym_cache()
     reset_shelf_life_cache()
 
 

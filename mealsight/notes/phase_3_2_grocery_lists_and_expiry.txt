@@ -1,0 +1,541 @@
+PHASE 3.2 STUDY NOTES: EXPIRY FLAGGING, GROCERY LISTS, AND THE SECTION-
+COVERAGE FIX
+=============================================================
+
+These notes cover the second round of phase 3: flag_expiring,
+create_grocery_list, get_grocery_list, and set_grocery_item_checked —
+plus a real bug this round found in its own first version and had to
+fix before the feature was actually usable. Everything below describes
+code and data that really exist right now, in
+backend/mealsight/pantry/expiring.py, grocery.py, and category.py, and
+backend/tests/test_pantry/.
+
+This phase happened in two passes, and the notes are organized the same
+way: first the two tools as originally built (section 3-4), then the
+real coverage problem found in verification and the fix for it (section
+5) — a shape this project has now hit three times running (phase 2.2's
+importance-heuristic bugs, phase 2.3's nutrition-coverage measurement
+gap, and this one), each time because a feature's first version worked
+correctly against a small hand-checked example but the real, full corpus
+told a different story.
+
+
+1. WHAT THIS PHASE BUILT AND WHY IT COMES NOW
+=============================================================
+
+Phase 3.1 built the plumbing for what's currently in the pantry -
+merging reported items, reading them back, removing what gets used. This
+phase builds the two things that plumbing exists to eventually support:
+flag_expiring, which turns "what's in the pantry" into "what needs
+attention soon," and create_grocery_list/get_grocery_list, which turns
+"what a recipe is missing" into an actual, organized shopping list. Both
+are still plain Python, no MCP wrapper - phase 3.1's notes already
+explained why that split exists, and it holds here too.
+
+The reason this couldn't have been built any differently from the start:
+create_grocery_list needs to put every missing ingredient into a store
+section, and the only category data that existed when this phase began
+was shelf_life_reference - a table built in phase 3.1 for a completely
+different purpose (predicting when food goes bad), covering only 86
+ingredients. The very first version of create_grocery_list read section
+straight from that table, and the very first real grocery list built
+from real missing ingredients put 14 of its 17 items in OTHER. Section 5
+is the fix.
+
+
+2. FILE MAP
+=============================================================
+
+backend/mealsight/pantry/expiring.py
+    flag_expiring - section 3.
+
+backend/mealsight/pantry/grocery.py
+    create_grocery_list, get_grocery_list, set_grocery_item_checked,
+    CATEGORY_TO_SECTION, STAPLE_ITEMS, SECTION_ORDER - section 4.
+
+backend/mealsight/pantry/category.py
+    New in this phase's second pass. resolve_category,
+    EXPLICIT_CATEGORY_MAP, and the five keyword-rule term lists this
+    module owns (VEGETABLE_TERMS, FRUIT_TERMS, GRAIN_TERMS,
+    CONDIMENT_TERMS, SPICE_TERMS) - section 5.
+
+backend/mealsight/seed/data/shelf_life.json
+    508 entries (was 86 at the start of this phase).
+
+backend/mealsight/pantry/models.py
+    New in this phase: ExpiringItem, MissingIngredientInput,
+    RecipeMissingIngredients, GroceryQuantity, GroceryListItem,
+    GroceryListSection, GroceryList, and the GrocerySection Literal type.
+
+backend/tests/test_pantry/test_expiring.py
+    7 tests.
+
+backend/tests/test_pantry/test_grocery.py
+    11 tests.
+
+backend/tests/test_pantry/test_category.py
+    New in this phase's second pass - 11 tests.
+
+backend/tests/test_pantry/test_section_coverage.py
+    New in this phase's second pass - the coverage-regression guard,
+    same shape as phase 2.3's test_nutrition_coverage.py.
+
+
+3. flag_expiring
+=============================================================
+
+Reuses get_pantry entirely rather than recomputing days_remaining itself
+- flag_expiring's whole job is filtering and sorting what get_pantry
+already returns, plus deciding what to suggest. Items are sorted by
+days_remaining ascending, which - with no special-casing needed at all -
+puts an already-overdue item (a negative days_remaining) first, ahead of
+anything still counting down; ascending numeric sort just does the right
+thing here for free.
+
+suggested_action follows a small, fixed priority: already past zero days
+remaining gets its own distinct action ("already expired..."), not
+folded into a generic "use within N days" message that would understate
+how urgent it actually is; 0 or 1 days remaining says "use today"; past
+that, if the item's own category has a real frozen shelf life on file
+(CATEGORY_DEFAULTS, from phase 3.1), it suggests "freeze to extend"
+rather than just counting down; otherwise it says exactly how many days
+are left. An egg (protein category, but no real frozen storage value in
+the reference data) never gets told to freeze; a chicken thigh with a
+few days left does.
+
+
+4. create_grocery_list / get_grocery_list
+=============================================================
+
+Deduplication and quantity combination
+------------------------------------------------------
+Every missing ingredient goes through the same normalize-then-resolve
+pipeline as every other pantry function, so two recipes both missing
+"garlic" (or one missing "scallions" and another missing "green onion")
+produce exactly one line. Quantities combine only when their units
+literally match - 2 cloves plus 3 cloves becomes one (5, "clove") entry
+- because converting between genuinely different units (2 cloves versus
+1 head of garlic) isn't something this project has a conversion table
+for, and guessing at one silently would be worse than just keeping both
+numbers visible. Mismatched units stay as separate GroceryQuantity
+entries on the same line instead - milk needed as "1 cup" by one recipe
+and "1 l" by another shows up as two quantities under one "milk" line,
+not a wrong combined number.
+
+Importance across recipes
+------------------------------------------------------
+When the same ingredient is missing from more than one recipe at
+different importance levels, the line takes the more critical of the
+two - a _IMPORTANCE_RANK dict (critical=0, important=1, optional=2) and
+a plain min() over every occurrence. An ingredient critical to one
+recipe and merely optional to another still needs to actually be bought
+to make the critical recipe, so the line reflects that, not an average
+or the last-seen value.
+
+Staples
+------------------------------------------------------
+STAPLE_ITEMS is a small, exact-match set (oil, salt, pepper, flour,
+sugar, butter, and a handful of common dried spices) - exact-set
+membership, deliberately, not a substring or keyword check, since this
+list exists purely to add a verify_note, not to reclassify anything, and
+there's no reason to risk a false match here. A staple item still gets a
+normal grocery-list line; it just also carries is_staple=True and a note
+suggesting the user check what they already have before buying more,
+rather than this module silently assuming a staple must always be
+bought.
+
+Persistence
+------------------------------------------------------
+Each created list is stored as one grocery_lists row, with every
+section (already computed, sorted, and cost-free) serialized straight to
+JSON in the items column. get_grocery_list either fetches by id or,
+when none is given, the single most recently created row with
+status='active' (ORDER BY id DESC LIMIT 1 - simpler and just as correct
+as sorting by the created_at timestamp string, since ids are already
+monotonically assigned). set_grocery_item_checked resolves the given
+item name through the same normalize/resolve pipeline, finds the
+matching line across every section, flips its checked flag, and
+re-persists the whole structure - an item name that doesn't actually
+appear on the list is a no-op, not an error, since there's nothing wrong
+about asking to check off something that was never on the list to begin
+with.
+
+Cost estimation, explicitly not attempted
+------------------------------------------------------
+grocery_lists.estimated_total_cost (a real column, from phase 1.3's
+schema) is left null everywhere in this module. No price data exists
+anywhere in this project - no source, no reference table, nothing to
+compute a real number from - and fabricating one would be actively
+worse than an honest null, the same reasoning phase 2.3's nutrition_
+data.json used for values it genuinely didn't have solid sourcing for.
+
+
+5. THE SECTION-COVERAGE PROBLEM, AND THE CATEGORY RESOLVER
+=============================================================
+
+What went wrong
+------------------------------------------------------
+create_grocery_list's first version derived a missing ingredient's
+store section by looking its canonical name up directly in shelf_life_
+reference and reading that row's own category column. That table
+existed for a completely different reason (predicting shelf life,
+phase 3.1) and only had 86 rows in it - against roughly 483 distinct
+ingredients across the real seeded recipe corpus, a mere 13.5% match
+rate. Running create_grocery_list against three real recipes' real
+missing ingredients put 14 of 17 lines in OTHER - a grouping so sparse
+it wasn't actually useful for anything.
+
+The real fix: decoupling category from shelf life
+------------------------------------------------------
+mealsight/pantry/category.py's whole reason to exist is a single,
+direct realization: a grocery list needs a section for every ingredient,
+but only perishables need a shelf life at all. Coupling the two meant an
+ingredient with no curated shelf-life data yet - a brand new recipe, a
+vision-vocabulary term nobody's gotten to - fell into OTHER not because
+it was genuinely uncategorizable, just because nobody had entered its
+refrigerated/frozen/pantry day counts yet. resolve_category answers a
+narrower, easier question ("what kind of thing is this") using three
+fallback layers instead of one lookup:
+
+    1. An exact shelf_life_reference row, when one exists - still the
+       most trustworthy source, whenever it happens to be available.
+    2. EXPLICIT_CATEGORY_MAP - hand-authored for specific ingredients
+       the keyword rules below would get wrong or miss outright ("water"
+       isn't any of the eight real buckets; "corn" is vegetable, not
+       grain, even though "corn flour" - a real grain-keyword hit - is).
+    3. Whole-word keyword rules over the canonical name - reusing
+       mealsight.seed.recipe_parsing's own DAIRY_TERMS and PROTEIN_TERMS
+       directly rather than duplicating them (those lists are already
+       hardened against the exact substring-collision bug class phase
+       2.2 found), plus four new term lists this module owns for
+       vegetable, fruit, grain, and condiment/spice, matched with the
+       same \\b-bounded regex phase 2.2's fix already established -
+       never raw `term in name` containment, for the identical reason:
+       a raw check would let "cheese" match inside "cheesecake" the same
+       way "egg" once matched inside "reggiano".
+    4. "other", only if nothing above matched anything at all.
+
+Real bugs found expanding shelf_life.json to close the gap
+------------------------------------------------------
+Bringing shelf_life.json's real coverage up (this phase's other half of
+the fix - see below) surfaced two more instances of a bug pattern this
+project has now hit several times: a canonical-name mismatch, invisible
+until something actually exercises the exact lookup path a real caller
+uses.
+
+    "ground beef" and "beef" were both real, separate entries in the
+    original 86-row file - but normalize_ingredient strips "ground" as a
+    preparation modifier, so both collapsed to the identical database
+    key at load time, and INSERT OR REPLACE silently kept only whichever
+    one loaded last. The fix was the same as every prior instance of
+    this bug (phase 1.4's near-duplicate nutrition keys, phase 2.3's
+    nine mismatched synonym canonicals): remove the redundant entry
+    rather than pretend two rows can coexist under one key.
+
+    "ginger" - 25 separate recipes' worth of occurrences, one of the
+    single most common ingredients in the entire corpus - simply had no
+    shelf_life.json entry at all, an outright oversight from the
+    original 86-entry file, not a subtler bug. Caught only because this
+    phase's coverage-measurement script checks the real, complete
+    uncovered list by frequency, the same discipline phase 2.3 already
+    established for nutrition coverage (never trust a top-20 slice when
+    the real list is checkable).
+
+A third mistake, caught by re-reading rather than by a test, worth
+naming honestly: several tree nuts (almond, walnut, cashew, pecan,
+hazelnut) were first entered into the expanded shelf_life.json under
+category "fruit" - which, through CATEGORY_TO_SECTION, would have
+routed them into the produce section of a grocery list. Nuts aren't
+produce. They were reclassified to "grain" (the closest real bucket to
+a dry-goods/baking aisle) before ever being loaded into the real
+database - an authoring mistake caught and fixed within the same
+session, not left for a test to eventually surface.
+
+The real numbers
+------------------------------------------------------
+Before this phase's fix: 67/495 (13.5%) of distinct recipe-corpus
+ingredients had a shelf_life_reference row at all (68/483, 14.1%, once
+measured with synonym resolution applied the same way phase 2.3 taught -
+raw string comparison without it undercounts the same way it did for
+nutrition coverage). A real grocery list built from three real recipes'
+missing ingredients put 14 of 17 items in OTHER, across only 4 populated
+sections.
+
+After expanding shelf_life.json (86 to 508 entries) and building the
+category resolver: shelf-life-only coverage reached 483/483 (100.0%) -
+every distinct ingredient in the real corpus now has a genuine,
+curated row, not a category default. Section coverage via
+resolve_category (the number that actually matters for grocery
+grouping) reached 480/483 (99.4%) - the three that remain
+uncategorized are "water", "boiling water" (both correctly, deliberately
+routed to "other" via EXPLICIT_CATEGORY_MAP, since water genuinely isn't
+a grocery-store-aisle item - not a real gap), and "khu khu" (a single,
+garbled, unidentifiable ingredient name from the source recipe text -
+one occurrence in the whole corpus, not worth chasing further). The same
+three-recipe grocery list, rebuilt after the fix, spread across 6
+populated sections instead of 4, with OTHER down to a single line
+(water) instead of 14.
+
+
+6. HOW THIS CONNECTS TO THE REST
+=============================================================
+
+An agent (still not built) is the obvious caller of both tools here -
+flag_expiring to proactively surface "your spinach is about to turn"
+without being asked, create_grocery_list after checking what several
+candidate recipes are missing (mealsight.matching.match_recipe_by_id,
+phase 2.1) and deciding to actually shop for one of them. Nothing in
+this phase calls into mealsight.recipe_engine or mealsight.matching
+directly - assembling a RecipeMissingIngredients list from a real
+match_ingredients result plus a real get_recipe call (to recover
+quantity/unit, which MissingItem itself doesn't carry - phase 3.1's
+notes already covered why) is exactly the kind of cross-module stitching
+this project has consistently treated as the agent's job, not any one
+module's.
+
+The next session, per the established pattern (phase 2's matcher and
+recipe_engine before phase 2.4's MCP wrapper, phase 3.1's pantry
+functions before this phase's grocery/expiry functions), wraps
+everything in mealsight.pantry as MCP tools.
+
+
+7. THE TESTS
+=============================================================
+
+test_expiring.py (7 tests)
+------------------------------------------------------
+An empty pantry returning an empty list rather than erroring; urgency
+ordering with an already-expired item, a same-day item, and a
+comfortably-fine item all inserted out of order and confirmed to come
+back sorted correctly; the already-expired item specifically getting a
+distinct action string; a same-day item saying "use today"; a
+protein-category item with a few days left suggesting "freeze to
+extend" (checked against the real CATEGORY_DEFAULTS entry, not a
+hand-waved assumption); items outside the threshold, and items with
+unknown shelf life, both correctly excluded.
+
+test_grocery.py (11 tests)
+------------------------------------------------------
+Duplicate ingredients across two recipes collapsing to one line with a
+correctly summed quantity and the more-critical importance winning;
+mismatched units staying as two separate quantities rather than being
+wrongly added together; a staple item getting is_staple=True and a real
+verify_note, a non-staple item getting neither; section grouping checked
+directly against a hand-seeded shelf_life_reference (including one
+ingredient deliberately seeded under an unexpected category, to prove
+the section really comes from that row and not an assumption); synonym-
+differing names deduplicating in the grocery list the same way they do
+in the pantry itself; a created list round-tripping through
+get_grocery_list unchanged; get_grocery_list defaulting to the most
+recent active list, returning None for an unknown id, and returning
+None cleanly when no list exists at all; set_grocery_item_checked
+actually persisting its change, confirmed by an independent reload.
+
+test_category.py (11 tests)
+------------------------------------------------------
+An exact shelf_life_reference row winning over every other layer (using
+a deliberately wrong category for onion to actually prove priority, not
+just assume it); EXPLICIT_CATEGORY_MAP firing for "water" and "corn"
+when no reference row exists; each of the keyword-rule categories
+getting its own direct test, including the two reused straight from
+recipe_parsing (protein, dairy); and, the one test that matters most for
+catching a regression of phase 2.2's original bug class - "cheesecake"
+confirmed NOT to resolve as dairy, proving whole-word matching is
+actually doing its job and not just present in a docstring's claim.
+
+test_section_coverage.py (1 test)
+------------------------------------------------------
+The coverage-regression guard, built the same way phase 2.3's test_
+nutrition_coverage.py already was: checks the real, already-seeded
+recipes.db and pantry.db directly (not a synthetic fixture), fails if
+section coverage drops below 90%, and skips cleanly on a machine where
+recipes.db hasn't been seeded yet. This is what makes the fix in section
+5 durable rather than a one-time measurement - a future recipe addition
+that introduces enough new, uncategorizable vocabulary now fails a test
+instead of silently degrading grocery-list grouping the exact way this
+phase's own first version did.
+
+A cache-reset fixture, extended
+------------------------------------------------------
+phase 3.1's conftest.py already reset mealsight.pantry.shelf_life's
+cache before every test. This phase's test_section_coverage.py is the
+first test in this directory to actually read the real recipes.db
+synonym table rather than passing a hand-built map directly, so the
+autouse fixture now resets mealsight.matching.synonyms' cache too - the
+same latent cross-test cache hazard phase 2.3 and phase 2.4 both had to
+guard against, caught here before it ever had a chance to cause a
+flaky, order-dependent test failure.
+
+
+8. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+Coupling section to shelf_life_reference versus a separate resolver
+    Covered in full in section 5 - this is the actual fix this phase
+    made, not a rejected alternative, but it's worth stating the
+    rejected option plainly: keep reading category from shelf_life_
+    reference, and simply expand that table until its coverage was good
+    enough. That was tried first (shelf_life.json genuinely was
+    expanded, 86 to 508 entries) and it wasn't sufficient on its own -
+    any ingredient that shows up in a future recipe before someone gets
+    around to curating its real shelf-life numbers would still fall
+    through to OTHER under that design, no matter how large the
+    reference table grows. Decoupling the two questions is what makes
+    the fix durable against ingredients nobody's added shelf-life data
+    for yet, not just the ones already in the corpus today.
+
+Reusing recipe_parsing's DAIRY_TERMS/PROTEIN_TERMS versus writing new
+term lists for every category
+    The two lists this phase reuses directly were already fixed once,
+    in phase 2.2, against a real substring-collision bug ("egg" matching
+    inside "reggiano"). Writing a second, parallel dairy/protein term
+    list for grocery categorization specifically would have meant that
+    fix wasn't actually shared - a future collision found and fixed in
+    one list would leave the other one just as broken. The four new term
+    lists this phase does add (vegetable, fruit, grain, condiment/spice)
+    have no existing equivalent anywhere in this codebase to reuse
+    instead.
+
+An exact-match STAPLE_ITEMS set versus a keyword rule
+    A keyword-based staple check (matching "oil" as a substring inside
+    any ingredient name containing it, say) would catch more variations
+    with less authoring effort, but STAPLE_ITEMS only ever adds an
+    advisory note - it never changes what section an item lands in or
+    whether it appears on the list at all. Given the low stakes of a
+    false negative here (a staple simply doesn't get flagged, the same
+    as any other item) against the real cost of a false positive
+    (telling someone to double-check an ingredient that isn't actually a
+    common staple), exact-set membership was the safer, simpler choice
+    for something this low-consequence.
+
+Ordering by id versus created_at for "most recent active list"
+    grocery_lists.created_at is a TIMESTAMP column stored as a plain
+    string (the same representation phase 3.1's notes already covered
+    for pantry.added_date/last_seen_date) - comparing those strings
+    directly works for ISO-shaped timestamps, but id is already a plain
+    monotonically increasing integer with no string-comparison edge
+    cases to worry about at all, and it's exactly as correct here since
+    a later-created row always has a larger id. Simpler wins with
+    nothing given up.
+
+
+9. GLOSSARY
+=============================================================
+
+canonical-mismatch bug (this project's own recurring pattern)
+    A reference-data row filed under one spelling or form while the
+    lookup path that's supposed to find it (normalization, synonym
+    resolution, or both) actually produces a different key - so the row
+    exists, but nothing real ever finds it. Found and fixed at least
+    four separate times across this project so far (phase 1.4's near-
+    duplicate nutrition keys, phase 2.3's nine mismatched synonym
+    canonicals and the "hot sauce"/"sauce" collapse, and this phase's
+    "ground beef"/"beef" collision) - always invisible until something
+    actually exercises the real lookup path with real, full data, never
+    caught by a test built only against a small hand-picked example.
+
+category (mealsight.pantry.category)
+    What kind of ingredient something is (protein, vegetable, fruit,
+    dairy, grain, condiment, spice, or other) - a purely descriptive
+    classification, deliberately independent of whether that ingredient
+    happens to have curated shelf-life data.
+
+section (mealsight.pantry.grocery)
+    Which physical area of a grocery store an item belongs to (produce,
+    protein, dairy, bakery, pantry, frozen, spices, other) - derived
+    from category via a fixed CATEGORY_TO_SECTION map, one level removed
+    from category itself so the two vocabularies can each have exactly
+    the granularity their own purpose actually needs.
+
+staple
+    A common kitchen ingredient (oil, salt, common dried spices, and so
+    on) a real household usually already has open, even if a photo never
+    caught it - flagged with a verify note rather than assumed to need
+    buying.
+
+
+10. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: Your grocery list feature's first real test run put most items in an
+"OTHER" bucket. Walk me through why, and what the actual fix was - not
+just "add more data."
+
+    The root cause wasn't that the reference data was too small, though
+    it genuinely was - it's that I'd coupled two questions that don't
+    actually need to be coupled at all. create_grocery_list was reading
+    an ingredient's grocery section straight out of shelf_life_
+    reference, a table that exists to answer "how long does this last,"
+    curated for exactly the ingredients someone had bothered to look up
+    real refrigerated/frozen/pantry day counts for - 86 of them, against
+    roughly 483 real ingredients in the actual recipe corpus. Any
+    ingredient without a shelf-life entry fell through to OTHER, not
+    because it was genuinely uncategorizable, but purely because nobody
+    had entered its shelf-life numbers yet. I did expand that table
+    substantially - 86 to 508 entries - but the real fix was building a
+    separate resolver, resolve_category, that answers "what kind of
+    thing is this" on its own: an exact reference row if one exists,
+    then a small hand-authored map for specific edge cases, then
+    keyword rules, then "other" as a genuine last resort. That's what
+    makes the fix durable against a brand new ingredient six months from
+    now that nobody's curated shelf-life data for yet - it still gets
+    correctly categorized, just without shelf-life data specifically.
+
+Q: You mention reusing DAIRY_TERMS and PROTEIN_TERMS from a completely
+different module built for dietary tagging. Why not just write your own
+term lists tailored to grocery categorization?
+
+    Because those two lists had already been through a real bug fix I
+    didn't want to have to repeat separately. Phase 2.2 found that a
+    naive substring check let "egg" match inside "reggiano" purely by
+    spelling coincidence, and fixed it with whole-word regex matching.
+    If I'd written a second, parallel dairy-and-protein term list just
+    for grocery categorization, that fix would only ever live in one of
+    the two copies - any future collision found and fixed in one list
+    would leave the other just as broken, and nobody reviewing a change
+    to one would necessarily think to check the other. Reusing the exact
+    same lists, already hardened, meant this phase inherited that fix
+    for free instead of needing its own copy of the same lesson.
+
+Q: How did you actually verify the category resolver was working, versus
+just trusting it produced fewer OTHER results than before?
+
+    Two ways, and I think both mattered. The narrow one: I wrote a
+    dedicated whole-word-matching test using "cheesecake" specifically -
+    it contains the substring "cheese" but isn't dairy, and if my
+    keyword check were doing raw substring containment instead of
+    \b-bounded regex matching, that test would fail immediately. The
+    broad one: a real coverage test that checks the real, seeded
+    recipes.db directly, computes resolve_category for every genuinely
+    distinct ingredient in the actual corpus, and asserts at least 90%
+    resolve to something other than "other" - not a synthetic fixture
+    standing in for real data, the same real-database-coverage-test
+    pattern this project already used for nutrition coverage. Together
+    they check two different things: the mechanism is correct in
+    principle, and it actually performs well against the real, full,
+    messy data it has to work against in practice - which is exactly
+    where this feature's first version looked fine on paper and quietly
+    wasn't.
+
+Q: While expanding the shelf-life data for this fix, you found a
+"ground beef" versus "beef" collision. What happened there, and is it
+the same bug as anything found in an earlier phase?
+
+    Yes, the same underlying pattern, just a new instance of it.
+    normalize_ingredient strips "ground" as a preparation modifier - the
+    same rule that correctly turns "Ground Cinnamon" into "cinnamon" -
+    so "ground beef" and "beef" both normalize down to the identical
+    string, "beef". shelf_life.json had both as separate, genuinely
+    different entries with different real shelf-life numbers, but the
+    loader writes rows keyed by that normalized string with INSERT OR
+    REPLACE, so the second one loaded silently overwrote the first with
+    no error or warning at all. I'd seen this exact shape of bug twice
+    before by this point - phase 1.4's near-duplicate nutrition keys,
+    and phase 2.3's nine synonym-canonical mismatches - so I actually
+    went looking for it deliberately this time, by running a small
+    script that normalizes every key in the file and checks for
+    collisions, rather than waiting to trip over it by accident. Found
+    it, removed the redundant "ground beef" entry, kept "beef" - the
+    same fix every prior instance of this bug got, since two rows can
+    never actually coexist under one key regardless of how the
+    collision happened.

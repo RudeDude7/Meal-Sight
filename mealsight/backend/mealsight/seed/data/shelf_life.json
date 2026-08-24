@@ -1,99 +1,3571 @@
 {
   "_meta": {
     "note": "Hand-curated, approximate shelf-life guidance (days), drawn from typical USDA FoodSafety.gov storage guidance for each item's common raw/generic form. Keys (item_name) are the exact normalized ingredient name strings produced by mealsight.matching.normalize.normalize_ingredient, chosen to cover the proteins, vegetables, fruits, dairy, grains, and condiments that actually appear in the seeded recipe corpus and in the vision-model vocabulary (see mealsight.seed.vision_vocabulary). shelf_days_refrigerated/frozen/pantry are null wherever that storage mode genuinely doesn't apply (e.g. eggs are not typically frozen whole; salt has no real pantry shelf-life limit at all — represented here as a very large number instead of null, since it IS pantry-storable, just effectively indefinitely). These are approximations for relative comparison (estimating whether an item is getting old), not food-safety-certified expiration dates.",
-    "categories": ["protein", "vegetable", "fruit", "dairy", "grain", "condiment"]
+    "categories": [
+      "protein",
+      "vegetable",
+      "fruit",
+      "dairy",
+      "grain",
+      "condiment"
+    ]
   },
   "items": [
-    {"item_name": "chicken", "category": "protein", "shelf_days_refrigerated": 2, "shelf_days_frozen": 270, "shelf_days_pantry": null},
-    {"item_name": "chicken breast", "category": "protein", "shelf_days_refrigerated": 2, "shelf_days_frozen": 270, "shelf_days_pantry": null},
-    {"item_name": "chicken thigh", "category": "protein", "shelf_days_refrigerated": 2, "shelf_days_frozen": 270, "shelf_days_pantry": null},
-    {"item_name": "ground beef", "category": "protein", "shelf_days_refrigerated": 2, "shelf_days_frozen": 120, "shelf_days_pantry": null},
-    {"item_name": "beef", "category": "protein", "shelf_days_refrigerated": 4, "shelf_days_frozen": 180, "shelf_days_pantry": null},
-    {"item_name": "pork", "category": "protein", "shelf_days_refrigerated": 4, "shelf_days_frozen": 180, "shelf_days_pantry": null},
-    {"item_name": "bacon", "category": "protein", "shelf_days_refrigerated": 7, "shelf_days_frozen": 30, "shelf_days_pantry": null},
-    {"item_name": "sausage", "category": "protein", "shelf_days_refrigerated": 2, "shelf_days_frozen": 60, "shelf_days_pantry": null},
-    {"item_name": "lamb", "category": "protein", "shelf_days_refrigerated": 4, "shelf_days_frozen": 180, "shelf_days_pantry": null},
-    {"item_name": "salmon", "category": "protein", "shelf_days_refrigerated": 2, "shelf_days_frozen": 90, "shelf_days_pantry": null},
-    {"item_name": "tuna", "category": "protein", "shelf_days_refrigerated": 2, "shelf_days_frozen": 90, "shelf_days_pantry": null},
-    {"item_name": "shrimp", "category": "protein", "shelf_days_refrigerated": 2, "shelf_days_frozen": 180, "shelf_days_pantry": null},
-    {"item_name": "cod", "category": "protein", "shelf_days_refrigerated": 2, "shelf_days_frozen": 180, "shelf_days_pantry": null},
-    {"item_name": "egg", "category": "protein", "shelf_days_refrigerated": 35, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "tofu", "category": "protein", "shelf_days_refrigerated": 7, "shelf_days_frozen": 150, "shelf_days_pantry": null},
-    {"item_name": "ham", "category": "protein", "shelf_days_refrigerated": 5, "shelf_days_frozen": 60, "shelf_days_pantry": null},
-
-    {"item_name": "onion", "category": "vegetable", "shelf_days_refrigerated": 30, "shelf_days_frozen": null, "shelf_days_pantry": 30},
-    {"item_name": "green onion", "category": "vegetable", "shelf_days_refrigerated": 7, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "garlic", "category": "vegetable", "shelf_days_refrigerated": 90, "shelf_days_frozen": null, "shelf_days_pantry": 90},
-    {"item_name": "potato", "category": "vegetable", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 60},
-    {"item_name": "sweet potato", "category": "vegetable", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 30},
-    {"item_name": "carrot", "category": "vegetable", "shelf_days_refrigerated": 21, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "celery", "category": "vegetable", "shelf_days_refrigerated": 14, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "tomato", "category": "vegetable", "shelf_days_refrigerated": 7, "shelf_days_frozen": null, "shelf_days_pantry": 5},
-    {"item_name": "bell pepper", "category": "vegetable", "shelf_days_refrigerated": 10, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "mushroom", "category": "vegetable", "shelf_days_refrigerated": 7, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "broccoli", "category": "vegetable", "shelf_days_refrigerated": 7, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "cabbage", "category": "vegetable", "shelf_days_refrigerated": 60, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "spinach", "category": "vegetable", "shelf_days_refrigerated": 5, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "lettuce", "category": "vegetable", "shelf_days_refrigerated": 7, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "cucumber", "category": "vegetable", "shelf_days_refrigerated": 7, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "courgette", "category": "vegetable", "shelf_days_refrigerated": 7, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "green bean", "category": "vegetable", "shelf_days_refrigerated": 5, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "sweetcorn", "category": "vegetable", "shelf_days_refrigerated": 3, "shelf_days_frozen": 240, "shelf_days_pantry": null},
-    {"item_name": "cauliflower", "category": "vegetable", "shelf_days_refrigerated": 10, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "eggplant", "category": "vegetable", "shelf_days_refrigerated": 5, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "beetroot", "category": "vegetable", "shelf_days_refrigerated": 21, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "radish", "category": "vegetable", "shelf_days_refrigerated": 14, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "asparagus", "category": "vegetable", "shelf_days_refrigerated": 4, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "avocado", "category": "vegetable", "shelf_days_refrigerated": 5, "shelf_days_frozen": null, "shelf_days_pantry": 5},
-
-    {"item_name": "apple", "category": "fruit", "shelf_days_refrigerated": 30, "shelf_days_frozen": null, "shelf_days_pantry": 7},
-    {"item_name": "banana", "category": "fruit", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 5},
-    {"item_name": "orange", "category": "fruit", "shelf_days_refrigerated": 30, "shelf_days_frozen": null, "shelf_days_pantry": 14},
-    {"item_name": "lemon", "category": "fruit", "shelf_days_refrigerated": 30, "shelf_days_frozen": null, "shelf_days_pantry": 14},
-    {"item_name": "lime", "category": "fruit", "shelf_days_refrigerated": 30, "shelf_days_frozen": null, "shelf_days_pantry": 14},
-    {"item_name": "strawberry", "category": "fruit", "shelf_days_refrigerated": 5, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "blueberry", "category": "fruit", "shelf_days_refrigerated": 10, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "grape", "category": "fruit", "shelf_days_refrigerated": 7, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "pear", "category": "fruit", "shelf_days_refrigerated": 14, "shelf_days_frozen": null, "shelf_days_pantry": 5},
-    {"item_name": "peach", "category": "fruit", "shelf_days_refrigerated": 5, "shelf_days_frozen": null, "shelf_days_pantry": 3},
-    {"item_name": "mango", "category": "fruit", "shelf_days_refrigerated": 5, "shelf_days_frozen": null, "shelf_days_pantry": 5},
-    {"item_name": "cherry", "category": "fruit", "shelf_days_refrigerated": 10, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "raspberry", "category": "fruit", "shelf_days_refrigerated": 3, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "blackberry", "category": "fruit", "shelf_days_refrigerated": 5, "shelf_days_frozen": null, "shelf_days_pantry": null},
-
-    {"item_name": "milk", "category": "dairy", "shelf_days_refrigerated": 7, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "butter", "category": "dairy", "shelf_days_refrigerated": 60, "shelf_days_frozen": 180, "shelf_days_pantry": null},
-    {"item_name": "cheese", "category": "dairy", "shelf_days_refrigerated": 30, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "cheddar cheese", "category": "dairy", "shelf_days_refrigerated": 30, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "yogurt", "category": "dairy", "shelf_days_refrigerated": 14, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "cream", "category": "dairy", "shelf_days_refrigerated": 10, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "heavy cream", "category": "dairy", "shelf_days_refrigerated": 10, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "sour cream", "category": "dairy", "shelf_days_refrigerated": 21, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "cottage cheese", "category": "dairy", "shelf_days_refrigerated": 14, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "parmesan", "category": "dairy", "shelf_days_refrigerated": 60, "shelf_days_frozen": null, "shelf_days_pantry": null},
-
-    {"item_name": "rice", "category": "grain", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 730},
-    {"item_name": "white rice", "category": "grain", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 730},
-    {"item_name": "brown rice", "category": "grain", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 180},
-    {"item_name": "flour", "category": "grain", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 365},
-    {"item_name": "bread", "category": "grain", "shelf_days_refrigerated": null, "shelf_days_frozen": 90, "shelf_days_pantry": 5},
-    {"item_name": "pasta", "category": "grain", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 730},
-    {"item_name": "spaghetti", "category": "grain", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 730},
-    {"item_name": "oat", "category": "grain", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 365},
-    {"item_name": "granola", "category": "grain", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 180},
-
-    {"item_name": "sugar", "category": "condiment", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 730},
-    {"item_name": "salt", "category": "condiment", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 3650},
-    {"item_name": "olive oil", "category": "condiment", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 540},
-    {"item_name": "vegetable oil", "category": "condiment", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 365},
-    {"item_name": "soy sauce", "category": "condiment", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 1095},
-    {"item_name": "vinegar", "category": "condiment", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 1095},
-    {"item_name": "mayonnaise", "category": "condiment", "shelf_days_refrigerated": 60, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "tomato ketchup", "category": "condiment", "shelf_days_refrigerated": 180, "shelf_days_frozen": null, "shelf_days_pantry": 365},
-    {"item_name": "dijon mustard", "category": "condiment", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 365},
-    {"item_name": "honey", "category": "condiment", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 3650},
-    {"item_name": "peanut butter", "category": "condiment", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 270},
-    {"item_name": "jam", "category": "condiment", "shelf_days_refrigerated": 365, "shelf_days_frozen": null, "shelf_days_pantry": null},
-    {"item_name": "hot sauce", "category": "condiment", "shelf_days_refrigerated": null, "shelf_days_frozen": null, "shelf_days_pantry": 1095}
+    {
+      "item_name": "chicken",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 270,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "chicken breast",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 270,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "chicken thigh",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 270,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "beef",
+      "category": "protein",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "pork",
+      "category": "protein",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "bacon",
+      "category": "protein",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": 30,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "sausage",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 60,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "lamb",
+      "category": "protein",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "salmon",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "tuna",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "shrimp",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "cod",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "egg",
+      "category": "protein",
+      "shelf_days_refrigerated": 35,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "tofu",
+      "category": "protein",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": 150,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "ham",
+      "category": "protein",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": 60,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "onion",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 30
+    },
+    {
+      "item_name": "green onion",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "garlic",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 90,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 90
+    },
+    {
+      "item_name": "potato",
+      "category": "vegetable",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 60
+    },
+    {
+      "item_name": "sweet potato",
+      "category": "vegetable",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 30
+    },
+    {
+      "item_name": "carrot",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 21,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "celery",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "tomato",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 5
+    },
+    {
+      "item_name": "bell pepper",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "mushroom",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "broccoli",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "cabbage",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 60,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "spinach",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "lettuce",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "cucumber",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "courgette",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "green bean",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "sweetcorn",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 3,
+      "shelf_days_frozen": 240,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "cauliflower",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "eggplant",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "beetroot",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 21,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "radish",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "asparagus",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "avocado",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 5
+    },
+    {
+      "item_name": "apple",
+      "category": "fruit",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 7
+    },
+    {
+      "item_name": "banana",
+      "category": "fruit",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 5
+    },
+    {
+      "item_name": "orange",
+      "category": "fruit",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 14
+    },
+    {
+      "item_name": "lemon",
+      "category": "fruit",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 14
+    },
+    {
+      "item_name": "lime",
+      "category": "fruit",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 14
+    },
+    {
+      "item_name": "strawberry",
+      "category": "fruit",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "blueberry",
+      "category": "fruit",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "grape",
+      "category": "fruit",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "pear",
+      "category": "fruit",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 5
+    },
+    {
+      "item_name": "peach",
+      "category": "fruit",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 3
+    },
+    {
+      "item_name": "mango",
+      "category": "fruit",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 5
+    },
+    {
+      "item_name": "cherry",
+      "category": "fruit",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "raspberry",
+      "category": "fruit",
+      "shelf_days_refrigerated": 3,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "blackberry",
+      "category": "fruit",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "milk",
+      "category": "dairy",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "butter",
+      "category": "dairy",
+      "shelf_days_refrigerated": 60,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "cheese",
+      "category": "dairy",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "cheddar cheese",
+      "category": "dairy",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "yogurt",
+      "category": "dairy",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "cream",
+      "category": "dairy",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "heavy cream",
+      "category": "dairy",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "sour cream",
+      "category": "dairy",
+      "shelf_days_refrigerated": 21,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "cottage cheese",
+      "category": "dairy",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "parmesan",
+      "category": "dairy",
+      "shelf_days_refrigerated": 60,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "rice",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "white rice",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "brown rice",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 180
+    },
+    {
+      "item_name": "flour",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "bread",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": 5
+    },
+    {
+      "item_name": "pasta",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "spaghetti",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "oat",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "granola",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 180
+    },
+    {
+      "item_name": "sugar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "salt",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 3650
+    },
+    {
+      "item_name": "olive oil",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 540
+    },
+    {
+      "item_name": "vegetable oil",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "soy sauce",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "vinegar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "mayonnaise",
+      "category": "condiment",
+      "shelf_days_refrigerated": 60,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "tomato ketchup",
+      "category": "condiment",
+      "shelf_days_refrigerated": 180,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "dijon mustard",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "honey",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 3650
+    },
+    {
+      "item_name": "peanut butter",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 270
+    },
+    {
+      "item_name": "jam",
+      "category": "condiment",
+      "shelf_days_refrigerated": 365,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "hot sauce",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "parsley",
+      "category": "spice",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "bay leaf",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "thyme",
+      "category": "spice",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "cilantro",
+      "category": "spice",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "paprika",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "cinnamon",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "cumin",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "vanilla extract",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "allspice",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "nutmeg",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "basil",
+      "category": "spice",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "mint",
+      "category": "spice",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "red chilli",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "rosemary",
+      "category": "spice",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "cardamom",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "greek yogurt",
+      "category": "dairy",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "oregano",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "harissa spice",
+      "category": "condiment",
+      "shelf_days_refrigerated": 180,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "sea salt",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 3650
+    },
+    {
+      "item_name": "cayenne pepper",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "garam masala",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "garlic powder",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "green chilli",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "cinnamon stick",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "dill",
+      "category": "spice",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "saffron",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "turmeric",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "chives",
+      "category": "spice",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "curry powder",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "sage",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "celery salt",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 3650
+    },
+    {
+      "item_name": "cumin seed",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "marjoram",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "onion salt",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 3650
+    },
+    {
+      "item_name": "red pepper flake",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "chili powder",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "cocoa",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "fennel seed",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "kosher salt",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 3650
+    },
+    {
+      "item_name": "mustard powder",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "star anise",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "red chilli flake",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "red chilli powder",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "smoked paprika",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "biryani masala",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "cajun",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "caraway seed",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "coriander seed",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "fajita seasoning",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "fenugreek",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "italian seasoning",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "lemon zest",
+      "category": "fruit",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "mixed spice",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "mustard seed",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "orange zest",
+      "category": "fruit",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "ras el hanout",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "sichuan pepper",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "smoky paprika",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "tarragon leaf",
+      "category": "spice",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "turmeric powder",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "bouquet garni",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "chicken stock",
+      "category": "condiment",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "beef stock",
+      "category": "condiment",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "vegetable stock",
+      "category": "condiment",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "fish stock",
+      "category": "condiment",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "chicken stock cube",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "vegetable stock cube",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "tomato puree",
+      "category": "condiment",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "tomato pur e",
+      "category": "condiment",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "worcestershire sauce",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "red wine vinegar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "english mustard",
+      "category": "condiment",
+      "shelf_days_refrigerated": 365,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "passata",
+      "category": "condiment",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "white vinegar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "balsamic vinegar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "barbeque sauce",
+      "category": "condiment",
+      "shelf_days_refrigerated": 180,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "cider vinegar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "cooking wine",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "rice vinegar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "white wine vinegar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "fish sauce",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "maple syrup",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "oyster sauce",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "black treacle",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "golden syrup",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "mustard",
+      "category": "condiment",
+      "shelf_days_refrigerated": 365,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "starch",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "apricot jam",
+      "category": "condiment",
+      "shelf_days_refrigerated": 365,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "raspberry jam",
+      "category": "condiment",
+      "shelf_days_refrigerated": 365,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "duck sauce",
+      "category": "condiment",
+      "shelf_days_refrigerated": 180,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "enchilada sauce",
+      "category": "condiment",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "garlic sauce",
+      "category": "condiment",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "gochujang",
+      "category": "condiment",
+      "shelf_days_refrigerated": 365,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "ginger garlic paste",
+      "category": "condiment",
+      "shelf_days_refrigerated": 21,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "ginger paste",
+      "category": "condiment",
+      "shelf_days_refrigerated": 21,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "green salsa",
+      "category": "condiment",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "horseradish",
+      "category": "condiment",
+      "shelf_days_refrigerated": 90,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "malt vinegar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "massaman curry paste",
+      "category": "condiment",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "pickle juice",
+      "category": "condiment",
+      "shelf_days_refrigerated": 365,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "dill pickle",
+      "category": "condiment",
+      "shelf_days_refrigerated": 365,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "salsa",
+      "category": "condiment",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "tabasco sauce",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "tahini",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "tamarind ball",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "tamarind paste",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "thai fish sauce",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "thai green curry paste",
+      "category": "condiment",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "thai red curry paste",
+      "category": "condiment",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "tomato sauce",
+      "category": "condiment",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "vinaigrette dressing",
+      "category": "condiment",
+      "shelf_days_refrigerated": 90,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "doubanjiang",
+      "category": "condiment",
+      "shelf_days_refrigerated": 365,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "dark soy sauce",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "fermented black bean",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "caramel sauce",
+      "category": "condiment",
+      "shelf_days_refrigerated": 90,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "caramel",
+      "category": "condiment",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 180
+    },
+    {
+      "item_name": "caper",
+      "category": "condiment",
+      "shelf_days_refrigerated": 365,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "candied peel",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "mixed peel",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "glace cherry",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "mincemeat",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "rose water",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "orange blossom water",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "white wine",
+      "category": "condiment",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "red wine",
+      "category": "condiment",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "dry white wine",
+      "category": "condiment",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "brandy",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 3650
+    },
+    {
+      "item_name": "sake",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "grand marnier",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 3650
+    },
+    {
+      "item_name": "dark rum",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 3650
+    },
+    {
+      "item_name": "mirin",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "sherry",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "stout",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 270
+    },
+    {
+      "item_name": "ginger cordial",
+      "category": "condiment",
+      "shelf_days_refrigerated": 365,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "all purpose flour",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "baking powder",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "powdered sugar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "self rising flour",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "brown sugar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "muscovado sugar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "cornstarch",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "corn flour",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "breadcrumb",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 180
+    },
+    {
+      "item_name": "basmati rice",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "demerara sugar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "light brown soft sugar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "dark brown soft sugar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "dark brown sugar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "dark soft brown sugar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "coco sugar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "granulated sugar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "puff pastry",
+      "category": "grain",
+      "shelf_days_refrigerated": 3,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "shortcrust pastry",
+      "category": "grain",
+      "shelf_days_refrigerated": 3,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "yeast",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "macaroni",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "lasagne sheet",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "linguine pasta",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "couscous",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "rice stick noodle",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "bulgur wheat",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "farfalle",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "fettuccine",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "filo pastry",
+      "category": "grain",
+      "shelf_days_refrigerated": 3,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "flour tortilla",
+      "category": "grain",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "corn tortilla",
+      "category": "grain",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "jasmine rice",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "mixed grain",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "naan bread",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": 5
+    },
+    {
+      "item_name": "noodle",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "oatmeal",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "paccheri pasta",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "paella rice",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "penne rigate",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "pita bread",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": 5
+    },
+    {
+      "item_name": "quinoa",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "rice noodle",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "rice vermicelli",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "rigatoni",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "rolled oats",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "udon noodle",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "vermicelli pasta",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "wheat",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "white flour",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "wholegrain bread",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": 5
+    },
+    {
+      "item_name": "hard taco shell",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 180
+    },
+    {
+      "item_name": "baguette",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": 3
+    },
+    {
+      "item_name": "bun",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": 5
+    },
+    {
+      "item_name": "english muffin",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": 5
+    },
+    {
+      "item_name": "sesame seed burger bun",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": 5
+    },
+    {
+      "item_name": "wonton skin",
+      "category": "grain",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "toor dal",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "potato starch",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "custard powder",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "pretzel",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 180
+    },
+    {
+      "item_name": "rice krispy",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 180
+    },
+    {
+      "item_name": "garlic clove",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 90,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 90
+    },
+    {
+      "item_name": "leek",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "red onion",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 30
+    },
+    {
+      "item_name": "red pepper",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "yellow pepper",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "green pepper",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "zucchini",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "black olive",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 21,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "green olive",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 21,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "pitted black olive",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 21,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "chickpea",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "peas",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": 240,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "kale",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "shallot",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 30
+    },
+    {
+      "item_name": "cherry tomato",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "celeriac",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 21,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "fennel",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "brown lentil",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "cannellini bean",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "challot",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 30
+    },
+    {
+      "item_name": "kidney bean",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "broad bean",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": 240,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "lentil",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "green pepper flake",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "arugula",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "bean sprout",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 3,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "butter bean",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "butternut squash",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "chestnut mushroom",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "corn",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 3,
+      "shelf_days_frozen": 240,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "egg plant",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "fennel bulb",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "jerusalem artichoke",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "pumpkin",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "sauerkraut",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "scotch bonnet",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "shiitake mushroom",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "squash",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "swede",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 21,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "water chestnut",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": 240,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "baby aubergine",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "baby plum tomato",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "borlotti bean",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "brussel sprout",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "chinese broccoli",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "charlotte potato",
+      "category": "vegetable",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 60
+    },
+    {
+      "item_name": "floury potato",
+      "category": "vegetable",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 60
+    },
+    {
+      "item_name": "french lentil",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "green red lentil",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "grape tomato",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "haricot bean",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "iceberg lettuce",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "little gem lettuce",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "plum tomato",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "refried bean",
+      "category": "grain",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "roasted vegetable",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "stir fry vegetable",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": 240,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "sugar snap peas",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "sun tomato",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "tinned tomato",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "turnip",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 21,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "vine leaf",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "vine tomato",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "wild mushroom",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "wood ear mushroom",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "baked bean",
+      "category": "grain",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "almond",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "lemon juice",
+      "category": "fruit",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "apricot",
+      "category": "fruit",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 3
+    },
+    {
+      "item_name": "braeburn apple",
+      "category": "fruit",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 7
+    },
+    {
+      "item_name": "bramley apple",
+      "category": "fruit",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 7
+    },
+    {
+      "item_name": "currant",
+      "category": "fruit",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "raisin",
+      "category": "fruit",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "sultana",
+      "category": "fruit",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "flaked almond",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "peanut",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 270
+    },
+    {
+      "item_name": "pecan nut",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 270
+    },
+    {
+      "item_name": "almond extract",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "fruit",
+      "category": "fruit",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "fruit mix",
+      "category": "fruit",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "coconut milk",
+      "category": "condiment",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "cashew nut",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 270
+    },
+    {
+      "item_name": "pine nut",
+      "category": "fruit",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 180
+    },
+    {
+      "item_name": "walnut",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 270
+    },
+    {
+      "item_name": "cashew",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 270
+    },
+    {
+      "item_name": "chestnut",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 90
+    },
+    {
+      "item_name": "hazlenut",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 270
+    },
+    {
+      "item_name": "medjool date",
+      "category": "fruit",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 180
+    },
+    {
+      "item_name": "redcurrant",
+      "category": "fruit",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "rhubarb",
+      "category": "fruit",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "ackee",
+      "category": "fruit",
+      "shelf_days_refrigerated": 3,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "double cream",
+      "category": "dairy",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "cream cheese",
+      "category": "dairy",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "creme fraiche",
+      "category": "dairy",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "dark chocolate",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "gruyere",
+      "category": "dairy",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "mozzarella",
+      "category": "dairy",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "custard",
+      "category": "dairy",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "salted butter",
+      "category": "dairy",
+      "shelf_days_refrigerated": 60,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "unsalted butter",
+      "category": "dairy",
+      "shelf_days_refrigerated": 60,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "feta",
+      "category": "dairy",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "mascarpone",
+      "category": "dairy",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "single cream",
+      "category": "dairy",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "ricotta",
+      "category": "dairy",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "condensed milk",
+      "category": "dairy",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "ghee",
+      "category": "dairy",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "monterey jack cheese",
+      "category": "dairy",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "ice cream",
+      "category": "dairy",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "milk chocolate",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 270
+    },
+    {
+      "item_name": "mozzarella ball",
+      "category": "dairy",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "pecorino",
+      "category": "dairy",
+      "shelf_days_refrigerated": 60,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "white chocolate chip",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 270
+    },
+    {
+      "item_name": "chocolate chip",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 270
+    },
+    {
+      "item_name": "dark chocolate chip",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 270
+    },
+    {
+      "item_name": "cacao",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "brie",
+      "category": "dairy",
+      "shelf_days_refrigerated": 21,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "cheese curd",
+      "category": "dairy",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "chocolate",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "clotted cream",
+      "category": "dairy",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "coconut cream",
+      "category": "condiment",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "colby jack cheese",
+      "category": "dairy",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "creamed corn",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "desiccated coconut",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "fromage frai",
+      "category": "dairy",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "full fat yogurt",
+      "category": "dairy",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "goat cheese",
+      "category": "dairy",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "gouda cheese",
+      "category": "dairy",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "gruyere cheese",
+      "category": "dairy",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "mexican cheese",
+      "category": "dairy",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "paneer",
+      "category": "dairy",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "semi skimmed milk",
+      "category": "dairy",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "soya milk",
+      "category": "dairy",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "almond milk",
+      "category": "dairy",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "stilton cheese",
+      "category": "dairy",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "vegan butter",
+      "category": "dairy",
+      "shelf_days_refrigerated": 60,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "feta cheese",
+      "category": "dairy",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "parmigiano reggiano",
+      "category": "dairy",
+      "shelf_days_refrigerated": 60,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "gruy re",
+      "category": "dairy",
+      "shelf_days_refrigerated": 60,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "peanut cooky",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 30
+    },
+    {
+      "item_name": "peanut brittle",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 90
+    },
+    {
+      "item_name": "marzipan",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 180
+    },
+    {
+      "item_name": "toffee popcorn",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 60
+    },
+    {
+      "item_name": "meringue nest",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 90
+    },
+    {
+      "item_name": "mar bar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 180
+    },
+    {
+      "item_name": "christma pudding",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "beef brisket",
+      "category": "protein",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "beef fillet",
+      "category": "protein",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "chicken leg",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 270,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "king prawn",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "lamb mince",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 120,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "free range egg",
+      "category": "protein",
+      "shelf_days_refrigerated": 35,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "smoked haddock",
+      "category": "protein",
+      "shelf_days_refrigerated": 3,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "chorizo",
+      "category": "protein",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": 60,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "duck leg",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 270,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "lamb kidney",
+      "category": "protein",
+      "shelf_days_refrigerated": 1,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "lamb leg",
+      "category": "protein",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "italian fennel sausage",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 60,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "mussel",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "white fish",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "goat meat",
+      "category": "protein",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "turkey mince",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 120,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "veal",
+      "category": "protein",
+      "shelf_days_refrigerated": 3,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "haddock",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "herring",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "mackerel",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "monkfish",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "oxtail",
+      "category": "protein",
+      "shelf_days_refrigerated": 3,
+      "shelf_days_frozen": 270,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "oyster",
+      "category": "protein",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "pilchard",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "prosciutto",
+      "category": "protein",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": 60,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "parma ham",
+      "category": "protein",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": 60,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "red snapper",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "salt cod",
+      "category": "protein",
+      "shelf_days_refrigerated": 30,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "smoked salmon",
+      "category": "protein",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": 60,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "tiger prawn",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "kielbasa",
+      "category": "protein",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": 60,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "lean beef",
+      "category": "protein",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "lamb loin chop",
+      "category": "protein",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "lamb shoulder",
+      "category": "protein",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "doner meat",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "clam",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "anchovy fillet",
+      "category": "protein",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "beef gravy",
+      "category": "condiment",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "beef shin",
+      "category": "protein",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "baby squid",
+      "category": "protein",
+      "shelf_days_refrigerated": 1,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "black pudding",
+      "category": "protein",
+      "shelf_days_refrigerated": 5,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "egg yolk",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "egg white",
+      "category": "protein",
+      "shelf_days_refrigerated": 4,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "flax egg",
+      "category": "protein",
+      "shelf_days_refrigerated": 3,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "gelatine leaf",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "prosciutto ham",
+      "category": "protein",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": 60,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "ancho chilly",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "jalapeno",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "boiling water",
+      "category": "other",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "water",
+      "category": "other",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "oil",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 540
+    },
+    {
+      "item_name": "sesame seed oil",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 540
+    },
+    {
+      "item_name": "sunflower oil",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "rapeseed oil",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "canola oil",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "extra virgin olive oil",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 540
+    },
+    {
+      "item_name": "peanut oil",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "truffle oil",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "goose fat",
+      "category": "condiment",
+      "shelf_days_refrigerated": 90,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "lard",
+      "category": "condiment",
+      "shelf_days_refrigerated": 90,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "shortening",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "suet",
+      "category": "condiment",
+      "shelf_days_refrigerated": 90,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "digestive biscuit",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 90
+    },
+    {
+      "item_name": "pepper",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "black pepper",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "pink food colouring",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "khu khu",
+      "category": "other",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "madra paste",
+      "category": "condiment",
+      "shelf_days_refrigerated": 14,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "mulukhiyah",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 3,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "apple cider vinegar",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "ginger",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 21,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "clove",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "vanilla",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 1095
+    },
+    {
+      "item_name": "basil leaf",
+      "category": "spice",
+      "shelf_days_refrigerated": 7,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "baking soda",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "chili",
+      "category": "vegetable",
+      "shelf_days_refrigerated": 10,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "miniature marshmallow",
+      "category": "condiment",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 270
+    },
+    {
+      "item_name": "bowtie pasta",
+      "category": "grain",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 730
+    },
+    {
+      "item_name": "egg roll",
+      "category": "grain",
+      "shelf_days_refrigerated": 3,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "fry",
+      "category": "vegetable",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": 90,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "red wine jelly",
+      "category": "condiment",
+      "shelf_days_refrigerated": 365,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": null
+    },
+    {
+      "item_name": "sesame seed",
+      "category": "spice",
+      "shelf_days_refrigerated": null,
+      "shelf_days_frozen": null,
+      "shelf_days_pantry": 365
+    },
+    {
+      "item_name": "white fish fillet",
+      "category": "protein",
+      "shelf_days_refrigerated": 2,
+      "shelf_days_frozen": 180,
+      "shelf_days_pantry": null
+    }
   ]
 }

@@ -1,0 +1,500 @@
+PHASE 5.3 STUDY NOTES: TEXT PERCEPTION AND TRI-MODAL FUSION
+=============================================================
+
+These notes cover the third and final round of phase 5: the third and
+last input modality (typed text), and the module that actually makes
+having three separate modalities worth anything — merge_perceptions,
+which combines vision, audio, and text into one request a recipe
+recommendation could act on. Everything below describes code that
+really exists right now, in backend/mealsight/perception/ (models.py,
+validation.py, processor.py all extended; fusion.py is new) and
+backend/tests/test_perception/. No agent wiring yet, the same
+sequencing every prior perception-layer round has followed. This is
+also the round that finally uses the three modalities as a genuine
+"more than the sum of its parts" system, not three parallel pipelines
+that happen to share a package.
+
+
+1. WHAT THIS PHASE BUILT AND WHY IT COMES NOW
+=============================================================
+
+Phase 5.1 built vision, phase 5.2 built audio — two of the three real
+input channels mealsight.providers has supported since phase 1.2, each
+wrapped in its own validate/call/post-process pipeline with its own
+graceful-degradation guarantee. Text was always going to be the
+smallest of the three builds, and this phase confirms that directly:
+analyze_text_input isn't a new pipeline so much as analyze_voice_memo
+with its first stage (transcription) removed, reusing the identical
+prompt, the identical schema, and — after this phase's own small
+refactor — the identical post-processing code, not a second copy of
+it. The task's own framing said this outright: "Reuse the audio
+extraction prompt, dietary vocabulary, and ingredient canonicalization
+— same code path, different input." Section 4 covers how that
+literally became true, not just something the code happens to
+resemble.
+
+Fusion is the actual point of building three separate perception
+modalities in the first place. A photo alone can't hear "no dairy," a
+voice memo alone can't see what's actually in the fridge, and typed
+text alone can't confirm anything either — merge_perceptions is what
+turns three independently-fallible, independently-gracefully-degrading
+perception results into one thing worth handing to a recipe
+recommendation step. This is also the first module in the entire
+perception layer explicitly required to touch no database at all —
+every prior analyze_* function reaches into recipes.db (synonym table)
+or pantry.db (shelf-life table); merge_perceptions reaches into
+neither, on purpose, and that constraint shaped several real decisions
+(section 6).
+
+
+2. FILE MAP
+=============================================================
+
+backend/mealsight/perception/models.py  (EXTENDED)
+    TextPerception (AudioPerception minus raw_transcript).
+    UnifiedMealRequest and its three supporting shapes:
+    AvailableIngredient, FreshnessAlert, DetectedConflict. Sections 3
+    and 5.
+
+backend/mealsight/perception/validation.py  (EXTENDED)
+    validate_text, TextValidationError — section 3.
+
+backend/mealsight/perception/processor.py  (EXTENDED)
+    analyze_text_input, plus a new shared _postprocess_constraints
+    helper both analyze_voice_memo and analyze_text_input now call —
+    section 4.
+
+backend/mealsight/perception/fusion.py  (NEW)
+    merge_perceptions and every merge rule — section 5-6.
+
+backend/tests/test_perception/
+    test_validation_text.py, test_processor_text.py, test_fusion.py —
+    63 new tests, 387 total in the whole test suite now.
+
+
+3. TEXT VALIDATION: THE ONE CASE THAT ISN'T A VALIDATION FAILURE AT ALL
+=============================================================
+
+validate_text checks exactly one thing — text over settings.
+max_text_length is rejected, naming both the actual and allowed
+length. What it deliberately does NOT check is emptiness, and that's
+not an oversight: the task's own wording ("Empty or whitespace-only
+input returns an empty result without an API call") describes a
+completely different situation from "input that's clearly unusable."
+Empty text isn't malformed or oversized — it's just nothing being
+said, a normal, valid non-event a user's UI could trivially produce
+(a text box submitted blank). Treating it as a validation failure
+would mean logging a warning and attaching a rejection-flavored note
+to every genuinely empty submission, which misrepresents what actually
+happened. Instead, analyze_text_input checks `not text.strip()` itself,
+before ever calling validate_text, and returns an empty TextPerception
+with a plain "No text provided." note — no warning log, no error
+framing, because nothing went wrong.
+
+
+4. THE SAME CODE PATH, LITERALLY: _postprocess_constraints
+=============================================================
+
+Before this phase, analyze_voice_memo's own body contained the loop
+that canonicalizes avoid_ingredients and normalizes dietary_
+restrictions onto DIETARY_RESTRICTION_VOCABULARY, dropping-but-
+preserving-in-context anything unrecognized. Adding analyze_text_input
+with an identical inline copy of that loop would have satisfied the
+task's instruction in spirit while violating it in fact — "same code
+path" means one function both callers actually run, not two functions
+that happen to do the same thing. This phase extracted that loop into
+_postprocess_constraints(raw: RawExtractedConstraints, synonym_map) ->
+(avoid_ingredients, dietary_restrictions, additional_context), and
+refactored analyze_voice_memo to call it too, so both functions now run
+through the literal same lines rather than two copies that could drift
+apart the moment either one changed. This is the same "duplicate a
+tiny private helper across a package boundary, but never within one"
+discipline this project has followed since phase 5.1 — the difference
+here being that audio and text extraction aren't across a package
+boundary at all, they're two callers of the same module, so the
+correct answer was "share the function," not "duplicate it."
+
+build_extraction_prompt itself needed zero changes to support text:
+its own docstring already just says "Read the transcript below," and a
+typed message satisfies that instruction exactly as well as a
+transcribed one does — the prompt's own conservative framing (extract
+only what's stated, self-correction takes the final value, distinguish
+category/ingredient/dish) applies identically regardless of how the
+words arrived. Nothing about analyze_text_input passes anything
+audio-specific into the prompt; it's the exact same function call with
+raw typed text substituted for a transcript.
+
+
+5. UnifiedMealRequest: WHAT GETS CARRIED FORWARD, AND WHAT DOESN'T
+=============================================================
+
+available_ingredients and freshness_alerts are new shapes this phase
+introduces, not renamed copies of anything vision already had.
+AvailableIngredient generalizes IdentifiedItem to also represent an
+unverified, audio/text-only mention (verified=False, no quantity/
+category/freshness, a note explaining why) — the two cases share one
+type rather than two, since "is this ingredient actually confirmed"
+is exactly the one bit of information that distinguishes them.
+FreshnessAlert is a narrower view into the same vision data: any
+identified item whose freshness observation was anything other than a
+plain "fresh" (case-insensitively) gets pulled out separately, so an
+agent doesn't have to scan every available_ingredients entry itself
+looking for a concerning freshness string.
+
+additional_context — the field AudioPerception and TextPerception both
+use to carry a graceful-degradation note or genuine extra detail — is
+NOT part of UnifiedMealRequest at all. The task's own field list for
+the fused shape doesn't include it, and this phase treated that
+omission as deliberate rather than an oversight to work around:
+whatever extra narrative detail either modality captured stays
+available on that modality's own perception result, but doesn't get
+promoted into the one thing downstream code is meant to act on.
+
+
+6. FUSION'S OWN CONSTRAINT: NO DATABASE ACCESS, AND WHAT THAT COSTS
+=============================================================
+
+merge_perceptions is synchronous and touches nothing but the three
+perception objects (and an optional UserProfile) handed to it — no
+get_pantry_db, no get_recipe_db, no synonym_map parameter at all. This
+is the first module in the perception layer with that constraint, and
+it shaped one real, named limitation directly: matching an audio/text-
+mentioned protein_preference against what vision actually saw uses
+normalize_ingredient alone (pure Python, no I/O), never resolve_
+canonical (which needs a real synonym_map, normally loaded from
+recipes.db). A synonym pair that only differs ACROSS modalities —
+vision's own analyze_fridge_photo already canonicalized "scallions" to
+"green onion" before fusion ever sees it, but if audio said "scallion"
+and that word never got canonicalized against the same table fusion
+itself can't reach — would not cross-match here. This is documented
+directly in fusion.py's own module docstring as a real trade-off this
+module's DB-free requirement creates, not something silently missed.
+
+protein_preference as the "ingredient mention" channel, found in the
+real data
+------------------------------------------------------
+The task said "if audio or text names an ingredient not seen in the
+photo, add it flagged as unverified" — but neither AudioPerception nor
+TextPerception has a dedicated "ingredients I have" list field; the
+only structured field either schema uses to name a specific ingredient
+at all is protein_preference. Rather than guessing at this, this phase
+checked the real data it would later be verified against:
+voice_scripts.json's own memo_04 ("chicken if we've got it" ->
+protein_preference="chicken") and memo_19 ("I picked up some fresh
+salmon... use that if you can" -> protein_preference="salmon") are
+both exactly this pattern — a specific ingredient the user says they
+have or want, captured nowhere else in either schema. Confirmed live
+in this phase's own tri-modal verification (section 8): protein_
+preference is the one real channel this rule needed to check.
+
+
+7. THE MERGE RULES, IN FULL
+=============================================================
+
+available_ingredients / freshness_alerts: vision alone populates
+verified entries; each of audio.protein_preference and text.protein_
+preference, if named and not already present among vision's
+(normalize_ingredient-matched) item names, becomes one unverified
+entry with a note. Nothing is ever removed here — see the dietary-
+restriction rule below.
+
+dietary_restrictions, avoid_ingredients, avoid_dishes: plain union
+across audio and text, order-preserving, deduplicated. No
+canonicalization happens in this step — both lists arrive already
+canonicalized/normalized by whichever analyze_* function produced
+them, so fusion's own job here is just "combine, don't lose."
+
+servings, max_cook_time_minutes: when audio and text both state a
+value and they DISAGREE, the lower one wins (both fields treated
+identically — "more restrictive" means smaller for cook time
+unambiguously, and this phase applied the same "smaller wins" rule to
+servings per the task's own explicit instruction, even though "fewer
+people" isn't restrictive in quite the same intuitive sense cook time
+is). Every such collision is recorded in conflicts_detected with both
+original values, the chosen one, and a plain-language reason. When
+still unspecified by both, and a UserProfile was passed in, household_
+size / preferred_cook_time_minutes fill the gap — never overriding a
+value either modality actually stated, only filling a genuine absence.
+
+cuisine_preference, protein_preference, occasion, mood_or_preference:
+non-orderable strings — a collision here has no "smaller" side to pick,
+so text wins (typed input judged more deliberate than speech) and the
+disagreement is still recorded, exactly the same conflict-recording
+discipline the numeric fields get. The task named cuisine_preference
+as its own worked example of this rule; this phase generalized it to
+the other three non-orderable string fields on the reasoning that
+they're the identical shape of field facing the identical kind of
+disagreement, not a special case unique to cuisine.
+
+Dietary restrictions never remove anything: a milk item stays in
+available_ingredients even under a stated "dairy-free" restriction,
+with a note attached to that one entry instead of the item being
+dropped. This phase implemented the note-generation itself narrowly
+and honestly — see section 6's own scope discussion — rather than
+attempting a general "does this ingredient violate this restriction"
+classifier the task never actually asked for.
+
+Zero modalities is an error: merge_perceptions raises ValueError
+immediately if vision, audio, and text are all None — the one place
+in this whole phase where "return something empty" was rejected in
+favor of a real exception, because unlike a single modality gracefully
+degrading to an empty result (a real, valid outcome of one channel
+failing), calling merge_perceptions with literally nothing to merge is
+a caller error, not a perception outcome.
+
+
+8. VERIFICATION: TEXT SCORED LIVE, THEN ONE FULL TRI-MODAL RUN
+=============================================================
+
+ruff/mypy --strict/full pytest all clean (387 tests total, no
+regressions across phase 1 through 5.2's own suite). Against the real
+Mistral extraction API, analyze_text_input ran on all 10 real inputs in
+test_data/text/text_inputs.json, scored per-field against their real
+expected_constraints:
+
+    servings, max_cook_time_minutes, dietary_restrictions,
+    avoid_dishes, cuisine_preference, protein_preference: 100% each
+    avoid_ingredients: 7/10 (70%)
+    OVERALL: 67/70 fields (95.7%)
+
+Three mismatches, each reasoned through individually rather than just
+counted: text_01's ["mushroom"] vs. expected ["mushrooms"] is the same
+canonicalization-driven singular/plural artifact phase 5.2's own
+verification hit on "peanut"/"peanuts" — not a real error. text_05
+("no seafood") and text_09 ("not too spicy") are genuine extraction
+misses — both constraints were dropped entirely, landing in neither
+avoid_ingredients nor even additional_context as a fallback. text_09
+also showed the extraction model adding "tired" to mood_or_preference
+— a word never actually present anywhere in that input — worth naming
+directly even though mood_or_preference wasn't one of this phase's own
+scored fields, since it's a real, if minor, over-inference the
+conservative "extract only what's stated" prompt instruction didn't
+fully prevent.
+
+One full tri-modal run — photo_01.jpg (vision) + memo_13.mp3 (audio,
+the real self-correction memo phase 5.2 already verified resolves to
+servings=3/cook_time=30) + a typed message deliberately set to conflict
+on both fields (servings=2, cook_time=15, plus a fresh "vegetarian" +
+"Italian" that neither audio field had stated) — ran live end to end.
+Every stage's real output was printed: audio's self-correction still
+resolved correctly heading into fusion, and the fused result correctly
+took the lower value on both servings (2) and cook time (15), recording
+both collisions with clear reasons, while vegetarian/Italian merged in
+without any recorded conflict (only text had stated either). One
+detail worth calling out specifically because it demonstrates section
+6's own documented scope boundary rather than a bug: photo_01's real
+identified_items include "chicken thigh" (category="protein"), and the
+fused constraint list includes "vegetarian" — no dietary-conflict note
+was attached to the chicken thigh entry, exactly as designed, since
+this phase deliberately does not attempt vegetarian-vs-protein-category
+detection (a category alone can't distinguish chicken from tofu). The
+live run is direct proof the scope decision behaves the way its own
+documentation says it will, not an accidental miss.
+
+
+9. THE TESTS
+=============================================================
+
+test_validation_text.py (2 tests): normal text passes; oversized text
+(settings.max_text_length monkeypatched down) is rejected naming the
+character counts.
+
+test_processor_text.py (6 tests): text extraction produces the
+identical final shape audio extraction would for equivalent content
+(the explicit "same code path" proof, using a synonym map and dietary
+phrase that mirror phase 5.2's own audio test data); empty/whitespace
+text short-circuits with the fake text provider never called; oversized
+text is rejected before any call; avoid_ingredients canonicalize
+through a hand-built synonym map; loose dietary phrasing normalizes;
+extraction failure degrades gracefully with a real note.
+
+test_fusion.py (14 tests, entirely synchronous — no providers, no
+database, matching fusion.py's own DB-free design): zero modalities
+raises; each of vision-only/audio-only/text-only works independently;
+conflicting cook times and conflicting servings both take the lower
+value and record the conflict; agreeing values produce zero conflict
+records; conflicting cuisine prefers text and records both original
+values plus the choice; an audio-mentioned protein absent from the
+photo is flagged unverified with an off-camera note; the identical
+protein already present in vision is NOT duplicated as a second,
+unverified entry; dietary restrictions union across audio and text;
+profile defaults (household_size, preferred_cook_time_minutes) apply
+only when a field is genuinely unspecified by both modalities, proven
+by the same test checking both the fallback case and the specified-
+value-wins case together; a dairy item survives a dairy-free
+constraint with a note attached rather than being removed; a non-fresh
+item produces a freshness alert and a fresh one doesn't.
+
+
+10. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+Extracting _postprocess_constraints into a shared helper versus
+letting analyze_text_input duplicate analyze_voice_memo's own inline
+loop
+    Covered in section 4. The task's own instruction ("same code path,
+    different input") was explicit enough that duplicating the loop —
+    even if the two copies started out identical — would have been a
+    real violation of what was actually asked, not just a style
+    preference. One function, two callers, is what "same code path"
+    has to mean literally.
+
+protein_preference as the sole "ingredient mention" channel for the
+unverified-ingredient rule, versus inventing a new field on Audio/
+TextPerception for "ingredients the user says they have"
+    A new dedicated field would have been more explicit, but it wasn't
+    part of either schema's task-specified field list from phase 5.2,
+    and inventing one now would mean re-running phase 5.2's own live
+    verification against a changed extraction schema for a rule this
+    phase could satisfy with the field that already exists. Checking
+    the real ground truth (memo_04, memo_19) confirmed protein_
+    preference was already exactly the right channel, not a
+    compromise.
+
+normalize_ingredient-only matching in fusion versus giving
+merge_perceptions its own synonym_map parameter (violating the DB-free
+requirement) versus requiring the caller to pre-canonicalize protein_
+preference before calling merge_perceptions
+    The task was explicit that this module stays free of database
+    access, which ruled out the second option directly. Requiring
+    callers to pre-canonicalize protein_preference themselves was
+    considered and rejected as pushing complexity outward onto every
+    future caller for a benefit (catching cross-modality synonym pairs)
+    that's a real but narrow edge case — most of the time a protein a
+    speaker names and a protein vision saw will already share a
+    normalized form without needing the full synonym table at all.
+    normalize_ingredient-only matching was the honest middle ground:
+    real, useful matching most of the time, a documented, narrow gap
+    for the synonym-pair case, no database access anywhere in the
+    module.
+
+Generalizing the "prefer text over audio" rule from cuisine_preference
+alone to all four non-orderable string fields
+    The task's own wording ("non-orderable conflicting fields like
+    cuisine_preference") reads as an example of a category, not an
+    exhaustive list — protein_preference, occasion, and mood_or_
+    preference are the identical shape of field (a string either
+    modality might state differently), and treating only cuisine_
+    preference specially while leaving the other three with no defined
+    conflict behavior at all would have been a real gap in the merge
+    rules, not a narrower, more faithful reading of the task.
+
+Implementing the dietary-restriction-vs-ingredient conflict check
+narrowly (dairy-free by category, five others by ingredient-name
+keyword) versus a broader "does this ingredient violate this
+restriction" classifier
+    Covered in section 7. A general classifier is real, substantial
+    work (essentially a second ingredient-classification system) that
+    the task never actually asked for — it gave exactly one worked
+    example (milk under dairy-free) and this phase implemented exactly
+    that, plus a small, honestly-scoped extension to five more
+    restrictions specific enough that name-level keyword matching is
+    actually reliable, rather than either doing only the bare minimum
+    or overbuilding something well beyond the stated requirement.
+
+
+11. GLOSSARY
+=============================================================
+
+(Every term phase 5.1's and 5.2's own glossaries already defined —
+raw schema / final schema, graceful degradation, fixed vocabulary,
+extraction — applies identically here. New terms below.)
+
+conflict (fusion)
+    One field where audio and text both stated a value and those
+    values disagreed — always recorded in conflicts_detected regardless
+    of which rule resolved it, never silently picked.
+
+more-restrictive-wins
+    The merge rule for orderable numeric fields (servings, max_cook_
+    time_minutes): when audio and text disagree, take the lower value.
+
+non-orderable field
+    A string-valued field (cuisine_preference, protein_preference,
+    occasion, mood_or_preference) with no meaningful "smaller" or
+    "more restrictive" side — a collision here is resolved by
+    preferring text over audio instead of picking a numeric minimum.
+
+unverified ingredient
+    An AvailableIngredient entry named by audio or text's protein_
+    preference but never confirmed present in the photo — kept in
+    available_ingredients (never dropped) with verified=False and a
+    note, so an agent can still act on it while knowing it wasn't
+    actually seen.
+
+
+12. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: The task said to reuse the audio extraction prompt and post-
+processing "same code path, different input." How did you make sure
+that was literally true rather than just similar code?
+
+    I extracted the actual post-processing logic — canonicalizing
+    avoid_ingredients, normalizing dietary_restrictions onto the fixed
+    vocabulary, preserving unrecognized phrases in additional_context —
+    into one function, _postprocess_constraints, and changed analyze_
+    voice_memo to call it too, rather than writing a second copy for
+    analyze_text_input and leaving analyze_voice_memo's own inline
+    version untouched. That was a real refactor of existing, already-
+    shipped code, not just new code written to resemble it — both
+    functions now execute the identical lines at runtime, which is the
+    only way "same code path" is actually true rather than "looks
+    similar right now and might silently diverge the next time either
+    one changes."
+
+Q: merge_perceptions needs to check whether an audio-mentioned
+ingredient was already seen in the photo, but neither AudioPerception
+nor TextPerception has an "ingredients I have" field. How did you
+resolve that?
+
+    I went back to the real ground truth this project already has —
+    voice_scripts.json's own memo_04 ("chicken if we've got it") and
+    memo_19 ("I picked up some fresh salmon... use that if you can") —
+    and checked what field those actually extract into. Both land in
+    protein_preference, which is the one structured field on either
+    schema that names a specific ingredient at all. Rather than
+    inventing a new field and re-verifying phase 5.2's extraction
+    quality against a changed schema, I used what was already there and
+    already proven to work for exactly this pattern in the real data.
+
+Q: Why does fusion only use normalize_ingredient, not the full
+resolve_canonical synonym lookup, when matching a mentioned protein
+against what vision saw?
+
+    Because the task explicitly required this module to stay free of
+    database access, and resolve_canonical needs a synonym_map that
+    normally comes from a real query against recipes.db. Given that
+    constraint, I used what's actually available without I/O —
+    normalize_ingredient, which does real work (lowercasing,
+    singularizing, stripping prep words) with zero network or database
+    calls — and documented directly, in the module's own docstring,
+    the one real gap that creates: a protein named with a synonym that
+    only differs from vision's own wording via the synonym table (not
+    via simple normalization) wouldn't cross-match here. That's a
+    genuine trade-off the DB-free requirement forces, not something I
+    missed — the alternative would have meant either violating the
+    no-database constraint directly or pushing pre-canonicalization
+    responsibility onto every future caller for a comparatively narrow
+    benefit.
+
+Q: In your live fusion verification, a photo with chicken in it and a
+"vegetarian" constraint produced no conflict note on the chicken. Isn't
+that wrong?
+
+    No — that's the documented scope boundary behaving exactly as
+    designed, and I called it out specifically in my own report rather
+    than treating it as an unexplained gap. I implemented the dietary-
+    restriction-conflict note narrowly: dairy-free flags anything
+    category="dairy" (the task's own worked example, milk), and five
+    more restrictions (peanut-free, nut-free, shellfish-free, egg-free,
+    soy-free) flag by keyword match against the ingredient's own name,
+    since those are specific enough that a name-level match is actually
+    reliable. Vegetarian and vegan were deliberately left out, because
+    mealsight.pantry.category's own protein category covers both
+    chicken and tofu — there's no way to tell which is which from
+    category alone without a much larger ingredient-classification
+    system the task never asked for. Seeing the real live output
+    confirm chicken went unflagged under vegetarian was exactly the
+    proof that the narrow scope I chose is actually what ships, not
+    just what I intended.

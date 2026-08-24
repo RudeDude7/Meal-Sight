@@ -1,7 +1,8 @@
-"""validate_image / validate_audio — pre-flight checks run before ever
-spending a real API call: format, file size, and (image) minimum pixel
-dimensions or (audio) duration. Deliberately cheap and entirely local
-(Pillow / mutagen decoding only, no network) so clearly unusable input
+"""validate_image / validate_audio / validate_text — pre-flight checks
+run before ever spending a real API call: format, file size, and
+(image) minimum pixel dimensions, (audio) duration, or (text) maximum
+length. Deliberately cheap and entirely local (Pillow / mutagen
+decoding, or a plain len() check, no network) so clearly unusable input
 never reaches the provider layer at all.
 """
 
@@ -147,4 +148,25 @@ def validate_audio(audio_bytes: bytes) -> None:
     if duration_seconds is not None and duration_seconds > settings.max_audio_duration_seconds:
         raise AudioValidationError(
             f"Audio is {duration_seconds:.0f}s, over the {settings.max_audio_duration_seconds}s limit."
+        )
+
+
+class TextValidationError(ValueError):
+    """Raised by validate_text for input that's clearly unusable —
+    over settings.max_text_length. Always carries a message naming the
+    specific problem. Empty/whitespace-only text is NOT this module's
+    concern at all — mealsight.perception.processor.analyze_text_input
+    short-circuits on that case itself, before ever calling
+    validate_text, since "nothing was said" is a normal, valid non-
+    event, not unusable input to reject."""
+
+
+def validate_text(text: str) -> None:
+    """Rejects text over settings.max_text_length before spending a
+    real extraction API call on it. Raises TextValidationError, naming
+    the actual and allowed length, for anything too long; returns None
+    (no exception) for anything usable."""
+    if len(text) > settings.max_text_length:
+        raise TextValidationError(
+            f"Text is {len(text)} characters, over the {settings.max_text_length} character limit."
         )

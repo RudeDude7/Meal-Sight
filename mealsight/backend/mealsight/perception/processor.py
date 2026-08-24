@@ -1,5 +1,5 @@
-"""analyze_fridge_photo / analyze_voice_memo — the vision and audio
-perception pipelines.
+"""analyze_fridge_photo / analyze_voice_memo / analyze_text_input — the
+vision, audio, and text perception pipelines.
 
 analyze_fridge_photo validates raw image bytes, calls the vision
 provider with the benchmarked (and now quantity/unit/freshness-
@@ -7,12 +7,15 @@ extended) prompt, and post-processes every identified item into
 pantry-ready shape. analyze_voice_memo validates raw audio bytes,
 transcribes it (settings.AUDIO_MODEL), extracts structured cooking
 constraints from the transcript (settings.EXTRACTION_MODEL), and
-post-processes those constraints (canonicalized avoid_ingredients,
-dietary_restrictions normalized to a fixed vocabulary).
+post-processes those constraints. analyze_text_input runs that exact
+same extraction-plus-post-processing step directly on typed text —
+same prompt, same schema, same _postprocess_constraints helper — since
+typed text has no audio to transcribe first.
 
-Deterministic post-processing in both; the provider calls themselves
-are the only non-deterministic steps, mitigated by temperature=0.0
-(mealsight.providers' own default for every call it makes).
+Deterministic post-processing throughout; the provider calls
+themselves are the only non-deterministic steps, mitigated by
+temperature=0.0 (mealsight.providers' own default for every call it
+makes).
 """
 
 from __future__ import annotations
@@ -37,15 +40,18 @@ from mealsight.perception.models import (
     IdentifiedItem,
     RawExtractedConstraints,
     RawVisionPerception,
+    TextPerception,
     VisionPerception,
 )
 from mealsight.perception.prompt import VISION_PERCEPTION_PROMPT, build_extraction_prompt
 from mealsight.perception.validation import (
     AudioValidationError,
     ImageValidationError,
+    TextValidationError,
     detect_audio_format,
     validate_audio,
     validate_image,
+    validate_text,
 )
 from mealsight.providers import ProviderError, get_audio_provider, get_text_provider, get_vision_provider
 from mealsight.utils.logging import get_logger
@@ -223,6 +229,37 @@ def _append_note(existing: str | None, note: str) -> str:
     return f"{existing} {note}" if existing else note
 
 
+def _postprocess_constraints(
+    raw: RawExtractedConstraints, synonym_map: Mapping[str, str]
+) -> tuple[list[str], list[str], str | None]:
+    """Shared by analyze_voice_memo and analyze_text_input — the exact
+    same code path post-processing a RawExtractedConstraints, regardless
+    of whether it came from a transcript or typed text: avoid_
+    ingredients canonicalized through normalize_ingredient + resolve_
+    canonical, dietary_restrictions normalized onto DIETARY_RESTRICTION_
+    VOCABULARY (an unrecognized phrase dropped from the list but
+    preserved in the returned additional_context, never silently lost).
+    Returns (canonical_avoid_ingredients, normalized_dietary_restrictions,
+    additional_context)."""
+    canonical_avoid_ingredients = [
+        resolve_canonical(normalize_ingredient(name), synonym_map) for name in raw.avoid_ingredients
+    ]
+
+    normalized_dietary_restrictions: list[str] = []
+    additional_context = raw.additional_context
+    for phrase in raw.dietary_restrictions:
+        normalized = normalize_dietary_restriction(phrase)
+        if normalized is not None:
+            if normalized not in normalized_dietary_restrictions:
+                normalized_dietary_restrictions.append(normalized)
+        else:
+            additional_context = _append_note(
+                additional_context, f'Unrecognized dietary phrasing not applied: "{phrase}".'
+            )
+
+    return canonical_avoid_ingredients, normalized_dietary_restrictions, additional_context
+
+
 async def analyze_voice_memo(
     audio_bytes: bytes,
     recipe_db: Database | None = None,
@@ -301,24 +338,102 @@ async def analyze_voice_memo(
     if synonym_map is None:
         synonym_map = await load_synonym_map(recipe_db or get_recipe_db())
 
-    canonical_avoid_ingredients = [
-        resolve_canonical(normalize_ingredient(name), synonym_map) for name in raw.avoid_ingredients
-    ]
-
-    normalized_dietary_restrictions: list[str] = []
-    additional_context = raw.additional_context
-    for phrase in raw.dietary_restrictions:
-        normalized = normalize_dietary_restriction(phrase)
-        if normalized is not None:
-            if normalized not in normalized_dietary_restrictions:
-                normalized_dietary_restrictions.append(normalized)
-        else:
-            additional_context = _append_note(
-                additional_context, f'Unrecognized dietary phrasing not applied: "{phrase}".'
-            )
+    canonical_avoid_ingredients, normalized_dietary_restrictions, additional_context = (
+        _postprocess_constraints(raw, synonym_map)
+    )
 
     return AudioPerception(
         raw_transcript=transcript,
+        servings=raw.servings,
+        max_cook_time_minutes=raw.max_cook_time_minutes,
+        dietary_restrictions=normalized_dietary_restrictions,
+        cuisine_preference=raw.cuisine_preference,
+        avoid_ingredients=canonical_avoid_ingredients,
+        avoid_dishes=raw.avoid_dishes,
+        mood_or_preference=raw.mood_or_preference,
+        protein_preference=raw.protein_preference,
+        occasion=raw.occasion,
+        additional_context=additional_context,
+    )
+
+
+_TEXT_EXTRACTION_UNAVAILABLE_NOTE = (
+    "Extraction was unavailable — continuing without text-derived constraints."
+)
+
+
+def _empty_text_perception(note: str) -> TextPerception:
+    return TextPerception(
+        servings=None,
+        max_cook_time_minutes=None,
+        dietary_restrictions=[],
+        cuisine_preference=None,
+        avoid_ingredients=[],
+        avoid_dishes=[],
+        mood_or_preference=None,
+        protein_preference=None,
+        occasion=None,
+        additional_context=note,
+    )
+
+
+async def analyze_text_input(
+    text: str,
+    recipe_db: Database | None = None,
+    synonym_map: Mapping[str, str] | None = None,
+) -> TextPerception:
+    """Extracts structured cooking constraints directly from typed text
+    — the same extraction step analyze_voice_memo runs on a transcript
+    (identical prompt, identical RawExtractedConstraints schema,
+    identical post-processing via this module's own
+    _postprocess_constraints), just with no transcription stage first,
+    since there's no audio to transcribe.
+
+    Empty or whitespace-only text returns an empty result immediately,
+    with NO API call spent on it at all — there's nothing for
+    extraction to find in nothing, and asking a model to confirm that
+    would just be spending a real call to learn what strip() already
+    knows for free.
+
+    Validates non-empty text against settings.max_text_length via
+    mealsight.perception.validation.validate_text before spending a
+    real extraction call on it.
+
+    NEVER RAISES: empty input, a validation failure, or an extraction
+    failure (ProviderError, or anything unexpected) all return an
+    empty TextPerception with additional_context explaining what
+    happened, the same graceful-degradation guarantee analyze_fridge_
+    photo and analyze_voice_memo both already make.
+    """
+    if not text.strip():
+        return _empty_text_perception("No text provided.")
+
+    try:
+        validate_text(text)
+    except TextValidationError as exc:
+        logger.warning("text_perception_rejected", reason=str(exc))
+        return _empty_text_perception(str(exc))
+
+    try:
+        text_provider = get_text_provider()
+        raw = await text_provider.complete_json(
+            build_extraction_prompt(text), RawExtractedConstraints, settings.EXTRACTION_MODEL
+        )
+    except ProviderError as exc:
+        logger.warning("text_perception_extraction_failed", error=str(exc))
+        return _empty_text_perception(_TEXT_EXTRACTION_UNAVAILABLE_NOTE)
+    except Exception:
+        logger.error("text_perception_extraction_unexpected_failure", exc_info=True)
+        return _empty_text_perception(_TEXT_EXTRACTION_UNAVAILABLE_NOTE)
+
+    if synonym_map is None:
+        synonym_map = await load_synonym_map(recipe_db or get_recipe_db())
+
+    canonical_avoid_ingredients, normalized_dietary_restrictions, additional_context = (
+        _postprocess_constraints(raw, synonym_map)
+    )
+
+    return TextPerception(
         servings=raw.servings,
         max_cook_time_minutes=raw.max_cook_time_minutes,
         dietary_restrictions=normalized_dietary_restrictions,

@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from mealsight.matching.models import MatchResult
+from mealsight.mcp_servers.errors import internal_error, not_found_error, validation_error
 from mealsight.recipe_engine.models import (
     NutritionResult,
     RecipeDetail,
@@ -21,6 +22,18 @@ from mealsight.recipe_engine.models import (
     SearchResults,
     SubstitutionResult,
 )
+
+__all__ = [
+    "internal_error",
+    "match_result_to_dict",
+    "not_found_error",
+    "nutrition_result_to_dict",
+    "recipe_detail_to_dict",
+    "scaled_recipe_to_dict",
+    "search_results_to_dict",
+    "substitution_result_to_dict",
+    "validation_error",
+]
 
 
 def search_results_to_dict(search_results: SearchResults) -> dict[str, Any]:
@@ -79,32 +92,3 @@ def substitution_result_to_dict(result: SubstitutionResult) -> dict[str, Any]:
     excluded_count is how many candidates were filtered out by a dietary
     restriction (0 whenever reason isn't "allergic" or "dietary")."""
     return result.model_dump(mode="json")
-
-
-def not_found_error(entity: str, entity_id: str) -> dict[str, Any]:
-    """A structured "doesn't exist" result — never an exception — naming
-    both what kind of thing was looked up and the exact id that failed."""
-    return {
-        "error": "not_found",
-        "message": f"No {entity} found with id {entity_id!r}.",
-        entity + "_id": entity_id,
-    }
-
-
-def validation_error(parameter: str, message: str, accepted: list[str] | None = None) -> dict[str, Any]:
-    """A structured "bad input" result, naming the offending parameter
-    and (when it's an enum-like choice) the accepted values."""
-    error: dict[str, Any] = {"error": "validation_error", "parameter": parameter, "message": message}
-    if accepted is not None:
-        error["accepted_values"] = accepted
-    return error
-
-
-def internal_error(
-    message: str = "An unexpected error occurred while processing this request.",
-) -> dict[str, Any]:
-    """A structured failure result for anything unexpected — deliberately
-    generic. The real exception is logged server-side (see server.py);
-    it never reaches the caller, so nothing internal ever leaks into an
-    agent's context."""
-    return {"error": "internal_error", "message": message}

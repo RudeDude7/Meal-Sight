@@ -15,6 +15,7 @@ dependencies = [
 [project.scripts]
 mealsight-seed = "mealsight.seed.seed_all:main"
 mealsight-recipe-server = "mealsight.mcp_servers.recipe_engine.__main__:main"
+mealsight-pantry-server = "mealsight.mcp_servers.pantry_manager.__main__:main"
 
 [dependency-groups]
 dev = [

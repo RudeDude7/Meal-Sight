@@ -1,0 +1,460 @@
+PHASE 4.1 STUDY NOTES: USER PROFILE AND PREFERENCE STORAGE
+=============================================================
+
+These notes cover the first round of phase 4: the business logic behind
+what MealSight remembers about one person's own preferences — dietary
+restrictions, disliked ingredients, household size, cooking skill, and
+so on. Everything below describes code that really exists right now, in
+backend/mealsight/user_intelligence/ and backend/tests/
+test_user_intelligence/. No MCP wrapper yet — the same deliberate
+sequencing phase 3.1 followed for the pantry (business logic first, a
+full round of its own tests, MCP server later) and phase 2 followed for
+matching/recipe_engine before phase 2.4 ever touched them.
+
+
+1. WHAT THIS PHASE BUILT AND WHY IT COMES NOW
+=============================================================
+
+Phase 1.3 created user_intelligence.db's four tables — user_profile,
+meal_history, preference_scores, cooking_patterns — back when the
+database layer itself was being built, and phase 3 spent two rounds
+making pantry.db useful the same way phase 2 made recipes.db useful.
+user_intelligence.db had sat completely unused since phase 1.3, exactly
+the position pantry.db was in before phase 3.1 — a real schema with no
+code that ever wrote to it. This phase makes user_profile mean
+something: get_user_profile, update_preferences, and remove_preference,
+the three functions that turn a bare key/value table into a typed
+profile an agent can actually reason about.
+
+The reason this comes after phase 3, not before or alongside it, is the
+same reason phase 3.1 came after phase 2: disliked_ingredients needs to
+resolve an ingredient name to a canonical form before comparing it
+against anything already stored, and that normalizer and synonym table
+already exist — built in phase 2.1 for the matcher, already reused once
+by phase 3.1's pantry module. This phase reuses the identical pipeline a
+second time rather than building a third copy of "scallions" and "green
+onion" meaning the same thing.
+
+This phase is also the first place in the whole project where meaningful
+input validation had to live inside the plain-Python business-logic
+layer itself, rather than being deferred to a later MCP-wrapping phase
+the way phase 2 and 3.1 both did it. Section 5 explains why.
+
+
+2. FILE MAP
+=============================================================
+
+backend/mealsight/user_intelligence/models.py
+    UserProfile (the typed schema layered over user_profile's key/value
+    rows), CookingSkill and BudgetSensitivity (the two enum-shaped
+    Literal types), PreferenceType (the seven known field names),
+    ADDITIVE_PREFERENCE_TYPES.
+
+backend/mealsight/user_intelligence/profile.py
+    get_user_profile — section 6. DEFAULT_PROFILE_VALUES, the exact
+    defaults a completely fresh database comes back with.
+
+backend/mealsight/user_intelligence/preferences.py
+    update_preferences and remove_preference — sections 5 and 7. Every
+    validation rule (unknown field names, positive-integer ranges, the
+    two literal enums) lives here, since this phase has no MCP layer to
+    put it in instead.
+
+backend/mealsight/user_intelligence/__init__.py
+    Re-exports everything, same convention as pantry/__init__.py and
+    recipe_engine/__init__.py.
+
+backend/tests/test_user_intelligence/
+    conftest.py (a fresh user_intelligence.db Database per test),
+    test_profile.py, test_preferences.py — 18 tests.
+
+
+3. WHAT THE user_profile TABLE ACTUALLY IS, AND WHY A TYPED SCHEMA SITS
+   OVER IT
+=============================================================
+
+user_profile is a bare key/value store — (key TEXT PRIMARY KEY, value
+TEXT NOT NULL, updated_at). Nothing in the schema itself constrains what
+keys can exist or what a value has to look like; left alone, that's
+exactly the kind of table that accumulates whatever random keys any
+future caller happens to write, with no single place that says what a
+"real" profile field actually is. This phase's whole job is to put a
+strict boundary in front of that table: PreferenceType enumerates the
+only seven keys update_preferences will ever accept, UserProfile's own
+pydantic fields are the only shape get_user_profile will ever hand back,
+and nothing else in this module ever reads or writes an arbitrary key.
+
+The value column stores every field — lists, ints, strings, or null —
+as JSON text, via json.dumps on write and json.loads on read, rather
+than, say, a separate typed column per value-kind or a naive
+str(value)/int(value) round-trip. This is what makes protein_preference
+able to hold a real null (json.dumps(None) is the four-character string
+"null", satisfying the column's own NOT NULL constraint while still
+meaning "no value" once read back) and what makes reading any field back
+require exactly one code path (json.loads) instead of a per-field-type
+branch. See section 10 for the alternative this was weighed against.
+
+
+4. THE PROFILE FIELDS AND THEIR DEFAULTS
+=============================================================
+
+Seven settable fields, split by how update_preferences treats them:
+
+    Additive (append, dedupe, never replace): dietary_restrictions,
+    disliked_ingredients.
+
+    Scalar (replace on every write): household_size,
+    preferred_cook_time_minutes, protein_preference, cooking_skill,
+    budget_sensitivity.
+
+Plus one read-only, computed field that isn't in PreferenceType at all
+and can never be written through update_preferences: cuisine_preferences
+— section 6.
+
+DEFAULT_PROFILE_VALUES is what a field never written comes back as, so
+a brand-new database still produces a profile an agent can act on
+immediately rather than one full of nulls it has to special-case:
+household_size=1, preferred_cook_time_minutes=30, protein_preference=
+None, cooking_skill="intermediate", budget_sensitivity="moderate",
+dietary_restrictions=[], disliked_ingredients=[]. These are ordinary
+reasonable-default choices, not derived from any external data source
+the way phase 1.4's nutrition or phase 3.1's shelf-life defaults were —
+there's no equivalent reference dataset for "what does a typical
+household look like," so the defaults here are just sensible starting
+values a real profile is expected to immediately overwrite.
+
+
+5. update_preferences: VALIDATION LIVING IN THE BUSINESS-LOGIC LAYER
+=============================================================
+
+Every prior phase's plain-Python layer (phase 2's recipe_engine/matching,
+phase 3.1's pantry functions) left input validation — an unknown enum
+value, a non-positive number — to whatever MCP server eventually wrapped
+it, on the reasoning that the underlying function's own natural
+behavior (a lookup that finds nothing, a filter that matches nothing)
+was already a coherent response to bad input, and a later transport
+layer was free to add a stricter check on top if a specific tool's
+schema needed one.
+
+update_preferences can't take that approach, because there's no natural
+"lookup that finds nothing" available: a preference_type argument is a
+plain string, and there's nothing about writing it that would fail on
+its own if it happened to be "flavor_color" instead of a real field —
+it would simply succeed at writing a new, permanent, never-cleaned-up
+key into user_profile, exactly the table-rot problem section 3 exists
+to prevent. So this phase's task explicitly required the validation
+happen here, now, in preferences.py itself: preference_type is checked
+against get_args(PreferenceType) before anything is written, a
+household_size or preferred_cook_time_minutes of zero or below is
+rejected, and cooking_skill/budget_sensitivity are checked against
+get_args() of their own Literal types — every rejection raising
+ValueError with the accepted field names or values spelled out in the
+message, the same "name what's actually accepted" instinct phase 2.4's
+validation_error and phase 3.1's structured errors both already had,
+just expressed as a raised exception instead of a structured dict,
+since there's no MCP boundary here yet to catch it into one.
+
+Additive fields, and canonicalization reused a second time
+------------------------------------------------------
+dietary_restrictions and disliked_ingredients both accept either a
+single string or a list of strings, get appended to whatever's already
+stored, and get deduplicated (list(dict.fromkeys(...)), preserving
+first-seen order rather than sorting, so a profile's own history of
+"what got added when" stays legible). The two fields are NOT treated
+identically, though: disliked_ingredients runs every value through
+normalize_ingredient + resolve_canonical — the exact same two calls, in
+the exact same order, phase 3.1's update_pantry already established for
+pantry items — so "scallions" and "green onion" collapse into one
+stored entry, since a dislike is a statement about an ingredient, and
+ingredients are exactly what that pipeline already knows how to
+canonicalize. dietary_restrictions is different in kind — "vegan" and
+"gluten_free" are restriction tags, not ingredient names, so running
+them through an ingredient normalizer would be a category error; they're
+only lowercased and stripped, deduplicated the same way, with no
+canonicalization pipeline involved at all.
+
+
+6. get_user_profile
+=============================================================
+
+Reads every row currently in user_profile, json.loads's each value,
+layers that dict on top of DEFAULT_PROFILE_VALUES (so a key that was
+never written falls through to its default, and a key that was written
+overrides it), and constructs one UserProfile from the result — the
+exact same "read what's real, default whatever isn't" shape phase 3.1's
+resolve_shelf_life used for a completely different table.
+
+cuisine_preferences is the one field on UserProfile that never comes
+from user_profile at all: it's read live, every call, from
+preference_scores where dimension='cuisine', as a plain {cuisine:
+score} mapping sorted highest-scored first, and it's an empty mapping —
+not an error, not a null — when nothing has been rated yet. This is
+deliberately excluded from PreferenceType and from update_preferences
+entirely: nothing in this phase writes to preference_scores, since
+scoring a cuisine from actual behavior (meal_history ratings, repeated
+cooking) is real logic that belongs to whatever later phase actually
+builds that scoring, not to a function whose job is "write down what
+the user explicitly said." Reading it here, rather than leaving it out
+of UserProfile until that later phase exists, is what makes
+get_user_profile's own promise — "the full profile, usable on a
+completely fresh database" — actually true today.
+
+
+7. remove_preference
+=============================================================
+
+The only way either additive field ever shrinks; update_preferences
+itself has no code path that removes anything. Takes the same
+preference_type/value shape as update_preferences, rejects any
+preference_type that isn't one of the two additive fields (naming both
+valid ones in the ValueError), canonicalizes the value the identical way
+update_preferences would have when adding it (so removing "green onion"
+correctly finds and drops an entry that was originally stored as
+"scallion"), and removes it from the stored list if present.
+
+A value that isn't actually there is deliberately a no-op, not an
+error: the profile comes back completely unchanged rather than raising.
+This mirrors phase 3.2's set_grocery_item_checked, which returns a
+grocery list unchanged when the item_name given isn't actually on it —
+the same reasoning applies here: a removal request for something
+already absent is not a mistake worth surfacing as a failure, it's
+already in the state the caller wanted.
+
+
+8. HOW THIS CONNECTS TO THE REST
+=============================================================
+
+An agent (still not built) is the obvious caller here too: get_user_
+profile before recommending anything, so dietary_restrictions and
+disliked_ingredients can actually constrain what search_recipes/
+match_ingredients (phase 2.4) considers, and preferred_cook_time_minutes
+can inform what gets suggested without the user having to restate it
+every time. update_preferences/remove_preference are the tools an agent
+calls when a conversation surfaces an explicit preference ("I don't eat
+cilantro", "actually I'm not vegan anymore"). Nothing about phase 2's or
+phase 3's own modules changed to support this phase — disliked_
+ingredients reuses phase 2.1's normalizer and phase 2's synonym table
+completely unmodified, the same "no new business logic elsewhere" outcome
+every prior phase in this project has reached when it needed to reuse
+something instead of rebuilding it. The next round wraps this module as
+an MCP server, the same way phase 2.4 wrapped recipe_engine and
+(presumably) an upcoming session wraps pantry_manager's remaining pieces
+or this module in turn — this phase deliberately stops short of that so
+the business logic and its validation get a full round of direct
+testing first.
+
+
+9. THE TESTS
+=============================================================
+
+conftest.py's user_db fixture is a fresh, throwaway Database per test,
+identical shape to pantry_db and recipe_db before it — schema applied
+via init_database, closed on teardown. Because update_preferences and
+remove_preference both take user_db and synonym_map as explicit optional
+arguments, tests pass a hand-built synonym dict directly instead of
+touching the real recipes.db singleton, the same testability argument
+phase 3.1 section 9 already made for update_pantry/remove_items.
+
+test_profile.py (3 tests): a fresh database's profile has every field
+at its documented default and cuisine_preferences as an empty mapping;
+cuisine_preferences populated correctly from two real preference_scores
+rows while a row under a different dimension ("protein") is confirmed
+NOT to leak into it — the one test in this phase that directly checks
+the dimension filter isn't accidentally a substring match or a missing
+WHERE clause.
+
+test_preferences.py (15 tests): dietary_restrictions and disliked_
+ingredients both dedupe a repeated identical value and accumulate a
+genuinely new one across separate calls; the canonically-equivalent-
+dislikes-collapse case (storing "scallions", then adding "green onion",
+ending with exactly one entry); household_size and cooking_skill/
+budget_sensitivity all replace rather than accumulate; an unknown
+preference_type is rejected with a message naming a real accepted field
+(household_size); household_size=0 and preferred_cook_time_minutes=-5
+are both rejected; cooking_skill="expert" and budget_sensitivity="cheap"
+are both rejected with messages naming a real accepted value from their
+respective Literal types; removing a dietary restriction, removing a
+disliked ingredient by its synonym form, remove_preference rejecting a
+scalar field, and a no-op removal of a value that was never added.
+
+
+10. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+JSON-encoding every stored value versus a typed column per value-kind
+    A schema with, say, a separate value_int/value_text/value_json set
+    of columns (or a "type" discriminator column) would make the stored
+    data more directly queryable with plain SQL — but user_profile
+    already has one fixed value column (phase 1.3's own schema, not
+    something this phase controls), and json.dumps/json.loads makes
+    every field's round-trip identical regardless of whether it's a
+    list, an int, a string, or a genuine null — a single, uniform
+    _read_value/_write_value pair rather than a per-field-type switch.
+    The cost is that a value is opaque to raw SQL (you can't
+    WHERE value > 5 against it without parsing JSON first) — a real
+    cost, but not one this phase's actual access pattern (always read
+    through get_user_profile, always write through update_preferences)
+    ever needs to pay.
+
+Canonicalizing dietary_restrictions through the same ingredient pipeline
+as disliked_ingredients
+    Rejected specifically because dietary_restrictions and disliked_
+    ingredients answer different questions — "what kind of diet" versus
+    "what specific ingredient" — and normalize_ingredient's own rules
+    (stripping prep modifiers, singularizing plurals, protecting known
+    multi-word ingredient phrases) are built entirely around ingredient
+    text, not restriction tags. Running "gluten_free" through an
+    ingredient normalizer wouldn't canonicalize it meaningfully; it would
+    just be the wrong tool applied to the wrong kind of string. Simple
+    lowercase-and-strip deduplication is the honest amount of
+    normalization a restriction tag actually needs.
+
+Raising ValueError versus returning a structured error result
+    Every MCP-wrapped module in this project (phase 2.4's recipe_engine,
+    phase 3.3's pantry_manager) returns structured {"error": ...} dicts
+    instead of raising, specifically because an MCP tool has no Python
+    caller able to catch an exception. This module has no MCP wrapper
+    yet at all — its caller is, for now, other Python code (this
+    phase's own tests, and eventually whatever MCP server wraps it next)
+    — so a raised ValueError, naming exactly what was wrong and what's
+    accepted, is the correct, idiomatic Python answer for this phase,
+    the same way phase 2's recipe_engine and matching functions raised
+    ValueError for "not found" before phase 2.4 ever caught it into a
+    structured result. Whatever MCP layer eventually wraps this module
+    will catch these ValueErrors the same way recipe_engine/server.py
+    already catches its own.
+
+remove_preference's absent-value case being a silent no-op versus a
+raised error
+    Covered in section 7. The alternative (raising if the value being
+    removed isn't currently present) would force every caller to check
+    "is this actually there" before ever calling remove_preference, just
+    to avoid a routine error for a state the caller may not have
+    perfect information about (an agent asking to remove a dislike it
+    only inferred from conversation, not one it's certain was actually
+    ever added). Treating "already not there" as success rather than
+    failure removes that burden entirely, at the cost of remove_
+    preference never being able to signal "that wasn't actually
+    present" — a distinction this phase judged not worth forcing every
+    caller to handle.
+
+cuisine_preferences excluded from PreferenceType entirely, rather than
+included as a read-only/rejected-on-write field
+    A field present in UserProfile's schema but explicitly rejected by
+    update_preferences (like a Django model field marked read-only)
+    would keep every "real" profile concept in one enum, at the cost of
+    a genuinely confusing error message the first time someone tried
+    update_preferences("cuisine_preferences", ...) and got told a field
+    that visibly exists on the profile isn't a valid preference_type.
+    Leaving it out of PreferenceType entirely means the get_args()-driven
+    "known field set" used for validation is exactly and only the set of
+    things update_preferences can actually write — no field exists in
+    two overlapping-but-different enumerations that a future maintainer
+    has to keep in sync by hand.
+
+
+11. GLOSSARY
+=============================================================
+
+additive field
+    One of the two PreferenceType values (dietary_restrictions,
+    disliked_ingredients) update_preferences appends to and deduplicates
+    rather than replaces — the opposite of a scalar field.
+
+key/value table
+    user_profile's actual schema shape: (key, value, updated_at), with
+    no fixed set of columns for individual fields — see section 3 for
+    why a typed pydantic schema (UserProfile) sits in front of it rather
+    than letting callers read/write arbitrary keys directly.
+
+PreferenceType
+    The Literal type enumerating the exact seven field names
+    update_preferences will accept — the single source of truth
+    get_args() is read from for both "is this a known field at all" and
+    the error message naming what is, when it isn't.
+
+scalar field
+    One of the five PreferenceType values that replaces on every write
+    (household_size, preferred_cook_time_minutes, protein_preference,
+    cooking_skill, budget_sensitivity) — the opposite of an additive
+    field.
+
+
+12. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: Every earlier phase in this project pushed input validation out to
+an MCP layer that doesn't exist yet here. Why does update_preferences
+validate its own input directly?
+
+    Because the failure mode without it is different in kind, not just
+    in when it gets caught. In phase 2's recipe_engine, calling get_
+    recipe with a bad id has an obviously coherent unvalidated behavior
+    — the lookup finds nothing, and that's a real, meaningful answer a
+    later layer can turn into a "not found" result whenever it wants to.
+    There's no equivalent for update_preferences: if I let
+    update_preferences("flavor_color", "blue") through unvalidated,
+    there's nothing about writing that key that would fail on its own —
+    it would just permanently add a made-up key to user_profile that
+    nothing else in the system knows what to do with, silently growing
+    exactly the kind of unbounded key/value table section 3 exists to
+    prevent. Since a wrong preference_type has no natural failure of its
+    own to defer to, the check has to happen at the one place that
+    actually knows the real field set — right here, before anything's
+    written — rather than being deferrable to a transport layer that
+    doesn't exist yet.
+
+Q: disliked_ingredients gets canonicalized through the ingredient
+matcher's normalizer, but dietary_restrictions doesn't. Why the
+difference, given both are "additive fields" in the same enum?
+
+    Because being additive is a storage behavior, not a statement about
+    what kind of string is being stored. disliked_ingredients holds
+    actual ingredient names — "cilantro," "scallions" — exactly the kind
+    of free-text ingredient string normalize_ingredient and
+    resolve_canonical were built to collapse into one comparable form,
+    the same pipeline phase 3.1's update_pantry already trusts for the
+    identical reason. dietary_restrictions holds restriction tags —
+    "vegan," "gluten_free" — which aren't ingredients at all; running
+    "gluten_free" through an ingredient normalizer (which strips prep
+    words, singularizes plurals, protects known multi-word ingredient
+    phrases) isn't meaningfully canonicalizing it, it's just applying a
+    tool built for a different kind of text. So dietary_restrictions
+    gets the honest amount of normalization it actually needs — lowercase
+    and strip — while disliked_ingredients gets the real pipeline,
+    because the two fields, despite sharing "additive" as a storage
+    behavior, hold semantically different kinds of strings.
+
+Q: How does get_user_profile guarantee it works on a completely fresh
+database, with literally zero rows in user_profile?
+
+    Every field either has an explicit fallback or is computed live from
+    a query that's naturally empty-safe. The seven PreferenceType fields
+    come from layering whatever rows actually exist in user_profile on
+    top of DEFAULT_PROFILE_VALUES — a fresh database contributes zero
+    rows, so every field falls straight through to its default, which is
+    exactly what the dict-merge (`{**DEFAULT_PROFILE_VALUES, **stored}`)
+    does with no special-casing needed. cuisine_preferences is a live
+    SELECT against preference_scores filtered to dimension='cuisine' — a
+    query against an empty table just returns zero rows, which becomes
+    an empty dict, not an error or a null. I have a test that builds a
+    genuinely fresh database, calls get_user_profile with no setup at
+    all, and asserts every single field is exactly its documented
+    default — not just that the call doesn't raise.
+
+Q: Walk me through what happens if I call remove_preference for a
+dislike that was actually stored under its synonym form, not the exact
+string I'm asking to remove.
+
+    remove_preference canonicalizes the value being removed the exact
+    same way update_preferences would have canonicalized it on the way
+    in — normalize_ingredient then resolve_canonical against the same
+    synonym map — before comparing it against what's stored. So if
+    "scallions" was originally added and got canonicalized down to
+    "scallion" in storage, asking to remove "green onion" (a synonym of
+    the same canonical ingredient) resolves to that identical "scallion"
+    string and correctly finds and drops it, even though the literal
+    text I passed to remove_preference never matches what's actually
+    sitting in the row. I have a test that adds via one synonym form and
+    removes via the other specifically to prove this, rather than just
+    asserting removal works when the exact original string is reused.

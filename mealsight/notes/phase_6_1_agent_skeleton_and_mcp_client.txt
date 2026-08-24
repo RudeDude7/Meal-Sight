@@ -1,0 +1,504 @@
+PHASE 6.1 STUDY NOTES: THE LANGGRAPH AGENT SKELETON AND MCP CLIENT
+MANAGER
+=============================================================
+
+These notes cover the first round of phase 6: the plumbing that will
+eventually turn three MCP servers, a perception layer, and an LLM into
+one working recommendation agent. Everything below describes code that
+really exists right now, in backend/mealsight/agent/ and backend/
+tests/test_agent/. Structure and plumbing only, exactly as the task
+specified — every one of the eleven graph nodes is a stub in this
+phase. This is the first phase in the whole project that requires all
+three MCP servers (phase 2.4, 3.3, 4.3) to actually run together at
+once, and the first to bring in LangGraph as a real dependency.
+
+
+1. WHAT THIS PHASE BUILT AND WHY IT COMES NOW
+=============================================================
+
+Every prior phase built one real, independently-tested piece: three
+MCP servers, each verified in isolation against its own real subprocess
+session (phase 2.4, 3.3, 4.3's own verification steps); a full
+perception layer (phase 5.1-5.3) that never needed a database
+connection of its own beyond the pantry/recipes reference tables it
+already reaches into directly. Nothing before this phase ever needed
+all three servers running AT THE SAME TIME, in the same process, for
+the same request — that's specifically what an agent recommending a
+meal needs, since a real recommendation touches pantry state,
+user preferences, and recipe search all in one pass. This phase builds
+exactly that connective tissue — MCPClientManager — plus the graph
+shape (LangGraph's StateGraph) the eventual agent logic will run
+inside, and confirms both compile and run cleanly before any real node
+logic exists.
+
+The task's own framing — "structure and plumbing only, every node is a
+stub in this session" — is a real, deliberate sequencing choice this
+project has followed before (phase 3.1 built pantry logic a full round
+before phase 3.3 wrapped it; phase 5.1-5.3 built and fully tested three
+perception pipelines before this phase ever tried to orchestrate them
+together). Getting the graph's own shape, the state schema, the
+trace-id wiring, and the MCP client's own reliability contract right
+first — and proven right, against the three REAL servers, not mocks —
+is what makes filling in eleven nodes' real logic in a later session a
+matter of editing eleven existing files, not redesigning the pipeline
+around whatever turns out to be missing.
+
+
+2. FILE MAP
+=============================================================
+
+backend/mealsight/agent/mcp_client.py
+    MCPClientManager, ToolCallResult, MCPServerStartupError,
+    EXPECTED_TOOLS, _StderrForwarder. Sections 3-4.
+
+backend/mealsight/agent/state.py
+    MealSightState — the LangGraph state schema. Section 5.
+
+backend/mealsight/agent/graph.py
+    build_graph, NODE_ORDER — the eleven-node wiring. Section 6.
+
+backend/mealsight/agent/nodes/
+    _common.py (the shared run_stub helper) plus one file per node:
+    validate_input.py, perceive.py, merge.py, update_pantry.py,
+    get_context.py, search_recipes.py, match_rank.py, reason.py,
+    generate_output.py, log_learn.py, present.py. Section 6.
+
+backend/mealsight/agent/runner.py
+    run_recommendation — the entry point. Section 7.
+
+backend/pyproject.toml
+    langgraph added as a real dependency (resolved to 1.2.11, pulling
+    in langchain-core and several langgraph-* packages).
+
+backend/tests/test_agent/
+    test_mcp_client.py (5 tests, two of which start all three real
+    servers as real subprocesses), test_graph.py (3 tests) — 8 new
+    tests, 395 total in the whole suite now.
+
+
+3. MCPClientManager: STARTUP, HEALTH CHECK, AND THE ERROR CONTRACT
+=============================================================
+
+start() launches all three servers concurrently via asyncio.gather
+(never sequentially — a real requirement, not a style preference,
+since three servers each taking ~1-2 seconds to import their own
+dependencies and verify their own database would make sequential
+startup measurably slower for no benefit), waits for each to finish
+initializing, then runs a real health check per server: list_tools(),
+confirm every name in EXPECTED_TOOLS[server] is actually present. Any
+failure — a server that doesn't start at all, or one that starts but
+answers with an incomplete tool list — collects into one
+MCPServerStartupError naming every failing server and exactly why,
+after first tearing down anything that DID start successfully (via
+shutdown(), called from inside the failure branch itself), so a failed
+start never leaves an orphaned subprocess running even when two of the
+three servers were fine.
+
+call_tool(server, tool_name, arguments) is the one contract every
+future node will actually use. Two failure shapes are handled
+completely differently, on purpose: an unknown server name (a typo in
+the CALLING code) raises ValueError immediately — a programmer error,
+not a runtime condition worth degrading around — while a genuine
+transport failure (a timeout, a dropped connection) gets one retry,
+and if that also fails, a structured ToolCallResult(success=False,
+error=...) comes back instead of an exception. This mirrors the exact
+distinction phase 3.3/4.3's own MCP servers already draw between "this
+input is fundamentally wrong" (raise, or a validation_error) and
+"something transient went wrong" (retry, then report) — applied one
+layer up, at the client instead of the server.
+
+Every call is logged with server, tool, duration_ms, success, and
+attempt — this is deliberately the seed of "this becomes the
+processing trace later" the task called out directly: nothing about
+this logging format needs to change for a later phase to build
+processing_trace out of it, it's already structured exactly that way.
+
+
+4. A REAL BUG FOUND WHILE WIRING THIS UP: log_file NEEDS A REAL FILE
+=============================================================
+
+The task's own requirement — "make sure their stderr is captured to
+the parent logger rather than discarded, or debugging Phase 6.3 will
+be miserable" — led directly to a real, load-bearing bug this phase
+found and fixed before it ever reached a later session.
+
+The first design was a plain Python object with a .write() method,
+handed to StdioTransport's own log_file parameter in place of its
+default (sys.stderr passthrough). That failed immediately, with all
+three servers refusing to start: fastmcp hands log_file directly to
+the real subprocess as its stderr target, which means the object has
+to be a genuine OS-backed file — something with a working .fileno() —
+not a duck-typed stream that merely LOOKS like a file from Python's
+own perspective. subprocess creation (however fastmcp performs it
+internally) needs a real file descriptor to redirect the child's
+stderr into, and a plain .write()-only object simply doesn't have one.
+
+The fix: _StderrForwarder now opens a real os.pipe(), wraps the write
+end via os.fdopen (which does have a working fileno(), since it's
+backed by the same real OS pipe) and hands THAT to log_file, then
+reads the other end in a small daemon background thread, forwarding
+each line into this project's own structured logger as it arrives —
+tagged with which server it came from, and (since get_logger's own
+contextvar-based trace-id injection applies automatically) whatever
+trace_id happens to be bound in the calling context at the moment
+start() ran. Verified directly in this phase's own live verification:
+every one of the three real servers' own startup log lines
+(recipes_table_verified, shelf_life_reference_verified, the FastMCP
+banner itself) shows up correctly in the parent's logs, attributed per
+server, exactly the outcome the task asked for. This is the kind of
+bug that's invisible until the very first time three real subprocesses
+actually run together — which is exactly what this phase was the
+first to do.
+
+
+5. MealSightState: EVERYTHING OPTIONAL EXCEPT THE ACCUMULATOR
+=============================================================
+
+Every field on MealSightState is NotRequired except stream_messages,
+which uses the standard LangGraph reducer idiom (Annotated[list[str],
+operator.add]) so each node's own return value concatenates onto the
+running list rather than overwriting it. The task's own reasoning for
+this shape — "a node may fail and leave its field unset" — is a real
+design constraint this phase respected literally: nothing about
+MealSightState assumes every field gets populated on every run (a
+text-only request never sets vision_result at all, and that's a
+completely normal, valid state, not a gap to work around), and nothing
+about a later node's real implementation should ever assume an earlier
+field is present just because that node usually runs after another one
+that would have set it.
+
+The MCP-sourced fields (pantry_items, expiring_items, user_profile,
+context_signals, meal_history, recipe_candidates, matched_recipes) are
+all typed as plain dict[str, Any] shapes — deliberately, since that's
+exactly what MCPClientManager.call_tool's own ToolCallResult.data
+already is (a tool's parsed JSON result), so state never needs its own
+second, redundant typed schema layered on top of what the MCP layer
+already returns.
+
+
+6. THE GRAPH: ELEVEN STUBS, ONE FILE EACH, AND ONE HONEST CONSTRAINT
+   NAMED DIRECTLY
+=============================================================
+
+build_graph wires exactly the eleven nodes the task specified,
+sequentially, via NODE_ORDER — the one list both the graph-building
+loop and this phase's own tests read from, so "how many nodes" and
+"what order" are never duplicated as two separate facts that could
+drift apart. Every node is its own file under mealsight/agent/nodes/,
+each calling one shared helper (run_stub) that logs entry/exit and
+appends one stream message — not eleven copies of the same three lines
+of logging code, but eleven genuinely separate, individually-editable
+files, which is what actually satisfies "so later sessions fill them
+in without restructuring": a future session changes exactly one node's
+own file, and nothing about NODE_ORDER, the shared helper, or any
+other node needs to change alongside it.
+
+Every stub's own docstring names specifically what it will eventually
+call, grounded in the real tools this project has already built —
+"will call recipe_engine's search_recipes," not "will search for
+recipes" — since a docstring naming a real, already-existing tool is a
+directly checkable claim, not a vague placeholder a later session has
+to re-derive from scratch.
+
+log_learn's own honest constraint
+------------------------------------------------------
+Worth calling out on its own: log_learn sits between generate_output
+and present in the sequence — meaning it runs BEFORE the user has even
+seen top_recommendation, let alone cooked it. user_intelligence's own
+log_meal tool is documented, since phase 4.3, to be called only AFTER
+cooking is actually confirmed, never on a mere recommendation. A stub
+description that said "will call log_meal here" would have been
+quietly wrong the moment a later session tried to implement it
+literally — this phase's own stub says so directly instead, naming the
+real constraint (log_meal fires from a separate, later, user-confirmed
+flow entirely outside this graph) rather than describing a node
+behavior that would violate an already-established boundary from a
+different phase.
+
+
+7. TRACE-ID WIRING: NOTHING TO WIRE, EXCEPT WHERE TO BIND IT
+=============================================================
+
+The task called this out as a requirement — "a recommendation gets one
+trace id bound at entry, appearing in every log line from every node
+and every MCP call" — and the actual implementation turned out to need
+almost no new code to satisfy it: mealsight.utils.logging's own
+contextvar-based propagation (phase 1.1) already makes every log line
+in the current async context carry whatever trace_id was last bound,
+including across await boundaries, by design. run_recommendation calls
+bind_trace_id(uuid) exactly once, before anything else runs — start()
+runs inside that context (so every mcp_tool_call log line already
+carries it), and the graph itself runs inside that same context too.
+
+The one thing this phase couldn't simply assume — LangGraph's own node
+execution model might, in principle, run nodes via a mechanism that
+doesn't preserve the calling asyncio context (a thread pool, a
+different task-creation path) — was verified directly rather than
+trusted: a live test binds a trace id, monkeypatches two different
+node functions (one early in the sequence, one at the very end) to
+record current_trace_id() when they actually run, and confirms both
+see the identical value. That passed on the first real run, confirming
+LangGraph's node execution does preserve contextvar propagation the
+way plain asyncio.create_task already does — a real thing to verify,
+not something to assume just because it usually works that way.
+
+
+8. THE ENTRY POINT
+=============================================================
+
+run_recommendation does exactly three things in order: bind the trace
+id, start the MCP manager (as an async context manager, `async with
+MCPClientManager():`), run the graph once. Using the manager as a
+context manager is what makes "ensures shutdown even on failure" true
+by construction rather than by a manually-written try/finally: __aexit__
+runs unconditionally on the way out of the `async with` block, whether
+graph.ainvoke() returns normally or raises, so a failed recommendation
+never leaves a live subprocess behind. The graph itself doesn't
+actually call into the manager anywhere yet in this phase (every node
+is a stub) — but the manager still starts and stops on every real run,
+exactly as a filled-in graph will need it to when a later session gives
+nodes an actual way to reach it.
+
+
+9. THE TESTS
+=============================================================
+
+test_mcp_client.py (5 tests) deliberately mixes two kinds of test. Two
+of them start the three REAL servers as real subprocesses — the only
+way to actually prove "starts all three servers and passes health
+check" is true of the real thing, not an assumption about how a mock
+would behave: one confirms the full inventory and a real successful
+call_tool against each server, the other confirms shutdown clears the
+manager's own state and a subsequent call fails clearly. A third real-
+subprocess test proves the timeout path fires and returns a structured
+failure (call_timeout_seconds set absurdly low against a real, fast
+server, guaranteeing the timeout — not the tool's own slowness —
+is what's actually being exercised). The remaining two are fully
+mocked and fast: a bad server name raising ValueError needs no running
+manager at all, and the health-check-failure path (naming the specific
+server and the specific missing tool) is proven deterministically via
+a monkeypatched fastmcp.Client rather than by actually breaking a real
+server on purpose.
+
+test_graph.py (3 tests): the graph compiles with exactly the eleven
+node names NODE_ORDER expects (checked against the compiled graph's
+own introspection, graph.get_graph().nodes, not just NODE_ORDER's own
+length); a full run accumulates exactly eleven stream messages, each
+one starting with its own node's bracketed name, in the correct order;
+the trace-id-consistency test described in section 7.
+
+Real subprocess spawning is genuinely expensive relative to this
+project's usual test suite — the full suite's runtime rose from ~3
+seconds to ~23 seconds specifically because of the MCP-manager tests
+that start three real servers. That cost was accepted deliberately
+rather than mocked away, since a mocked MCPClientManager test would
+never have caught section 4's own log_file bug at all.
+
+
+10. VERIFICATION: ALL THREE SERVERS TOGETHER FOR THE FIRST TIME
+=============================================================
+
+ruff/mypy --strict/full pytest all clean (395 tests total, no
+regressions across phase 1 through 5.3's own suite). Against the three
+REAL servers — the first time in this entire project all three have
+run together at once — MCPClientManager.start() succeeded, the printed
+tool inventory matched EXPECTED_TOOLS exactly for all eighteen tools
+across the three servers, and one real call_tool per server succeeded:
+recipe_engine's search_recipes matched 250 real seeded recipes,
+pantry_manager's get_pantry read back 10 real items from the actual
+data/pantry.db, user_intelligence's get_user_profile returned a real
+default profile. Every one of the three servers' own real startup log
+lines showed up correctly captured and attributed in the parent
+process's own logs — section 4's fix confirmed working, not just
+theorized. The full stub graph ran end to end and printed all eleven
+stream messages in the correct order, in 11.98 milliseconds wall-clock
+— the actual cost of eleven stub nodes running sequentially with no
+real work yet, a number worth having on record specifically so a later
+session can tell, once real node logic exists, how much of the total
+run time is genuinely new work versus this phase's own baseline graph
+overhead.
+
+
+11. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+A real os.pipe() plus a background thread versus a temp file, versus
+accepting fastmcp's own sys.stderr default
+    Covered in section 4. A temp file (opened once, tailed for new
+    content) would also have a real fileno() and would have worked,
+    but adds real disk I/O and a "how do I know when the server is
+    done writing" polling problem a live pipe doesn't have — a pipe's
+    own EOF signals completion naturally when the write end closes.
+    Accepting fastmcp's own default (raw sys.stderr passthrough) was
+    rejected because it satisfies "not discarded" but not "captured to
+    the parent LOGGER" — the task's own wording specifically wanted
+    server output routed through this project's real structured
+    logger, attributed and trace-correlated, not just visible
+    somewhere in the terminal with no service name attached.
+
+One retry, then a structured failure, versus more retries or versus
+letting the caller configure a retry policy per call
+    The task specified "one retry" directly, and this phase followed
+    that literally rather than generalizing it into a configurable
+    policy the task never asked for — max_retries is a constructor
+    parameter (so a future need for more retries doesn't require
+    editing this module), but the default is exactly one, matching the
+    stated requirement precisely.
+
+ValueError for an unknown server name versus a ToolCallResult(success=
+False) for that case too
+    Covered in section 3. Folding an unknown-server-name typo into the
+    same structured-failure shape as a genuine transport problem would
+    make a real programmer error (a node calling "pantr_manager" by
+    typo) silently degrade the same way a real network blip does —
+    which is the wrong signal to send, since one is a bug to fix in
+    the calling code and the other is a real runtime condition to
+    handle gracefully. Keeping them as two different failure shapes
+    (raise vs. return) is what the task's own explicit test
+    requirement — "a bad server name surfaces a clear error" — asked
+    for directly.
+
+One shared run_stub helper versus eleven independent copies of the
+same logging/message logic
+    A future session editing one node's real implementation needs to
+    change exactly that node's file — sharing the boilerplate through
+    one helper both keeps that true (nothing about NODE_ORDER, the
+    other ten nodes, or the shared helper itself needs to change) and
+    avoids eleven near-identical copies of three lines of logging code
+    that could quietly drift apart if one were ever edited and the
+    other ten weren't.
+
+Sequential-only graph wiring in this phase versus building in
+conditional routing now (e.g. skip update_pantry when there's no
+vision_result)
+    The task specified eleven nodes "wired sequentially" directly, and
+    real conditional routing (a node's own real logic deciding whether
+    a later node is even relevant) can't be meaningfully designed
+    before that node's own real behavior exists — build_graph's own
+    docstring says this explicitly, so a later session knows
+    introducing real branching is expected and doesn't require
+    re-architecting this file, just adding real edges where a stub
+    edge currently is.
+
+
+12. GLOSSARY
+=============================================================
+
+health check (MCP)
+    MCPClientManager.start()'s own per-server verification: list_tools()
+    against a just-started server, confirming every name in
+    EXPECTED_TOOLS[server] is actually present before considering that
+    server "up."
+
+processing trace
+    The task's own name for what MCPClientManager's own call_tool
+    logging (server, tool, duration_ms, success, attempt) is the seed
+    of — not yet assembled into MealSightState.processing_trace in
+    this phase (present's own stub docstring names this as its future
+    job), but already structured in exactly the shape that assembly
+    will need.
+
+stub node
+    One of the eleven functions under mealsight.agent.nodes/ in this
+    phase — logs entry/exit, appends one stream message naming its own
+    future real behavior, passes state through completely unchanged.
+    Not a placeholder that raises NotImplementedError; a real,
+    runnable no-op.
+
+trace id
+    A UUID bound once, at the very start of run_recommendation, via
+    mealsight.utils.logging.bind_trace_id — automatically present on
+    every subsequent log line in that same async context, including
+    across await boundaries and (confirmed live, section 7) across
+    LangGraph's own node execution.
+
+
+13. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: You found a real bug in your first attempt at stderr forwarding —
+walk me through how you actually diagnosed it, not just what the fix
+was.
+
+    The first version was a plain Python object with a .write() method,
+    handed to StdioTransport's log_file parameter, and all three
+    servers failed to start immediately with an error naming that
+    exact object and saying it had no "fileno" attribute. That error
+    message told me directly what was actually happening: fastmcp
+    isn't treating log_file as "something I write Python strings to
+    myself" the way I'd assumed — it's handing that object straight to
+    the subprocess machinery as a real stderr target, which needs an
+    actual OS file descriptor to redirect into, not just something
+    that duck-types as writable from Python's own perspective. Once I
+    understood that, the fix was concrete: open a real os.pipe(), wrap
+    the write end with os.fdopen so it has a genuine fileno() backed by
+    that real pipe, and read the other end myself in a background
+    thread. I verified the fix the same way I found the bug — running
+    it against the real servers, not just trusting the code looked
+    right — and confirmed the real startup log lines from all three
+    servers actually showed up in my own logger, correctly attributed.
+
+Q: Why does call_tool raise for an unknown server name but return a
+structured failure for a timeout — isn't that inconsistent?
+
+    They're different categories of problem, not the same problem
+    handled two different ways. An unknown server name means the
+    CALLING code has a bug — it typed a server name that was never one
+    of the three this manager actually manages, which is something a
+    developer needs to see and fix, the same way you'd want a typo'd
+    dictionary key to raise KeyError rather than silently returning
+    None. A timeout means the manager did everything right — it asked
+    a real, correctly-named server for something — and the server (or
+    the transport to it) didn't answer in time, which is a normal,
+    expected-to-happen-sometimes runtime condition an agent node needs
+    to be able to reason about as data, not as an exception it has to
+    wrap every single call in a try/except to survive. Treating both
+    the same way would either make every node defensively wrap every
+    call (if I raised for both) or make a real programmer typo silently
+    look like a transient network blip (if I structured-failed for
+    both) — neither is right, so they're deliberately different.
+
+Q: The task wanted the trace id to appear in every log line from every
+node. How much of that did you actually have to build versus just wire
+together?
+
+    Almost nothing new — that's actually the interesting part. Phase
+    1.1 already built contextvar-based trace-id propagation into
+    mealsight.utils.logging, specifically so it survives across await
+    boundaries within one async task tree. run_recommendation calls
+    bind_trace_id exactly once, right at the very start, before the
+    MCP manager even starts — and because both the manager's startup
+    and the whole graph run happen inside that same bound context, every
+    log line downstream picks it up automatically with zero explicit
+    threading of the value through any function signature. The one
+    thing I didn't just assume was true is whether LangGraph's own node
+    execution mechanism preserves that context — it's plausible a graph
+    library could run nodes through some execution path that doesn't
+    copy the calling context, the same way a naively-implemented thread
+    pool wouldn't. So I wrote a real test: bind a trace id, monkeypatch
+    two different nodes (one early, one at the very end of the
+    sequence) to record what current_trace_id() actually returns when
+    they run, and confirm both see the identical value. It passed
+    immediately, which told me LangGraph's own execution model does the
+    right thing here — but I wanted that confirmed by a real run, not
+    assumed because contextvars usually work that way.
+
+Q: log_learn's own stub explicitly says it will NOT call log_meal. Why
+put a negative constraint in a stub that isn't implementing anything
+yet?
+
+    Because the constraint is real and easy to violate by accident
+    later if it isn't written down where the implementer will actually
+    see it. log_learn runs before present in the sequence — meaning
+    before the user has even seen the recommendation, let alone cooked
+    it — but user_intelligence's own log_meal tool has been documented,
+    since phase 4.3, to fire only after cooking is actually confirmed.
+    If I'd written log_learn's stub description as something generic
+    like "will log the meal," a future session implementing it might
+    reasonably just call log_meal right there, since that's literally
+    what the node's name suggests — and that would quietly violate a
+    real boundary this project already established two phases ago. I'd
+    rather the stub say directly, in the one place a future
+    implementer is guaranteed to read before writing real code here,
+    exactly what this node can't do and why, than let that mistake get
+    made and discovered later.

@@ -51,6 +51,6 @@ async def test_trace_id_appears_in_provider_log_lines(
     provider = MistralProvider(client, RateLimiter())
     await provider.complete("what's in the fridge?", TEST_MODEL)
 
-    lines = [line for line in capsys.readouterr().out.strip().splitlines() if line]
+    lines = [line for line in capsys.readouterr().err.strip().splitlines() if line]
     parsed = [json.loads(line) for line in lines]
     assert any(entry.get("trace_id") == "trace-in-provider-logs" for entry in parsed)

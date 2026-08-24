@@ -1,0 +1,600 @@
+PHASE 2.4 STUDY NOTES: THE RECIPE ENGINE MCP SERVER
+=============================================================
+
+These notes cover the fourth round of phase 2: wrapping the Recipe
+Engine's five plain-Python functions (built in phase 2.1/2.3, described
+in notes/phase_2_recipe_engine.txt) as an actual MCP server an agent can
+talk to. Everything below describes code that really exists right now,
+in backend/mealsight/mcp_servers/ and backend/tests/test_mcp_servers/.
+
+
+1. WHAT THIS PHASE BUILT AND WHY IT COMES NOW
+=============================================================
+
+Every prior round of phase 2 built real, tested logic - the matcher,
+scale_recipe, calculate_nutrition, and so on - but none of it was
+reachable by anything outside a Python process that imports mealsight
+directly. An agent (a later phase, still not built) doesn't import
+Python modules - it talks MCP (Model Context Protocol), calling named
+tools with JSON arguments and getting JSON results back. This phase
+builds exactly that boundary: a FastMCP server exposing six tools, each
+one a thin wrapper around a function that already existed, already had
+its own tests, and does not change meaning here.
+
+The one binding rule for this whole phase, repeated because it actually
+shaped every file: business logic lives in mealsight.recipe_engine and
+mealsight.matching, and stays there. mealsight/mcp_servers/ only
+validates input, calls into those modules, and serializes what comes
+back. Nowhere in this phase's own code does a scoring formula, a unit
+conversion, or a dietary rule get written twice.
+
+
+2. FILE MAP
+=============================================================
+
+backend/mealsight/mcp_servers/__init__.py
+    One paragraph stating the architecture principle above - a package
+    marker with a purpose, not an empty file.
+
+backend/mealsight/mcp_servers/recipe_engine/server.py
+    The FastMCP app (mcp = FastMCP("recipe-engine")) and all six
+    @mcp.tool functions. Every tool: validate, call the underlying
+    function, serialize, catch errors into a structured result.
+
+backend/mealsight/mcp_servers/recipe_engine/serialization.py
+    Converts every recipe_engine/matching pydantic result model into a
+    plain dict (model_dump(mode="json")), plus three structured error
+    builders: not_found_error, validation_error, internal_error.
+
+backend/mealsight/mcp_servers/recipe_engine/__main__.py
+    Runnable as `python -m mealsight.mcp_servers.recipe_engine`. Opens
+    the real database connection at startup, checks the recipes table
+    isn't empty, runs the server over stdio, closes the connection on
+    the way out.
+
+backend/mealsight/mcp_servers/recipe_engine/__init__.py
+    Re-exports `mcp` so `from mealsight.mcp_servers.recipe_engine import
+    mcp` works from anywhere, same convention as every other package
+    __init__.py in this codebase.
+
+backend/mealsight/utils/logging.py
+    One line changed in this phase - see section 4. Everything else
+    about this module is phase 1.1's, unchanged.
+
+backend/mealsight/recipe_engine/search.py, models.py
+    search_recipes's signature and return type both changed in this
+    phase - see section 5. Nothing else in recipe_engine or matching was
+    touched.
+
+backend/pyproject.toml
+    fastmcp>=3.4.7 added as a real dependency (pulling in the official
+    mcp SDK underneath it). A new console script,
+    mealsight-recipe-server.
+
+backend/tests/test_mcp_servers/test_recipe_engine/
+    conftest.py, test_tool_schemas.py, test_tools.py, test_no_stdout.py -
+    15 tests, all against the real FastMCP in-memory client, not
+    server.py's Python functions called directly.
+
+
+3. WHAT MCP IS, AND WHAT A "THIN TRANSPORT SHELL" MEANS HERE
+=============================================================
+
+MCP (Model Context Protocol) is a standard way for something running an
+LLM-driven agent to discover and call a fixed set of named "tools" -
+each with a declared name, a description, and a JSON schema for its
+arguments - without the agent needing any Python-specific knowledge of
+what's on the other end. The agent doesn't import mealsight.recipe_engine;
+it sends a JSON-RPC-shaped request over some transport (here, stdio -
+section 6) naming a tool and its arguments, and gets a JSON result back.
+
+FastMCP is the library actually used to build the server side of this:
+a decorator (@mcp.tool) that takes a plain async Python function, infers
+its JSON schema from its type hints, and derives the tool's advertised
+description straight from its docstring. That last part matters more
+than it sounds like it should: the docstring on a tool function in
+server.py isn't documentation for a future maintainer reading the code -
+it's the ONLY thing an agent ever sees when deciding whether to call this
+tool at all, and it's read in isolation, without any of the surrounding
+context a human reading this file has. That's why section 5's tool
+docstrings are as long as they are, and why they explicitly state things
+a docstring for a human wouldn't normally bother saying ("this does NOT
+do X, call Y for that").
+
+"Thin transport shell" is the specific discipline this phase followed
+throughout: every tool function in server.py does exactly four things,
+in order - validate input that the underlying function itself wouldn't
+catch cleanly, call the one existing function that already implements
+the actual behavior, convert its pydantic result to a plain dict, and
+catch whatever can go wrong into a structured result instead of letting
+an exception reach the caller raw. Nothing else. The moment a tool
+function needs an if-statement that changes what a recipe result means -
+not just whether an error gets returned - that's a sign the logic
+belongs in mealsight.recipe_engine instead, not here.
+
+
+4. A REAL BUG FOUND WHILE WIRING THIS UP: LOGGING WAS WRITING TO STDOUT
+=============================================================
+
+stdio transport (the one this server actually uses - section 6) speaks
+the entire MCP protocol over the process's stdout and stdin. That means
+stdout is not a place for a person to read logs from during normal
+operation, the way it usually is - it's a live protocol stream, and
+anything else written there, even one stray line, corrupts it for the
+rest of the session, exactly the way a corrupted network packet would.
+
+mealsight.utils.logging (built in phase 1.1) configured structlog with
+`structlog.PrintLoggerFactory()` - the plain, no-argument PrintLoggerFactory,
+whose actual, undocumented-at-a-glance default destination is sys.stdout.
+That was never actually a problem before this phase - nothing before now
+ever needed stdout to be pristine - but it would have silently corrupted
+every single stdio session between this server and any real client the
+first time anything in the whole mealsight codebase logged a single INFO
+line during a tool call. This is exactly the kind of bug that's invisible
+in every test that doesn't specifically simulate the exact failure
+condition (a real MCP client reading stdout as a literal protocol stream)
+and catastrophic the one time it actually runs that way.
+
+The fix is one argument: `structlog.PrintLoggerFactory(file=sys.stderr)`.
+Diagnostics belong on stderr regardless of transport - this was arguably
+never correct to leave on stdout even before an MCP server existed, it
+just never mattered until now. Fixing it broke four assertions in
+tests/test_logging.py and one in tests/test_providers/test_tracing.py,
+all of which had been asserting on capsys.readouterr().out specifically
+because that's where output used to land - all five were updated to
+assert on .err instead, since that's the behavior that's actually correct
+now.
+
+`__main__.py` also passes show_banner=False to run_stdio_async as a second,
+independent guard - FastMCP's own startup banner already correctly writes
+to stderr via its own separate Rich console (Console(stderr=True)), so
+this isn't fixing a second live bug, it's removing one more thing that
+writes anything at all during startup, on the general principle that a
+transport this fragile deserves more than one line of defense.
+
+
+5. THE SIX TOOLS
+=============================================================
+
+search_recipes(dietary_filters, max_cook_time, cuisine, meal_type,
+max_results)
+------------------------------------------------------
+Wraps mealsight.recipe_engine.search_recipes directly. Two real, small
+changes were made to that underlying function in this phase - not new
+business logic, but a genuine signature and return-type change, made in
+recipe_engine/search.py itself, not faked at the transport layer:
+
+    max_cook_time became Optional (int | None = None). It was previously
+    a required argument, always applied as a SQL filter. The MCP tool's
+    own spec wanted "omit to skip cook-time filtering entirely" - and
+    faking that at the transport layer (passing some large sentinel
+    number down to the old required parameter) would have kept
+    excluding every recipe with an unknown cook time, even when the
+    caller never asked for a cook-time constraint at all. That's a
+    real behavior distortion, not a transport detail, so the fix went
+    into the actual filter-building logic.
+
+    search_recipes now returns a SearchResults model (results,
+    total_matched) instead of a bare list. This closes a finding from
+    the previous session: the old return shape had no way to tell "only
+    3 recipes matched" apart from "200 matched, here are the first 3" -
+    exactly the ambiguity an agent needs resolved to report a candidate
+    count honestly. total_matched is the count of every recipe that
+    passed every filter, computed before max_results ever slices the
+    list down.
+
+The tool's docstring says outright, in capital letters, that it does NOT
+perform ingredient matching and that match_ingredients is the separate
+call for that - directly satisfying the one thing this phase's task
+explicitly required search_recipes's description to state.
+
+get_recipe(recipe_id)
+------------------------------------------------------
+Wraps mealsight.recipe_engine.get_recipe. Full detail - every ingredient,
+every step, image_url - specifically the record search_recipes never
+returns, to keep search results compact.
+
+match_ingredients(recipe_id, available_ingredients, dietary_restrictions)
+------------------------------------------------------
+Wraps mealsight.matching.match_recipe_by_id - not something under
+recipe_engine at all, since the ingredient-matching algorithm lives in
+its own package (mealsight.matching, phase 2.1). This is the one tool
+whose name in the MCP surface (match_ingredients) doesn't match its
+underlying function's name (match_recipe_by_id) - the task specified the
+tool's name directly, and the docstring makes the mapping to the
+underlying concepts (match_score, can_cook, partial_matches, and so on)
+explicit rather than leaving an agent to infer field meanings from names
+alone.
+
+scale_recipe(recipe_id, target_servings) and
+calculate_nutrition(recipe_id, servings)
+------------------------------------------------------
+Thin wraps of the identically-named recipe_engine functions. Both
+validate their one numeric argument (a non-positive value) before ever
+calling into the underlying function, returning a structured
+validation_error naming the exact parameter rather than letting the
+underlying function's own ValueError surface as a generic failure -
+the difference between "here's specifically what's wrong" and "something
+broke."
+
+find_substitutions(ingredient_name, reason)
+------------------------------------------------------
+The one tool where the MCP-level signature is narrower than what the
+underlying function can actually do. mealsight.recipe_engine.
+find_substitutions takes an optional dietary_restrictions argument that
+does real, hard filtering (the same rule match_ingredients uses) - but
+the task's given MCP tool signature for find_substitutions only has
+ingredient_name and reason, no restrictions parameter. Rather than
+quietly making reason="dietary" look like it does real filtering when it
+can't (since a bare label can't say which specific restriction applies),
+the docstring says this directly: passing reason="allergic" or
+"dietary" here labels the result but does NOT exclude anything on its
+own, and points explicitly at match_ingredients's dietary_restrictions
+argument as the real way to get a hard exclusion. Reason validation
+happens before calling into the underlying function at all -
+`get_args(SubstitutionReason)` (imported from recipe_engine.models,
+where the Literal type is actually defined - not duplicated as a second
+list here) supplies the accepted-values list a validation_error reports
+when reason isn't one of the four real values.
+
+
+6. ERROR HANDLING
+=============================================================
+
+Every one of the six tools follows the same shape: validate anything
+the underlying function can't cleanly express as an error condition of
+its own (a numeric parameter's positivity, an enum-like string), call
+the underlying function inside a try block, catch ValueError specifically
+for "this id doesn't exist" (every recipe_engine/matching function that
+looks up a recipe by id already raises exactly this, naming the id, by
+convention established back in phase 2.1/2.3), and catch a bare Exception
+last as a genuine catch-all - never a bare `except:` with no type at all,
+which is a real distinction: `except Exception` still lets
+KeyboardInterrupt and SystemExit through, a bare except would swallow
+even those.
+
+Three structured result shapes, all built in serialization.py:
+
+    not_found_error(entity, entity_id) - {"error": "not_found",
+    "message": "...", "<entity>_id": entity_id}. Returned for get_recipe,
+    match_ingredients, scale_recipe, and calculate_nutrition, all of
+    which look a recipe up by id first.
+
+    validation_error(parameter, message, accepted=None) - {"error":
+    "validation_error", "parameter": ..., "message": ..., optionally
+    "accepted_values": [...]}. Returned for scale_recipe/
+    calculate_nutrition's non-positive numeric arguments and
+    find_substitutions's unrecognized reason.
+
+    internal_error(message=generic) - {"error": "internal_error",
+    "message": "An unexpected error occurred..."}. Returned for anything
+    that reaches the bare Exception catch. The real exception is logged
+    at error level, with structured context (tool name in the log event
+    name, plus whatever id/argument was involved) via mealsight.utils.
+    logging's get_logger and exc_info=True - server-side only. Nothing
+    about the real exception - its type, its message, its traceback -
+    ever reaches the caller, specifically so an agent's context window
+    never accidentally fills up with (or acts on) an internal stack
+    trace it has no way to interpret usefully anyway.
+
+Every one of these is a completely ordinary dict, returned as a normal
+tool result - is_error stays False at the MCP protocol level even for a
+not_found or validation_error result, confirmed directly against the
+real FastMCP client during this phase's own verification (result.is_error
+is False, result.data holds the structured error dict). That's
+deliberate: these are expected, actionable outcomes an agent should read
+and reason about, not protocol-level failures.
+
+
+7. LIFECYCLE
+=============================================================
+
+`python -m mealsight.mcp_servers.recipe_engine` (or, once installed, the
+`mealsight-recipe-server` console script) runs __main__.py's main(), a
+synchronous wrapper around asyncio.run(_run()) - the exact same
+sync-entry-point-wrapping-an-async-run shape mealsight.seed.seed_all's
+own main() already established, kept consistent rather than inventing a
+second pattern.
+
+_run() does three things in order: verifies the recipes table (opening
+the real database connection now, at startup, via get_recipe_db(), rather
+than lazily on whatever tool call happens to be first - a
+SELECT COUNT(*) query that also forces the connection open immediately),
+logs a loud warning if that count is 0 (a server that answers every
+search_recipes call with an empty result set would otherwise look like
+it's "working" while being completely useless - the exact kind of silent
+failure this codebase has repeatedly chosen to make loud instead, going
+back to phase 1's config validation), then runs the server over stdio
+until it stops, and finally closes every database connection on the way
+out via mealsight.db.close_all(), in a finally block so a connection
+doesn't leak even if the server loop itself raises.
+
+get_recipe_db() itself is unchanged from phase 1.3 - the same
+lazily-connected, process-wide singleton every other script in this
+codebase (audit_recipe_data.py, demo_matcher.py, seed_all.py) already
+uses. No new connection-management code was written for this phase;
+"initialize once, close on shutdown" was already exactly what that
+existing singleton does, as long as something calls it early and closes
+it late, which is all __main__.py actually adds.
+
+
+8. HOW THIS CONNECTS TO THE REST
+=============================================================
+
+This is the first phase where mealsight code is reachable by something
+outside a Python process that imports it directly - an agent (still not
+built) is the obvious next thing to sit on the other side of this
+server, discovering these six tools by name and description alone and
+calling them the same way this phase's own verification script did over
+a real subprocess. Nothing about mealsight.recipe_engine or
+mealsight.matching's own public API changed in spirit here - the two
+changes in section 5 (Optional max_cook_time, SearchResults) are the
+kind of change those modules' own test suites already cover and would
+have needed regardless of whether an MCP server ever got built on top.
+
+
+9. THE TESTS
+=============================================================
+
+conftest.py's central problem, and how it's solved
+------------------------------------------------------
+server.py's tools call mealsight.db.get_recipe_db() directly - the same
+process-wide singleton the rest of the codebase uses - rather than
+taking a Database instance as an argument the way recipe_engine's own
+functions do. That's a deliberate simplicity choice (section 3's "thin
+shell" discipline argued against threading a db parameter through a
+FastMCP-decorated function signature that also has to match a fixed,
+task-specified argument list), but it means test isolation can't just be
+"construct a fresh Database and pass it in" the way tests/test_recipe_
+engine/conftest.py's fixture works. Instead, _fresh_recipe_db
+monkeypatches settings.recipes_db_path to a tmp_path file, calls
+close_all() to drop the existing singleton, resets mealsight.matching's
+synonym and substitution caches (the same latent cross-test cache hazard
+found and fixed in phase 2.3), and re-initializes the schema - all as an
+autouse fixture, so every single test in this phase's suite gets an
+actually fresh, actually isolated database, despite the tools under test
+never accepting one as an argument.
+
+test_tool_schemas.py (3 tests)
+------------------------------------------------------
+Confirms all six tools are listed with descriptions over 50 characters
+(a cheap, real check against an empty or placeholder docstring slipping
+through), that each tool's inputSchema property names exactly match the
+task's specified argument list, and that search_recipes's own
+description literally contains both "not" and "match_ingredients" -
+a direct, mechanical check that the one thing the task explicitly
+required this tool's docstring to state is actually there, not just
+present in this author's intention.
+
+test_tools.py (10 tests)
+------------------------------------------------------
+One happy-path and (where relevant) one error-path test per tool, all
+called through mcp_client.call_tool - the real FastMCP in-memory client,
+so every one of these exercises real MCP argument serialization and
+response parsing, not just server.py's Python functions called directly.
+Specifically checks: a search_recipes result's summaries genuinely lack
+"steps" and "ingredients" keys (proving the compact-payload requirement,
+not just asserting it in a docstring); get_recipe and match_ingredients
+both return a structured not_found result, with result.is_error still
+False, for an unknown id; scale_recipe and find_substitutions both
+return a structured validation_error naming the exact offending
+parameter for target_servings=0 and reason="bogus" respectively.
+
+test_no_stdout.py (1 test)
+------------------------------------------------------
+Calls a deliberate mix of happy-path and error-path tools (search,
+get_recipe twice - once real, once missing - scale_recipe with an
+invalid target_servings, find_substitutions with an invalid reason) in
+one test and asserts capsys.readouterr().out is the empty string
+afterward. This is checking across every code path a tool can actually
+take, not just the successful one, since section 4's bug would only ever
+have manifested on whichever path happened to log something.
+
+
+10. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+Passing a Database into every tool function versus calling
+get_recipe_db() directly
+    A Database parameter would make server.py's tools trivially testable
+    without conftest.py's monkeypatch-and-reset dance (section 9). It
+    was rejected because the task specified fixed, exact argument lists
+    for all six tools, and a FastMCP @mcp.tool function's signature is
+    exactly what becomes the tool's advertised schema - adding a db
+    parameter would have either leaked into that schema (wrong) or
+    required a second, hidden mechanism (dependency injection, a
+    context object) to thread it through invisibly, which is more
+    machinery than the existing, already-established process-wide
+    singleton (get_recipe_db(), used identically by every script in this
+    codebase already) needed to solve the same problem.
+
+Optional max_cook_time and SearchResults.total_matched as real
+recipe_engine changes versus transport-layer workarounds
+    Covered in section 5. Both could theoretically have been faked at
+    the server.py layer (a sentinel value for "no limit", a second query
+    just to count matches) without touching recipe_engine at all - but
+    both would have either distorted real behavior (the sentinel would
+    still exclude unknown-cook-time recipes) or duplicated a query the
+    underlying function was already positioned to answer directly. Both
+    went into the actual business-logic module instead, exactly where
+    the architecture principle for this phase says they belong.
+
+find_substitutions's MCP signature staying narrower than the underlying
+function's real capability
+    Covered in section 5. The alternative was adding a dietary_restrictions
+    parameter to this tool too, matching what the underlying function
+    already supports - rejected specifically because the task gave an
+    exact, fixed signature for this tool with only two parameters.
+    Rather than silently accepting a narrower tool than what's possible
+    and letting an agent guess wrong about what reason="dietary" does,
+    the docstring says the limitation out loud and points at
+    match_ingredients as the real tool for a hard exclusion.
+
+stdio transport versus HTTP/SSE
+    FastMCP supports multiple transports; this phase only wires up
+    stdio, since that's what the task specified and what a
+    locally-spawned agent process talking to a locally-running tool
+    server actually needs - a subprocess with piped stdin/stdout, no
+    network port, no separate service to keep running. HTTP/SSE transport
+    would matter the moment this server needed to be reachable from a
+    different machine or a browser-based client; neither is a real
+    requirement yet.
+
+catching Exception broadly versus catching more specific exception types
+    per tool
+    A tool-by-tool list of every specific exception type that could
+    plausibly go wrong (a database error, a JSON decode error, and so
+    on) would be more precise, but this phase's actual failure boundary
+    is simpler: everything this codebase's own functions raise on
+    purpose is ValueError (the "not found" convention already established
+    in phase 2.1), and everything else reaching a tool function is, by
+    definition, unexpected - exactly what a single, broad `except
+    Exception` (never a bare `except:`) at the outermost boundary is for.
+    Narrowing it further would mean guessing at failure modes that
+    haven't actually been observed, for a broader classification
+    (internal_error) that already covers all of them correctly.
+
+
+11. GLOSSARY
+=============================================================
+
+FastMCP
+    The Python library used to build this server's MCP surface - a
+    decorator (@mcp.tool) that turns a plain async function into a
+    named, schema'd, discoverable MCP tool, inferring the schema from
+    type hints and the description from the docstring.
+
+in-memory client
+    FastMCP's Client, connected directly to a FastMCP server object in
+    the same process (Client(mcp)) rather than spawning it as a separate
+    process - used for this phase's own test suite, exercising the real
+    MCP protocol serialization without the overhead or flakiness of an
+    actual subprocess.
+
+JSON-RPC
+    The message format MCP itself is built on - every request and
+    response is a JSON object with a specific shape (method name,
+    parameters, id, result or error) - the actual bytes stdio transport
+    carries back and forth.
+
+MCP (Model Context Protocol)
+    A standard protocol for an LLM-driven agent to discover and call a
+    fixed set of named tools, each with a declared argument schema and
+    description, without needing any language-specific knowledge of
+    what implements them.
+
+stdio transport
+    Running an MCP server as a subprocess, communicating over that
+    process's own stdin (requests in) and stdout (responses out) rather
+    than over a network socket - the reason this phase's logging bug
+    (section 4) mattered as much as it did.
+
+thin transport shell
+    The architectural discipline this whole phase followed: a layer
+    that validates input, calls into existing logic, and serializes
+    output, with no business rule of its own - see section 3.
+
+tool (MCP)
+    One named, callable operation an MCP server advertises, with a JSON
+    schema for its arguments and a natural-language description an agent
+    reads to decide whether and how to call it.
+
+
+12. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: You found that your own logging setup was writing to stdout, which
+would corrupt an MCP stdio session. How did you find it, and why hadn't
+it been caught before?
+
+    I found it by reasoning backward from the transport, not by hitting
+    the failure directly - stdio transport uses stdout as a literal
+    protocol stream, so before writing the server I went looking for
+    anything in the codebase that could write there, and
+    structlog.PrintLoggerFactory() turned out to default to stdout with
+    no explicit file argument telling you so. It hadn't been caught
+    before because nothing before this phase actually needed stdout to
+    stay clean - every earlier phase's tests were asserting on stdout
+    specifically because that's genuinely where output was supposed to
+    go for a script someone runs directly and reads output from. The fix
+    was one argument, file=sys.stderr, but it meant updating five
+    existing test assertions that had been (correctly, at the time)
+    checking the old, now-wrong destination.
+
+Q: search_recipes changed in this phase - max_cook_time became optional
+and it now returns a total_matched count. Why touch the underlying
+recipe_engine module instead of handling both at the MCP layer, which
+is supposed to be a thin shell?
+
+    Because both changes are real behavior, not presentation. If I'd
+    faked "no cook-time limit" by passing some huge sentinel number down
+    to the old required parameter, the underlying SQL still would have
+    excluded every recipe with an unknown cook time - which is wrong the
+    moment the caller genuinely didn't ask for a cook-time constraint at
+    all. And total_matched needs to be the count of everything that
+    passed every filter before the result list gets capped - the
+    function computing the filtered list is the only place that number
+    can come from without literally running the query twice. Both
+    changes are the kind of thing recipe_engine's own test suite already
+    covers and would have needed regardless of whether an MCP server
+    ever sat on top of it - that's exactly the signal that they belonged
+    there, not in server.py.
+
+Q: Your error handling turns exceptions into structured dicts instead of
+raising them through the MCP layer. Walk me through why, and how you
+decided what counts as "not found" versus "internal error."
+
+    An agent consuming these tools has no way to catch a Python
+    exception - if one escaped raw, at best it becomes an opaque
+    protocol-level failure with no actionable content, at worst it leaks
+    an internal stack trace into the agent's own context window, where
+    it might get treated as meaningful text instead of what it actually
+    is. So every tool catches ValueError specifically - that's the
+    convention every recipe_engine and matching function already uses
+    for "this id doesn't exist," established two phases ago - and turns
+    it into a not_found_error naming the exact id. Anything else is by
+    definition unexpected, since it's not a failure mode any of this
+    codebase's own functions raise on purpose, so it gets logged at
+    error level with full context server-side and turned into a
+    deliberately generic internal_error with no details leaked - the
+    distinction is really "was this an expected, nameable outcome" versus
+    "something actually broke that a human needs to go look at in the
+    logs."
+
+Q: Why does find_substitutions's docstring warn that reason="dietary"
+doesn't actually filter anything? Wouldn't it be simpler to just add the
+missing parameter?
+
+    It probably would have been simpler, and the underlying function
+    already supports it - recipe_engine.find_substitutions takes an
+    optional dietary_restrictions argument that does real filtering. But
+    the task specified this tool's exact MCP signature with only
+    ingredient_name and reason, no restrictions parameter, and I wanted
+    to follow that precisely rather than quietly expanding it on my own
+    judgment. Given that constraint, the honest choice was between
+    silently shipping a tool where reason="dietary" looks like it's
+    doing real filtering but isn't, or saying so directly in the
+    description an agent actually reads before calling it. I did the
+    second, and pointed at match_ingredients's dietary_restrictions
+    argument as the real place that exclusion rule lives - same
+    underlying check, substitute_satisfies_dietary_restrictions, just
+    reachable from the tool that actually takes the restriction as an
+    argument.
+
+Q: How did you actually verify the stdio transport works, versus just
+trusting the in-memory test client?
+
+    I ran the server as a genuine separate subprocess - python -m
+    mealsight.mcp_servers.recipe_engine, spawned via FastMCP's own
+    StdioTransport pointed at that module - and drove a real scripted
+    session against it: list_tools, then search_recipes, then
+    match_ingredients on the top real result, then calculate_nutrition,
+    printing every request and response. That's a meaningfully different
+    test than the in-memory client, which never actually serializes
+    anything over a pipe - it proved the real process starts cleanly,
+    opens the real seeded database, and answers real MCP requests over
+    real stdin/stdout. I separately captured that subprocess's stdout in
+    isolation, with no client ever attached to it, and confirmed it was
+    exactly zero bytes - the strongest version of "nothing pollutes this
+    stream" I could actually check, rather than just trusting that my
+    own code path doesn't call print() anywhere.

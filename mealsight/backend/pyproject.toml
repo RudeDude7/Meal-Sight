@@ -9,10 +9,12 @@ dependencies = [
     "structlog>=24.1",
     "httpx>=0.27",
     "aiosqlite>=0.20",
+    "fastmcp>=3.4.7",
 ]
 
 [project.scripts]
 mealsight-seed = "mealsight.seed.seed_all:main"
+mealsight-recipe-server = "mealsight.mcp_servers.recipe_engine.__main__:main"
 
 [dependency-groups]
 dev = [

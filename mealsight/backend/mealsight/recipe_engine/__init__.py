@@ -1,7 +1,8 @@
 """The Recipe Engine — plain Python tools over the local recipes table:
 search, detail lookup, serving scaling, nutrition totals, and ingredient
-substitution lookup. All deterministic, no LLM calls anywhere. No MCP
-wrapper yet — these are called directly for now.
+substitution lookup. All deterministic, no LLM calls anywhere. Wrapped
+as MCP tools in mealsight.mcp_servers.recipe_engine, but also callable
+directly.
 """
 
 from mealsight.recipe_engine.models import (
@@ -11,6 +12,7 @@ from mealsight.recipe_engine.models import (
     RecipeSummary,
     ScaledIngredient,
     ScaledRecipe,
+    SearchResults,
     SubstitutionReason,
     SubstitutionResult,
     SubstitutionSuggestion,
@@ -27,6 +29,7 @@ __all__ = [
     "RecipeSummary",
     "ScaledIngredient",
     "ScaledRecipe",
+    "SearchResults",
     "SubstitutionReason",
     "SubstitutionResult",
     "SubstitutionSuggestion",

@@ -31,10 +31,10 @@ BACKEND_DIR = REPO_ROOT / "backend"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-import asyncio  # noqa: E402
+import asyncio
 
-from mealsight.db import Database, close_all, get_recipe_db  # noqa: E402
-from mealsight.seed.load_nutrition import coverage_report  # noqa: E402
+from mealsight.db import Database, close_all, get_recipe_db
+from mealsight.seed.load_nutrition import coverage_report
 
 # Independent of recipe_parsing's own term lists, deliberately — see
 # backend/tests/test_seed/test_substitutions_safety.py for the same

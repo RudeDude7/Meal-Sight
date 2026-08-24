@@ -14,6 +14,7 @@ value is part of the asyncio Task's copied context.
 
 from __future__ import annotations
 
+import sys
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -69,7 +70,13 @@ def configure_logging(environment: str) -> None:
     structlog.configure(
         processors=[*shared_processors, renderer],
         wrapper_class=structlog.make_filtering_bound_logger(20),  # INFO
-        logger_factory=structlog.PrintLoggerFactory(),
+        # file=sys.stderr, not the default stdout: the recipe-engine MCP
+        # server (mealsight.mcp_servers.recipe_engine) speaks the MCP
+        # protocol over stdio, so anything writing to stdout — including
+        # a stray log line — would corrupt that stream. Diagnostics
+        # belong on stderr regardless of transport; this was never
+        # correct to leave on stdout even before the MCP server existed.
+        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
         cache_logger_on_first_use=False,
     )
 

@@ -22,15 +22,11 @@ from mealsight.recipe_engine.search import get_recipe
 
 # Units that name a continuous, divisible measure — halving or doubling
 # them produces another perfectly sensible measurement.
-MEASURABLE_UNITS: frozenset[str] = frozenset(
-    {"tbsp", "tsp", "kg", "g", "ml", "l", "oz", "lb", "cup"}
-)
+MEASURABLE_UNITS: frozenset[str] = frozenset({"tbsp", "tsp", "kg", "g", "ml", "l", "oz", "lb", "cup"})
 
 # Units that name discrete, countable items — these round to a whole
 # number after scaling, never a fraction of one.
-COUNTABLE_UNITS: frozenset[str] = frozenset(
-    {"clove", "can", "slice", "stick", "piece", "packet", "bunch"}
-)
+COUNTABLE_UNITS: frozenset[str] = frozenset({"clove", "can", "slice", "stick", "piece", "packet", "bunch"})
 
 # Left unscaled entirely: a "dash" or "pinch" is inherently a rough,
 # to-taste amount, not a precise quantity meant to be multiplied.
@@ -110,7 +106,9 @@ async def scale_recipe(db: Database, recipe_id: str, target_servings: int) -> Sc
         display = _scale_quantity(ingredient.quantity, ingredient.unit, scale_factor)
         scaled_ingredients.append(
             ScaledIngredient(
-                name=ingredient.name, quantity_display=display, unit=ingredient.unit,
+                name=ingredient.name,
+                quantity_display=display,
+                unit=ingredient.unit,
                 importance=ingredient.importance,
             )
         )

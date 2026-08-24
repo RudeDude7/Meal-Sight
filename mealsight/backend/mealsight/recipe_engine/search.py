@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from mealsight.db.connection import Database
-from mealsight.recipe_engine.models import RecipeDetail, RecipeIngredient, RecipeSummary
+from mealsight.recipe_engine.models import RecipeDetail, RecipeIngredient, RecipeSummary, SearchResults
 
 
 def _parse_dietary_tags(raw: str | None) -> list[str]:
@@ -22,24 +22,33 @@ def _parse_dietary_tags(raw: str | None) -> list[str]:
 async def search_recipes(
     db: Database,
     dietary_filters: Sequence[str],
-    max_cook_time: int,
+    max_cook_time: int | None = None,
     cuisine: str | None = None,
     meal_type: str | None = None,
     max_results: int = 20,
-) -> list[RecipeSummary]:
+) -> SearchResults:
     """Searches recipes by hard filters, returning compact summaries.
 
     dietary_filters is a hard constraint applied after the SQL query
     (dietary_tags is stored as JSON, not queryable directly in SQL): a
     recipe is excluded entirely unless it carries every one of the
-    requested tags — never included but ranked lower. Recipes with no
-    known cook_time_minutes are excluded from a max_cook_time filter,
-    since there's no way to confirm they meet it.
-    """
-    query = "SELECT id, name, cuisine, meal_type, cook_time_minutes, dietary_tags FROM recipes "
-    query += "WHERE cook_time_minutes IS NOT NULL AND cook_time_minutes <= ?"
-    params: list[Any] = [max_cook_time]
+    requested tags — never included but ranked lower. When max_cook_time
+    is given, recipes with no known cook_time_minutes are excluded from
+    it, since there's no way to confirm they meet it; when max_cook_time
+    is None, cook time isn't filtered on at all, known or unknown.
 
+    The returned SearchResults carries both the (possibly capped)
+    results list and total_matched — the count of every recipe that
+    satisfied every filter, before max_results cut the list down. A
+    caller needs both to tell "only 3 recipes matched" apart from
+    "200 matched, here are the first 3".
+    """
+    query = "SELECT id, name, cuisine, meal_type, cook_time_minutes, dietary_tags FROM recipes WHERE 1=1"
+    params: list[Any] = []
+
+    if max_cook_time is not None:
+        query += " AND cook_time_minutes IS NOT NULL AND cook_time_minutes <= ?"
+        params.append(max_cook_time)
     if cuisine is not None:
         query += " AND cuisine = ?"
         params.append(cuisine)
@@ -51,12 +60,12 @@ async def search_recipes(
     rows = await db.fetch_all(query, params)
 
     required_tags = set(dietary_filters)
-    results: list[RecipeSummary] = []
+    matched: list[RecipeSummary] = []
     for row in rows:
         tags = _parse_dietary_tags(row["dietary_tags"])
         if not required_tags.issubset(tags):
             continue
-        results.append(
+        matched.append(
             RecipeSummary(
                 id=row["id"],
                 name=row["name"],
@@ -66,10 +75,8 @@ async def search_recipes(
                 dietary_tags=tags,
             )
         )
-        if len(results) >= max_results:
-            break
 
-    return results
+    return SearchResults(results=matched[:max_results], total_matched=len(matched))
 
 
 async def get_recipe(db: Database, recipe_id: str) -> RecipeDetail:

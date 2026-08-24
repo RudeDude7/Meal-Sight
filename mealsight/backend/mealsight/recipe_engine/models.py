@@ -25,6 +25,19 @@ class RecipeSummary(BaseModel):
     dietary_tags: list[str]
 
 
+class SearchResults(BaseModel):
+    """What search_recipes returns: the (possibly capped) list of
+    summaries, plus total_matched — how many recipes satisfied every
+    filter before the max_results cap was applied. A caller needs both:
+    len(results) alone can't distinguish "there were only 3 matches" from
+    "there were 200 matches and this is the first 3"."""
+
+    model_config = ConfigDict(frozen=True)
+
+    results: list[RecipeSummary]
+    total_matched: int
+
+
 class RecipeIngredient(BaseModel):
     model_config = ConfigDict(frozen=True)
 

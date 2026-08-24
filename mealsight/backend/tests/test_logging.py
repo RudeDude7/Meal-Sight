@@ -20,7 +20,7 @@ def test_trace_id_propagates_into_emitted_log_lines(
     logger = get_logger("test-service")
     logger.info("something happened")
 
-    captured = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    captured = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
     assert captured["trace_id"] == "trace-abc-123"
 
 
@@ -41,7 +41,7 @@ def test_trace_id_propagates_across_await_boundary(
 
     asyncio.run(outer())
 
-    captured = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    captured = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
     assert captured["trace_id"] == "trace-across-await"
 
 
@@ -53,7 +53,7 @@ def test_logger_emits_valid_json_in_production(
     logger = get_logger("json-service")
     logger.info("hello world", foo="bar")
 
-    line = capsys.readouterr().out.strip().splitlines()[-1]
+    line = capsys.readouterr().err.strip().splitlines()[-1]
     payload = json.loads(line)
 
     assert payload["event"] == "hello world"
@@ -72,7 +72,7 @@ def test_timed_block_emits_duration_ms(
     with timed_block(logger, "did_a_thing"):
         pass
 
-    line = capsys.readouterr().out.strip().splitlines()[-1]
+    line = capsys.readouterr().err.strip().splitlines()[-1]
     payload = json.loads(line)
 
     assert payload["event"] == "did_a_thing"

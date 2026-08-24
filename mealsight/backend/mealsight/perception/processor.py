@@ -1,11 +1,18 @@
-"""analyze_fridge_photo — the vision perception pipeline: validate the
-raw bytes, call the vision provider with the benchmarked (and now
-quantity/unit/freshness-extended) prompt, and post-process every
-identified item into pantry-ready shape.
+"""analyze_fridge_photo / analyze_voice_memo — the vision and audio
+perception pipelines.
 
-Deterministic post-processing; the vision call itself is the only
-non-deterministic step, mitigated by temperature=0.0 (mealsight.
-providers.mistral's own default for every call it makes).
+analyze_fridge_photo validates raw image bytes, calls the vision
+provider with the benchmarked (and now quantity/unit/freshness-
+extended) prompt, and post-processes every identified item into
+pantry-ready shape. analyze_voice_memo validates raw audio bytes,
+transcribes it (settings.AUDIO_MODEL), extracts structured cooking
+constraints from the transcript (settings.EXTRACTION_MODEL), and
+post-processes those constraints (canonicalized avoid_ingredients,
+dietary_restrictions normalized to a fixed vocabulary).
+
+Deterministic post-processing in both; the provider calls themselves
+are the only non-deterministic steps, mitigated by temperature=0.0
+(mealsight.providers' own default for every call it makes).
 """
 
 from __future__ import annotations
@@ -24,13 +31,28 @@ from mealsight.matching.synonyms import load_synonym_map, resolve_canonical
 from mealsight.pantry.category import resolve_category
 from mealsight.pantry.models import PantryItemInput
 from mealsight.pantry.shelf_life import load_shelf_life_map
-from mealsight.perception.models import IdentifiedItem, RawVisionPerception, VisionPerception
-from mealsight.perception.prompt import VISION_PERCEPTION_PROMPT
-from mealsight.perception.validation import ImageValidationError, validate_image
-from mealsight.providers import ProviderError, get_vision_provider
+from mealsight.perception.dietary import normalize_dietary_restriction
+from mealsight.perception.models import (
+    AudioPerception,
+    IdentifiedItem,
+    RawExtractedConstraints,
+    RawVisionPerception,
+    VisionPerception,
+)
+from mealsight.perception.prompt import VISION_PERCEPTION_PROMPT, build_extraction_prompt
+from mealsight.perception.validation import (
+    AudioValidationError,
+    ImageValidationError,
+    detect_audio_format,
+    validate_audio,
+    validate_image,
+)
+from mealsight.providers import ProviderError, get_audio_provider, get_text_provider, get_vision_provider
 from mealsight.utils.logging import get_logger
 
 logger = get_logger("mealsight.perception")
+
+_AUDIO_FORMAT_TO_EXTENSION: dict[str, str] = {"WAV": "wav", "MP3": "mp3", "M4A": "m4a", "WEBM": "webm"}
 
 # A small, deliberate duplicate of mealsight.providers.mistral's own
 # private _strip_code_fences / _CODE_FENCE_RE — the same "duplicate a
@@ -157,3 +179,154 @@ def to_pantry_item_inputs(perception: VisionPerception) -> list[PantryItemInput]
         )
         for item in perception.identified_items
     ]
+
+
+_TRANSCRIPTION_UNAVAILABLE_NOTE = (
+    "Transcription was unavailable — continuing without audio-derived constraints."
+)
+_EXTRACTION_UNAVAILABLE_NOTE = "Extraction was unavailable — continuing with the transcript only."
+
+
+def _empty_audio_perception(note: str) -> AudioPerception:
+    return AudioPerception(
+        raw_transcript="",
+        servings=None,
+        max_cook_time_minutes=None,
+        dietary_restrictions=[],
+        cuisine_preference=None,
+        avoid_ingredients=[],
+        avoid_dishes=[],
+        mood_or_preference=None,
+        protein_preference=None,
+        occasion=None,
+        additional_context=note,
+    )
+
+
+def _transcript_only_perception(transcript: str, note: str) -> AudioPerception:
+    return AudioPerception(
+        raw_transcript=transcript,
+        servings=None,
+        max_cook_time_minutes=None,
+        dietary_restrictions=[],
+        cuisine_preference=None,
+        avoid_ingredients=[],
+        avoid_dishes=[],
+        mood_or_preference=None,
+        protein_preference=None,
+        occasion=None,
+        additional_context=note,
+    )
+
+
+def _append_note(existing: str | None, note: str) -> str:
+    return f"{existing} {note}" if existing else note
+
+
+async def analyze_voice_memo(
+    audio_bytes: bytes,
+    recipe_db: Database | None = None,
+    synonym_map: Mapping[str, str] | None = None,
+) -> AudioPerception:
+    """Transcribes a voice memo and extracts structured cooking
+    constraints from it, in two separate steps — transcription
+    (settings.AUDIO_MODEL, Groq Whisper) then extraction
+    (settings.EXTRACTION_MODEL, via complete_json against
+    RawExtractedConstraints) — because a failure in one has a different
+    honest fallback than a failure in the other (see below).
+
+    Validates audio_bytes first — format, file size, duration where
+    determinable, all via mealsight.perception.validation.validate_audio
+    — and rejects clearly unusable input with a structured empty result,
+    before ever spending a real API call on it.
+
+    NEVER RAISES, and distinguishes two different failure points rather
+    than collapsing them into one generic fallback:
+      - a validation or TRANSCRIPTION failure returns raw_transcript=""
+        with every constraint field at its empty default and
+        additional_context explaining what happened — there is no
+        transcript to extract anything from at all.
+      - an EXTRACTION failure, after transcription already succeeded,
+        returns the real raw_transcript with every constraint field
+        still at its empty default — the transcript itself is real,
+        useful data even when structured extraction from it failed, so
+        it's preserved rather than discarded along with the failed
+        extraction.
+    Either way, an agent combining this with vision and text input can
+    always continue with whatever other input it has.
+
+    avoid_ingredients is canonicalized through the exact same
+    normalize_ingredient + resolve_canonical pipeline mealsight.
+    perception.processor's own analyze_fridge_photo (and every other
+    ingredient-touching part of this project) already uses.
+    dietary_restrictions is normalized onto mealsight.perception.
+    dietary.DIETARY_RESTRICTION_VOCABULARY — a phrase that doesn't map
+    onto anything in that fixed vocabulary is dropped from dietary_
+    restrictions (never guessed into the nearest-sounding entry) but
+    preserved in additional_context, so it's never silently lost
+    entirely.
+    """
+    try:
+        validate_audio(audio_bytes)
+    except AudioValidationError as exc:
+        logger.warning("audio_perception_rejected", reason=str(exc))
+        return _empty_audio_perception(str(exc))
+
+    try:
+        audio_provider = get_audio_provider()
+        audio_format = detect_audio_format(audio_bytes)
+        filename = f"memo.{_AUDIO_FORMAT_TO_EXTENSION[audio_format]}"
+        transcription = await audio_provider.transcribe(audio_bytes, filename, settings.AUDIO_MODEL)
+    except (ProviderError, AudioValidationError) as exc:
+        logger.warning("audio_perception_transcription_failed", error=str(exc))
+        return _empty_audio_perception(_TRANSCRIPTION_UNAVAILABLE_NOTE)
+    except Exception:
+        logger.error("audio_perception_transcription_unexpected_failure", exc_info=True)
+        return _empty_audio_perception(_TRANSCRIPTION_UNAVAILABLE_NOTE)
+
+    transcript = transcription.text
+
+    try:
+        text_provider = get_text_provider()
+        raw = await text_provider.complete_json(
+            build_extraction_prompt(transcript), RawExtractedConstraints, settings.EXTRACTION_MODEL
+        )
+    except ProviderError as exc:
+        logger.warning("audio_perception_extraction_failed", error=str(exc))
+        return _transcript_only_perception(transcript, _EXTRACTION_UNAVAILABLE_NOTE)
+    except Exception:
+        logger.error("audio_perception_extraction_unexpected_failure", exc_info=True)
+        return _transcript_only_perception(transcript, _EXTRACTION_UNAVAILABLE_NOTE)
+
+    if synonym_map is None:
+        synonym_map = await load_synonym_map(recipe_db or get_recipe_db())
+
+    canonical_avoid_ingredients = [
+        resolve_canonical(normalize_ingredient(name), synonym_map) for name in raw.avoid_ingredients
+    ]
+
+    normalized_dietary_restrictions: list[str] = []
+    additional_context = raw.additional_context
+    for phrase in raw.dietary_restrictions:
+        normalized = normalize_dietary_restriction(phrase)
+        if normalized is not None:
+            if normalized not in normalized_dietary_restrictions:
+                normalized_dietary_restrictions.append(normalized)
+        else:
+            additional_context = _append_note(
+                additional_context, f'Unrecognized dietary phrasing not applied: "{phrase}".'
+            )
+
+    return AudioPerception(
+        raw_transcript=transcript,
+        servings=raw.servings,
+        max_cook_time_minutes=raw.max_cook_time_minutes,
+        dietary_restrictions=normalized_dietary_restrictions,
+        cuisine_preference=raw.cuisine_preference,
+        avoid_ingredients=canonical_avoid_ingredients,
+        avoid_dishes=raw.avoid_dishes,
+        mood_or_preference=raw.mood_or_preference,
+        protein_preference=raw.protein_preference,
+        occasion=raw.occasion,
+        additional_context=additional_context,
+    )

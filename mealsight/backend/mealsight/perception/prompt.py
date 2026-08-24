@@ -67,3 +67,88 @@ VISION_PERCEPTION_PROMPT = (
     "tell from the photo — use null rather than guessing a plausible-sounding "
     "value. Do not include a category or food-group field at all."
 )
+
+
+def build_extraction_prompt(transcript: str) -> str:
+    """The audio-extraction prompt: pulls structured cooking constraints
+    out of a voice-memo transcript, run on settings.EXTRACTION_MODEL via
+    mealsight.providers' complete_json (which appends its own "respond
+    with valid JSON matching the schema" instruction and handles one
+    repair attempt on an invalid response — this prompt doesn't need to
+    repeat either).
+
+    Same conservative spirit as VISION_PERCEPTION_PROMPT: extract only
+    what's actually stated, null for anything not mentioned, never a
+    plausible-sounding guess. The one thing unique to spoken language
+    this prompt has to handle explicitly that a photo never does:
+    people talk in real time and correct themselves mid-sentence — "make
+    it for two, actually three" means three servings, not two, and "no
+    dairy — oh wait, cheese is fine, just no milk" means avoid_ingredients
+    = ["milk"] with dietary_restrictions left empty, not "dairy-free"
+    (the correction didn't just change a number, it swapped an entire
+    category-level restriction for a single-ingredient one). The prompt
+    below spells out that second case specifically, since it's a
+    genuinely different kind of correction than "make it three, not
+    two" and easy to get only half right.
+    """
+    return (
+        "You are extracting cooking constraints from a transcribed voice memo. "
+        "Read the transcript below and extract ONLY what is actually stated. "
+        "Never infer, assume, or fill in a plausible-sounding value for anything "
+        "the speaker didn't actually say — leave a field null (or, for a list "
+        "field, empty) whenever it wasn't mentioned at all.\n"
+        "\n"
+        "People speak in real time and correct themselves mid-sentence. When "
+        "that happens, use the FINAL stated value, not the first one — "
+        '"make it for two, actually three" means servings = 3, not 2. This '
+        "applies to every field, not just numbers: if someone states a "
+        "restriction and then narrows or retracts it "
+        '("no dairy — oh wait, cheese is fine, just no milk"), extract the '
+        "final, corrected intent — in that example, avoid_ingredients should "
+        'include "milk" and dietary_restrictions should NOT include a '
+        "dairy-related entry at all, since the broader dairy restriction was "
+        "explicitly retracted, not just refined.\n"
+        "\n"
+        "Distinguish three different things people ask to avoid, and put each "
+        "in the right field: a whole category of food (dietary_restrictions — "
+        'e.g. "vegetarian", "gluten-free", "dairy-free", "low-sodium"), one '
+        'specific ingredient (avoid_ingredients — e.g. "peanuts", "milk"), or '
+        'one specific dish or style (avoid_dishes — e.g. "tacos", "fried '
+        'food"). A single mention should only ever land in ONE of these three '
+        "fields, whichever actually matches what was said.\n"
+        "\n"
+        "If someone expresses two things that don't fit together (wanting a "
+        "very fast meal but also describing a slow-cooked dish, or wanting "
+        "something light but also something heavy and fried), do not silently "
+        "resolve the contradiction yourself — extract whatever concrete, "
+        "literal constraint was actually stated (a stated time limit, for "
+        "instance) and describe the tension itself in mood_or_preference "
+        "instead of picking a side.\n"
+        "\n"
+        "Fields to extract:\n"
+        "- servings: integer number of people, or null\n"
+        "- max_cook_time_minutes: integer minutes, or null\n"
+        "- dietary_restrictions: list of whole-category restrictions actually "
+        "stated (phrase each simply, e.g. \"vegetarian\", \"dairy-free\", "
+        '"gluten-free", "low-sodium" — a fixed vocabulary is applied to '
+        "these afterward, so simple, common phrasing matters more than exact "
+        "wording)\n"
+        "- cuisine_preference: a cuisine name actually mentioned, or null\n"
+        "- avoid_ingredients: list of specific ingredients to avoid actually "
+        "stated\n"
+        "- avoid_dishes: list of specific dishes or dish-styles to avoid "
+        "actually stated\n"
+        "- mood_or_preference: a brief note on tone/mood/vague preference "
+        "actually expressed (e.g. \"tired, wants something easy\"), or null "
+        "if nothing like that was expressed\n"
+        "- protein_preference: a specific protein actually mentioned (e.g. "
+        '"chicken", "salmon") or a general preference actually stated (e.g. '
+        '"high-protein"), or null\n'
+        "- occasion: a specific occasion actually mentioned (e.g. \"birthday "
+        'dinner", "meal prep for the week"), or null\n'
+        "- additional_context: any other concretely stated detail worth "
+        "keeping that doesn't fit the fields above (e.g. an ingredient "
+        "mentioned as already on hand, not yet in the pantry), or null\n"
+        "\n"
+        f"Transcript:\n\"\"\"\n{transcript}\n\"\"\"\n"
+    )

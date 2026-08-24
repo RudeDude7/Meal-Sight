@@ -1,0 +1,534 @@
+PHASE 5.2 STUDY NOTES: THE AUDIO PERCEPTION LAYER
+=============================================================
+
+These notes cover the second round of phase 5: turning a spoken voice
+memo into structured cooking constraints. Everything below describes
+code that really exists right now, in backend/mealsight/perception/
+(dietary.py is new; models.py, prompt.py, validation.py, processor.py
+are all extended) and backend/tests/test_perception/. No agent wiring
+yet, the same deliberate sequencing phase 5.1 followed for vision. This
+phase follows phase 5.1's own established two-schema structure and file
+layout directly rather than inventing a second convention for a second
+modality.
+
+
+1. WHAT THIS PHASE BUILT AND WHY IT COMES NOW
+=============================================================
+
+Phase 5.1 built the vision half of perception — a photo in, pantry-
+ready items out. Phase 1.2's provider layer had a second, already-
+working capability sitting unused the same way analyze_image once was:
+get_audio_provider (Groq Whisper, phase 1.2, with its own documented
+Cloudflare-fingerprinting workaround) could transcribe speech, but
+nothing turned a transcript into anything a recipe recommendation could
+actually act on. This phase closes that second gap: analyze_voice_memo,
+transcribe then extract, structured cooking constraints out.
+
+This comes right after phase 5.1, not interleaved with it or before it,
+for the same structural reason phase 5.1 came after phase 3/4: this
+phase's own post-processing — canonicalizing avoid_ingredients — reuses
+the identical normalize_ingredient + resolve_canonical pipeline phase
+5.1 already reused for vision, and this phase's dietary normalization
+depends on nothing else being built first, but was still worth doing
+second so the Raw*/final schema pattern, the graceful-degradation
+shape, and the "duplicate a tiny private helper rather than cross a
+package boundary" discipline were all already established precedent to
+follow rather than invent from scratch a second time.
+
+
+2. A FINDING BEFORE WRITING ANYTHING: WHICH DIETARY VOCABULARY
+   CONVENTION IS REAL
+=============================================================
+
+The task's own illustrative example for the fixed dietary vocabulary
+used underscores ("dairy_free", "nut_free"). Before committing to that
+convention, this phase checked what test_data/text/voice_scripts.json's
+own expected_constraints actually contain — the real eval data this
+phase's own verification would be scored against — and found every
+dietary restriction there is hyphenated: "dairy-free", "gluten-free",
+"peanut-free", "low-sodium", "vegetarian". No underscored variant
+appears anywhere in the real ground truth.
+
+DIETARY_RESTRICTION_VOCABULARY was built hyphenated, not underscored,
+specifically because of this — an illustrative example in a task
+description is not the same thing as this project's own real artifact,
+and using the wrong convention would have silently failed every
+scoring check on formatting alone, the exact same category of mistake
+phase 4.2's own resolve_canonical direction check (an earlier session)
+existed to catch before it shipped. This is the second time in this
+project a "verify against the real data before trusting an example"
+instinct caught a convention mismatch before it became a real bug —
+worth naming as a pattern, not a coincidence.
+
+
+3. FILE MAP
+=============================================================
+
+backend/mealsight/perception/models.py  (EXTENDED)
+    RawExtractedConstraints (what the extraction model produces — loose
+    dietary_restrictions/avoid_ingredients phrasing) and AudioPerception
+    (what analyze_voice_memo returns — normalized/canonicalized).
+    Section 5.
+
+backend/mealsight/perception/dietary.py  (NEW)
+    DIETARY_RESTRICTION_VOCABULARY, normalize_dietary_restriction.
+    Section 2 and 6.
+
+backend/mealsight/perception/prompt.py  (EXTENDED)
+    build_extraction_prompt — section 7.
+
+backend/mealsight/perception/validation.py  (EXTENDED)
+    validate_audio, detect_audio_format, AudioValidationError,
+    SUPPORTED_AUDIO_FORMATS, MAX_AUDIO_FILE_SIZE_MB. Section 4.
+
+backend/mealsight/perception/processor.py  (EXTENDED)
+    analyze_voice_memo — section 8.
+
+backend/pyproject.toml
+    mutagen added as a real dependency (the second Pillow-style
+    addition this project's perception layer has needed — phase 5.1
+    added Pillow for images, this phase adds mutagen for audio
+    duration/format reading).
+
+backend/tests/test_perception/
+    conftest.py extended (make_wav_bytes, FakeAudioProvider,
+    FakeTextProvider), test_validation_audio.py, test_processor_audio.py
+    — 15 new tests, 29 total in the package now.
+
+
+4. VALIDATION: FORMAT, SIZE, DURATION — AND ONE DELIBERATE GAP
+=============================================================
+
+validate_audio checks, in order: file size against
+MAX_AUDIO_FILE_SIZE_MB (a new local constant, 25MB — Groq's own
+documented free-tier file-size limit for the Whisper endpoint, a real
+external constraint rather than an arbitrary guess, the same "cite the
+real number, don't invent one" discipline MIN_IMAGE_DIMENSION_PX
+followed in phase 5.1), that the bytes decode as one of WAV/MP3/M4A/
+WEBM at all, and duration against settings.max_audio_duration_seconds
+— for every format except WEBM.
+
+WAV/MP3/M4A detection and duration both come from mutagen (a new real
+dependency, the audio-layer equivalent of phase 5.1's Pillow addition)
+— mutagen.File() auto-detects the type and its own .info.length gives
+duration directly, verified live against a real WAV built with
+Python's own wave module and a real memo_01.mp3 fixture before this
+phase trusted it as the implementation. mutagen has no WebM/Matroska
+module at all (confirmed by listing its own format submodules
+directly, not assumed from memory), so WEBM is recognized separately,
+by its own EBML magic bytes (the literal 4-byte "RIFF"-style header
+every WebM/Matroska file starts with).
+
+The deliberate gap: WEBM's duration is not parsed at all. A real,
+correct EBML/Matroska duration reader is a bounded, well-documented
+binary format, and this phase seriously considered hand-rolling one
+(a recursive-descent walk down Segment -> Info -> Duration/
+TimecodeScale, maybe 50-60 lines) — but rejected it for a concrete
+reason: a live-recorded WebM clip (the realistic source for this
+format — a browser's MediaRecorder output) very commonly has an
+unknown-size Segment and no Duration element at all until the
+recording is finalized, and this project has zero real .webm fixtures
+to test a hand-rolled parser against. Writing binary-parsing logic
+with no real test data to validate it against is exactly the kind of
+"looks done, silently wrong" risk this project has repeatedly chosen
+to avoid rather than ship. WEBM's format and file size are still
+validated; its duration simply isn't — documented directly in
+validation.py's own comment, not silently skipped.
+
+
+5. TWO SCHEMAS, PHASE 5.1'S PATTERN REUSED FOR A SECOND MODALITY
+=============================================================
+
+RawExtractedConstraints is what settings.EXTRACTION_MODEL is asked to
+produce from a transcript, via complete_json — every field but is
+optional, dietary_restrictions and avoid_ingredients both still in
+whatever loose phrasing the model actually used. AudioPerception is
+the final shape analyze_voice_memo returns: raw_transcript added (the
+extraction model never sees or produces this field itself — it's
+supplied by the transcription step, not asked for), dietary_
+restrictions normalized onto DIETARY_RESTRICTION_VOCABULARY, avoid_
+ingredients canonicalized. The same "the model literally cannot
+produce the final field's real value directly" structure phase 5.1's
+IdentifiedItem/RawIdentifiedItem split established for category — here
+applied to two fields at once instead of one.
+
+One schema-design decision phase 5.1 didn't need to make: AudioPerception
+has no dedicated "notes" or failure field the way VisionPerception
+does. Rather than adding one beyond what the task's own field list
+named, additional_context — already one of the ten fields the task
+explicitly specified, meant for genuinely-stated extra detail — plays
+that dual role: on a real success it carries whatever extra detail the
+extraction model captured; on graceful degradation (section 8) it
+carries the explanatory note instead. This is a deliberate reuse, not
+an oversight — documented directly in AudioPerception's own docstring,
+comparing it explicitly to VisionPerception.notes' identical role.
+
+
+6. THE FIXED DIETARY VOCABULARY, AND WHAT "NORMALIZE" ACTUALLY MEANS
+   HERE
+=============================================================
+
+DIETARY_RESTRICTION_VOCABULARY is a closed set of seventeen terms
+(vegetarian, vegan, pescatarian, dairy-free, gluten-free, nut-free,
+peanut-free, shellfish-free, soy-free, egg-free, low-sodium, low-carb,
+low-fat, keto, paleo, halal, kosher) — covering every value that
+actually appears in test_data/text/voice_scripts.json's real ground
+truth plus the other common real-world restrictions an agent filtering
+on this as a hard constraint would reasonably need. normalize_dietary_
+restriction maps a loose phrase (lowercased, spaces/underscores
+collapsed to hyphens) onto exactly one vocabulary term via an explicit
+synonym table, or returns None for anything unrecognized — never a
+best-effort nearest match, the identical "return null rather than
+guessing" discipline the task itself demanded for every other field in
+this phase.
+
+A phrase that doesn't map onto anything is dropped from dietary_
+restrictions but NOT silently lost — mealsight.perception.processor
+folds it into additional_context instead ("Unrecognized dietary
+phrasing not applied: ..."), verified directly by test_processor_
+audio.py's own test for exactly this case. This is the honest middle
+ground between two worse options: silently discarding information a
+real speaker actually said, or letting an unrecognized string leak
+into dietary_restrictions where an agent hard-filtering on it would
+treat an un-normalized phrase as if it were a real vocabulary term.
+
+
+7. THE EXTRACTION PROMPT: ONE PROBLEM PHOTOS NEVER HAVE
+=============================================================
+
+build_extraction_prompt follows the same conservative instinct
+VISION_PERCEPTION_PROMPT already established — extract only what's
+actually stated, null over guessing — but has to handle something a
+single photo genuinely never does: people talk in real time and
+correct themselves mid-utterance. The task's own example ("make it for
+two — actually three") is a plain value correction, and the prompt
+handles that directly: use the FINAL stated value.
+
+The harder case the prompt spells out separately, because it's a
+different kind of correction than a number changing: a speaker can
+retract an entire category-level restriction down to a single-
+ingredient one, not just revise a number. memo_15's real script — "No
+dairy — oh wait, cheese is fine actually, just no milk, I don't know
+why I said that" — is exactly this: the correct extraction is avoid_
+ingredients = ["milk"], dietary_restrictions = [] (NOT "dairy-free"),
+because the broader dairy restriction was explicitly retracted, not
+merely refined. Getting only half of this right (taking "milk" as an
+avoided ingredient but still also keeping "dairy-free" as a
+restriction, or vice versa) would be a strictly different error from
+getting a number wrong, so the prompt names this case directly with
+its own worked example rather than trusting the general "final stated
+value" instruction to generalize to it on its own. Verified live: the
+real extraction on memo_15 got this exactly right (section 10), even
+though Whisper itself mistranscribed "oh wait" as "or weight" in the
+same clip — the extraction step tolerated a real transcription error
+and still resolved the retraction correctly.
+
+The prompt also explicitly separates two different failure modes real
+speech can present, and asks for genuinely different handling for
+each: a self-correction ("actually", "wait", "no I mean") should
+collapse to its final value, but two simultaneously-stated,
+incompatible preferences (wanting a ten-minute meal AND describing a
+slow-braised stew in the same breath — memo_18's real script) should
+NOT be resolved by picking a winner. The prompt instructs extracting
+whatever concrete, literal constraint was actually stated (the real
+time limit) and describing the tension itself in mood_or_preference
+instead — confirmed directly against real ground truth, where memo_18's
+own expected max_cook_time_minutes is 10 (the first-stated number, not
+some averaged or ignored one) with the contradiction captured
+narratively rather than mathematically resolved.
+
+
+8. GRACEFUL DEGRADATION, TWO DIFFERENT FALLBACKS FOR TWO DIFFERENT
+   FAILURE POINTS
+=============================================================
+
+analyze_voice_memo has three exception-handling points, not one
+generic wrapper around the whole pipeline, because the honest fallback
+genuinely differs depending on how far the pipeline got before
+failing:
+
+    validation or TRANSCRIPTION failure: there is no real transcript
+    at all, so raw_transcript="" and every constraint field sits at
+    its empty default — nothing downstream could possibly be trusted
+    if the words themselves were never actually captured.
+
+    EXTRACTION failure, after transcription already succeeded: the
+    real transcript IS preserved (raw_transcript = the actual words),
+    with only the constraint fields sitting at their empty defaults.
+    The task's own wording is explicit about this being a different
+    case from a transcription failure — "still returns the transcript
+    with empty constraints" — and it's a real, meaningful distinction:
+    a raw transcript that a human (or a downstream text-only fallback)
+    could still read is genuinely useful data even when structured
+    extraction from it failed, so discarding it alongside the failed
+    extraction would throw away something real for no reason.
+
+Both paths, like phase 5.1's analyze_fridge_photo, follow the same
+three-tier exception shape: specific expected exception types caught
+first (ProviderError for both stages, plus AudioValidationError for
+the format-detection call inside the transcription block, since
+detect_audio_format can itself raise), then one final bare `except
+Exception` as the outermost, genuinely-unexpected-only backstop —
+never a bare `except:`. additional_context carries the explanatory
+note in every fallback case, reusing the same field a real success
+uses for its own extra detail (section 5).
+
+
+9. THE TESTS
+=============================================================
+
+conftest.py gained three new pieces: make_wav_bytes (a real, minimal,
+silent WAV built with the standard library's own wave module — so
+mutagen's real decode step in validate_audio has something genuine to
+succeed against, the identical "build real bytes with a real library,
+never a hand-rolled stub" discipline phase 5.1's make_jpeg_bytes
+already established), FakeAudioProvider (transcribe returns a pre-
+baked TranscriptionResponse or raises), and FakeTextProvider
+(complete_json returns a pre-built schema instance or raises) — both
+patched in via monkeypatch.setattr at the name as imported into
+processor.py, the same discipline every provider-mocking test in this
+project has used since it first came up.
+
+test_validation_audio.py (5 tests): a real WAV passes; oversized audio
+is rejected (MAX_AUDIO_FILE_SIZE_MB monkeypatched down, since unlike
+image size this constant isn't a settings field); genuinely undecodable
+bytes are rejected; audio longer than settings.max_audio_duration_
+seconds (monkeypatched down) is rejected; a bare WEBM magic-byte header
+with no real Segment/Duration data still passes, proving section 4's
+duration-skip decision is real behavior, not just a comment.
+
+test_processor_audio.py (15 tests, since a version bump to include
+avoid_ingredients canonicalization test, unrecognized-phrase-preserved
+test, and both fallback paths): a transcript parses into real
+constraints; a self-correction case passes the model's own final-value
+answer straight through (the test itself is explicit that it's testing
+the PIPELINE's plumbing, not re-verifying real extraction quality —
+that's what live verification, section 10, actually checks); every
+unstated field on a fully-empty extraction stays null/empty, never
+invented; loose dietary phrasing ("no dairy", "gluten free") normalizes
+to the fixed vocabulary; an unrecognized phrase ("low glycemic") is
+dropped from dietary_restrictions but preserved in additional_context;
+avoid_ingredients canonicalizes through a hand-built synonym map (the
+same "scallion" -> "green onion" test data phase 3.1/4.1/5.1 have all
+reused); oversized and wrong-format audio are both rejected with
+neither fake provider ever called; transcription failure and
+extraction failure both degrade gracefully, with the extraction-
+failure test specifically asserting the real transcript text survives
+into the result.
+
+
+10. VERIFICATION: ALL 20 REAL MEMOS, SCORED AGAINST REAL GROUND TRUTH
+=============================================================
+
+ruff/mypy --strict/full pytest all clean (364 tests total, no
+regressions in phase 1 through 5.1's own suite). Against the real Groq
+and Mistral APIs, analyze_voice_memo ran on all 20 real memos in
+test_data/audio/, printing the full transcript and extracted
+AudioPerception for each, then scored per-field against test_data/
+text/voice_scripts.json's own expected_constraints:
+
+    servings: 20/20 (100%)
+    max_cook_time_minutes: 20/20 (100%)
+    avoid_dishes: 20/20 (100%)
+    cuisine_preference: 20/20 (100%)
+    dietary_restrictions: 19/20 (95%)
+    avoid_ingredients: 19/20 (95%)
+    protein_preference: 19/20 (95%)
+    OVERALL: 137/140 fields (97.9%)
+
+Every one of the three mismatches was individually named and reasoned
+through, per the task's own explicit instruction, rather than just
+reported as a number:
+
+    memo_02, dietary_restrictions: predicted [], expected
+    ["peanut-free"] — the model correctly captured avoid_ingredients =
+    ["peanuts"] but didn't ALSO produce a category-level "peanut-free"
+    entry. This traces directly to this phase's own prompt instruction
+    ("a single mention should only ever land in ONE of these three
+    fields") actively working against what this one ground-truth row
+    wants — a peanut allergy is simultaneously "avoid this specific
+    ingredient" AND "this is a peanut-free requirement." A real,
+    named tension in this phase's own prompt design, not a model
+    failure to fix by retrying.
+
+    memo_02, avoid_ingredients: predicted ["peanut"], expected
+    ["peanuts"] — a pure singular/plural artifact of the exact
+    canonicalization the task itself asked for (normalize_ingredient
+    singularizes "peanuts" to "peanut", the identical behavior this
+    phase's own test suite explicitly expects and asserts on). Not a
+    real extraction error at all.
+
+    memo_17, protein_preference: predicted "fried chicken", expected
+    "chicken" — a genuine, defensible granularity disagreement (the
+    dish-with-cooking-style versus the bare protein) rather than a
+    clear right/wrong answer either extraction or ground truth could
+    claim confidently.
+
+No live-API test failed outright and no unhandled exception occurred
+across all 20 real calls plus the earlier fake-provider suite — every
+number above reflects genuine extraction quality on real, uncontrolled
+speech, not a curated best case.
+
+
+11. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+Hyphenated dietary vocabulary versus the task's own underscored
+example
+    Covered in full in section 2. Chosen specifically because it's
+    what the real ground truth this phase is scored against actually
+    contains — an illustrative example in a task description doesn't
+    outrank a real project artifact when the two genuinely disagree.
+
+Hand-rolling a WEBM/Matroska duration parser versus skipping WEBM
+duration checking entirely
+    Covered in section 4. Rejected specifically because of the
+    combination of (a) live-recorded WebM commonly having no finalized
+    Duration element to read in the first place, and (b) zero real
+    .webm fixtures anywhere in this project to validate a hand-rolled
+    binary parser against. Format and file size are still validated
+    for WEBM; only duration is skipped, and that gap is documented
+    directly in code rather than silently present.
+
+mutagen as a real dependency versus hand-parsing WAV/MP3/M4A headers
+    The identical reasoning phase 5.1 already applied to Pillow: three
+    real audio container formats each have their own binary header
+    quirks, and a battle-tested, already-project-adjacent library
+    (mutagen — new to the backend package, but the same category of
+    tool Pillow already was) is worth a real dependency rather than
+    reinventing header parsing with a much larger real correctness
+    surface than it looks like from the outside.
+
+Reusing additional_context as the failure-note carrier versus adding a
+dedicated notes field
+    Covered in section 5. VisionPerception has a dedicated notes field
+    because the task's own vision schema named one explicitly. The
+    audio schema's task-specified field list did not include an
+    equivalent — adding one anyway would have been scope creep beyond
+    what was asked; reusing additional_context, a field the task DID
+    specify and that's semantically close enough (genuinely-stated
+    extra context), was the smaller, more disciplined choice.
+
+Splitting exception handling into three points (validation,
+transcription, extraction) versus one broad try/except around the
+whole pipeline
+    Covered in section 8. A single wrapper would be less code but
+    would erase the real, task-required distinction between "no
+    transcript exists at all" and "the transcript is real but
+    extraction from it failed" — collapsing both into one generic
+    empty result would silently violate the task's own explicit
+    requirement that a successful transcript survive an extraction
+    failure.
+
+
+12. GLOSSARY
+=============================================================
+
+(Every term phase 5.1's own glossary already defined — raw schema /
+final schema, structurally enforced, graceful degradation — applies
+identically here, just for a second modality. New terms below.)
+
+diet-category retraction
+    This phase's own name for memo_15's specific pattern: a speaker
+    states a whole dietary-restriction category, then narrows or fully
+    retracts it down to a single ingredient-level avoidance instead —
+    a genuinely different correction shape than a number simply
+    changing, and the reason section 7's prompt spells this case out
+    with its own worked example.
+
+extraction (audio)
+    The second of analyze_voice_memo's two stages: pulling structured
+    AudioPerception fields out of an already-transcribed text, via
+    settings.EXTRACTION_MODEL and complete_json — distinct from
+    transcription (turning audio into text at all), with its own
+    separate, honest failure fallback (section 8).
+
+fixed vocabulary
+    A closed, predetermined set of strings (DIETARY_RESTRICTION_
+    VOCABULARY) a caller normalizes onto rather than accepting
+    whatever a model happened to produce — necessary specifically
+    because an agent hard-filters on these values, so an un-normalized
+    near-miss string would silently break that filter rather than
+    just looking slightly untidy.
+
+
+13. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: The task gave you an example dietary vocabulary using underscores,
+but you built it with hyphens instead. Walk me through that decision.
+
+    Before committing to either convention, I checked what this
+    project's own real eval data — test_data/text/voice_scripts.json's
+    expected_constraints, the thing this phase's own verification would
+    actually be scored against — uses in practice, rather than trusting
+    the task description's illustrative example as authoritative. Every
+    dietary restriction in that real ground truth is hyphenated:
+    dairy-free, gluten-free, peanut-free, low-sodium. If I'd built the
+    vocabulary with underscores instead, every single dietary-
+    restriction scoring check in my own verification would have failed
+    on pure formatting, even for extractions that were otherwise
+    completely correct — the fixed vocabulary's entire purpose is to
+    match what this system's real data and downstream consumers
+    actually expect, and an illustrative example in a task description
+    isn't the same thing as that real artifact.
+
+Q: Why does your extraction prompt treat "make it for two, actually
+three" differently from "no dairy, oh wait, cheese is fine, just no
+milk" — aren't they both just self-corrections?
+
+    They're both self-corrections in the sense of "take the final
+    stated value," but they correct different KINDS of things. The
+    servings case is a number changing — take the last number. The
+    dairy case is a whole category-level restriction being retracted
+    down to a single ingredient — getting that right means the final
+    result has to be different not just in value but in WHICH FIELD it
+    lands in: avoid_ingredients gets "milk," and dietary_restrictions
+    has to end up empty, not just replaced with a different diet name.
+    A general "take the final value" instruction could plausibly still
+    get this half-right — keeping "dairy-free" as a restriction while
+    also adding "milk" as an avoided ingredient, which double-counts
+    the same real intent in two fields. I named this case explicitly in
+    the prompt with its own worked example specifically because I
+    didn't want to trust the general instruction to generalize
+    correctly to a genuinely different failure shape — and verified
+    directly against the real API that it works, including on a clip
+    where Whisper itself mistranscribed part of the sentence.
+
+Q: One of your three real mismatches was a case where your own prompt
+design worked against the ground truth. Why not just fix the prompt to
+match that one example?
+
+    Because the "fix" isn't obviously correct — it would mean telling
+    the model that a single mention CAN land in more than one field
+    simultaneously, which trades away a real property (every avoided
+    thing has exactly one clear categorization) for a narrower gain
+    (matching one specific ground-truth row where an allergen is
+    treated as both a category and an ingredient at once). I reported
+    it as a named tension rather than silently patching the prompt to
+    chase one test case, specifically because the task asked me to
+    call out every mismatch so a human can judge whether the model or
+    the ground truth is the one that's actually off — in this case I
+    think it's genuinely ambiguous which one, and that's a real answer,
+    not a dodge.
+
+Q: You added mutagen as a dependency for audio duration but explicitly
+chose not to fully support WEBM duration checking. How do you justify
+shipping an incomplete implementation of something the task asked for?
+
+    I don't think of it as incomplete so much as scoped honestly rather
+    than silently. WEBM format and file size are both still fully
+    validated — the only thing skipped is duration, and only for that
+    one format, with the reason written directly into the code: mutagen
+    itself has no WebM/Matroska support at all (I confirmed that by
+    listing its actual format modules, not by assuming), a correct
+    parser for it is a real binary-format implementation task, and this
+    project has zero real .webm test fixtures to validate one against —
+    plus the realistic source for a WebM voice memo (a browser's live
+    MediaRecorder) frequently doesn't even have a finalized duration to
+    read until the recording stops. Writing binary-parsing logic with
+    no real data to check it against, for a case that often has nothing
+    to parse anyway, is exactly the kind of "looks done, silently
+    wrong" work this project has consistently avoided. If real .webm
+    fixtures show up later, implementing the actual EBML walk becomes a
+    much better-justified piece of work than it would be right now.

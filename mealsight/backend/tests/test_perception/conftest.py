@@ -1,22 +1,27 @@
 """Fixtures for mealsight.perception tests: a fresh pantry.db Database
-per test, a real (Pillow-generated) minimal JPEG for validation tests
-to decode, and a FakeVisionProvider standing in for the real Mistral
-vision call — no live API call anywhere in this test package.
+per test, real (Pillow/wave-generated) minimal media for validation
+tests to decode, and Fake providers standing in for the real Mistral/
+Groq calls — no live API call anywhere in this test package.
 """
 
 from __future__ import annotations
 
+import wave
 from collections.abc import AsyncIterator
 from io import BytesIO
 from pathlib import Path
+from typing import TypeVar
 
 import pytest
 from PIL import Image
+from pydantic import BaseModel
 
 from mealsight.db.connection import SCHEMA_DIR, Database
 from mealsight.db.init import init_database
 from mealsight.pantry.shelf_life import reset_shelf_life_cache
-from mealsight.providers.base import TextResponse
+from mealsight.providers.base import TextResponse, TranscriptionResponse
+
+SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
 
 @pytest.fixture(autouse=True)
@@ -73,3 +78,67 @@ def make_webp_bytes(width: int = 400, height: int = 400) -> bytes:
     buffer = BytesIO()
     Image.new("RGB", (width, height), color=(200, 200, 200)).save(buffer, format="WEBP")
     return buffer.getvalue()
+
+
+def make_wav_bytes(duration_seconds: float = 2.0, frame_rate: int = 16000) -> bytes:
+    """A real, minimal, valid WAV file (silence), built with the
+    standard library's own wave module — so mutagen's decode step in
+    validate_audio actually succeeds against it, rather than a
+    hand-rolled byte stub that only looks like audio."""
+    buffer = BytesIO()
+    frame_count = int(duration_seconds * frame_rate)
+    with wave.open(buffer, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(frame_rate)
+        w.writeframes(b"\x00\x00" * frame_count)
+    return buffer.getvalue()
+
+
+class FakeAudioProvider:
+    """Stands in for the real Groq Whisper provider: transcribe returns
+    a pre-baked TranscriptionResponse, or raises a pre-baked exception —
+    never makes a network call. Records every call it receives."""
+
+    def __init__(self, text: str | None = None, error: BaseException | None = None) -> None:
+        self._text = text
+        self._error = error
+        self.calls: list[tuple[bytes, str, str]] = []
+
+    async def transcribe(self, audio_bytes: bytes, filename: str, model_id: str) -> TranscriptionResponse:
+        self.calls.append((audio_bytes, filename, model_id))
+        if self._error is not None:
+            raise self._error
+        assert self._text is not None
+        return TranscriptionResponse(text=self._text, model_id=model_id, latency_ms=0.0)
+
+
+class FakeTextProvider:
+    """Stands in for the real Mistral text provider: complete_json
+    returns a pre-built schema instance, or raises a pre-baked
+    exception — never makes a network call."""
+
+    def __init__(self, result: BaseModel | None = None, error: BaseException | None = None) -> None:
+        self._result = result
+        self._error = error
+        self.calls: list[tuple[str, str]] = []
+
+    async def complete(self, *args: object, **kwargs: object) -> TextResponse:  # pragma: no cover
+        raise NotImplementedError("FakeTextProvider only implements complete_json for these tests")
+
+    async def complete_json(
+        self,
+        prompt: str,
+        schema: type[SchemaT],
+        model_id: str,
+        *,
+        system: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float = 0.0,
+    ) -> SchemaT:
+        self.calls.append((prompt, model_id))
+        if self._error is not None:
+            raise self._error
+        assert self._result is not None
+        assert isinstance(self._result, schema)
+        return self._result

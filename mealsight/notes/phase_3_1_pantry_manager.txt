@@ -1,0 +1,515 @@
+PHASE 3.1 STUDY NOTES: THE PANTRY MANAGER
+=============================================================
+
+These notes cover the first round of phase 3: the business logic behind
+what MealSight believes is currently in someone's fridge and pantry.
+Everything below describes code and data that really exist right now,
+in backend/mealsight/pantry/ and backend/tests/test_pantry/. No MCP
+wrapper yet — that's explicitly deferred to the next session, the same
+way phase 2's matching/recipe_engine logic was built and tested for a
+full round before phase 2.4 ever wrapped it as a server.
+
+
+1. WHAT THIS PHASE BUILT AND WHY IT COMES NOW
+=============================================================
+
+Phase 1.3 created the pantry table back when the database layer itself
+was being built, and phase 2 spent four rounds making recipes.db useful.
+pantry.db had sat completely unused since phase 1.3 — a real schema with
+no code that ever wrote to it. This phase is what actually makes that
+table mean something: a shelf-life reference dataset (86 entries, the
+same shape as phase 1.4's nutrition_data.json), and three functions —
+update_pantry, get_pantry, remove_items — that merge in what a vision
+model (or anything else) reports, read it back with expiry information
+computed, and account for what actually gets used or thrown out.
+
+The reason this comes after phase 2, not before or alongside it, is
+concrete: update_pantry and remove_items both need to resolve an
+ingredient name to a canonical form before comparing it against
+anything already in the pantry, and that normalizer and synonym table
+already exist — they were built in phase 2.1 for the ingredient matcher.
+Building a second, pantry-specific version of "scallions" and "green
+onion" resolving to the same thing would have meant either duplicating
+that logic or letting it drift out of sync with the matcher's own
+notion of what those words mean. Reusing it instead is what section 5
+is actually about.
+
+
+2. FILE MAP
+=============================================================
+
+backend/mealsight/seed/data/shelf_life.json
+    86 hand-curated entries (24 vegetable, 16 protein, 14 fruit, 13
+    condiment, 10 dairy, 9 grain), each with shelf_days_refrigerated/
+    frozen/pantry — null wherever that storage mode genuinely doesn't
+    apply to that item.
+
+backend/mealsight/seed/load_shelf_life.py
+    Loads shelf_life.json into pantry.db's shelf_life_reference table.
+    Same idempotent INSERT OR REPLACE shape as every other loader in
+    mealsight.seed (phase 1.4's load_nutrition.py, load_substitutions.py,
+    load_synonyms.py) — keys are run through normalize_ingredient before
+    being written, so a pantry item normalized the same way actually
+    finds its row.
+
+backend/mealsight/pantry/models.py
+    PantryItemInput, PantryItem, PantryChangeDetail, FlaggedPantryItem,
+    PantryUpdateResult, RemovalItemInput, RemovalDetail, RemovalResult.
+
+backend/mealsight/pantry/shelf_life.py
+    ShelfLifeEntry, CATEGORY_DEFAULTS, load_shelf_life_map,
+    resolve_shelf_life — the fallback resolver section 4 covers in full.
+
+backend/mealsight/pantry/_datetime_utils.py
+    parse_sqlite_timestamp — one small shared helper, used by both
+    update.py (staleness scanning) and query.py (days_remaining), since
+    aiosqlite hands back TIMESTAMP columns as plain strings rather than
+    parsed datetimes.
+
+backend/mealsight/pantry/update.py
+    update_pantry — the merge engine, section 5.
+
+backend/mealsight/pantry/query.py
+    get_pantry — section 6.
+
+backend/mealsight/pantry/remove.py
+    remove_items — section 7.
+
+backend/tests/test_pantry/
+    conftest.py (a fresh pantry.db Database per test), test_shelf_life.py,
+    test_update.py, test_query.py, test_remove.py — 24 tests.
+
+
+3. WHAT THE PANTRY TABLE ACTUALLY TRACKS
+=============================================================
+
+Four date/status-shaped columns on the pantry table matter enough to be
+worth spelling out precisely, since this phase's logic depends on
+keeping their meanings distinct rather than conflating them:
+
+    added_date — set once, the moment an item first enters the pantry.
+    Never touched again after that first insert. This is the anchor
+    every shelf-life calculation counts forward from.
+
+    last_seen_date — updated every single time a later report (a new
+    photo, a new update_pantry call) confirms the item is still there.
+    This is what section 5's staleness check actually looks at — not
+    "how old is this food" (that's what estimated_shelf_days measures
+    from added_date) but "how long has it been since we actually
+    confirmed this item still exists in the pantry at all."
+
+    freshness_status — a plain text label (default 'fresh') describing
+    the observed physical condition of the item, set directly by
+    whatever reported it (a vision model might report "wilted" having
+    actually looked at the thing). This phase never computes this value
+    itself; it only stores whatever the caller says and lets get_pantry
+    filter on it.
+
+    estimated_shelf_days — a single integer, assigned once at insert
+    time by section 4's resolver, used together with added_date to
+    compute days_remaining on read (section 6). It is never
+    recalculated after insert, even if the item's category or name
+    somehow looked different in a later report of it — the item already
+    exists at that point, so the merge branch runs instead (section 5).
+
+The distinction that actually matters in practice: freshness_status is
+someone's observation of condition; last_seen_date is proof of presence;
+estimated_shelf_days plus added_date is a prediction of remaining life.
+An item can be "stale" (not recently confirmed present) while its
+freshness_status still literally says "fresh" from the last time it was
+actually seen — those are two different kinds of "old," and this phase
+keeps them as two entirely separate signals rather than collapsing them
+into one.
+
+
+4. SHELF LIFE RESOLUTION
+=============================================================
+
+The reference data
+------------------------------------------------------
+shelf_life.json follows the identical shape and sourcing philosophy as
+phase 1.4's nutrition_data.json: hand-curated, approximate values drawn
+from typical USDA FoodSafety.gov storage guidance, explicitly stated in
+the file's own _meta note to be approximations for relative comparison
+("is this getting old"), not food-safety-certified expiration dates. 86
+entries across the six categories the task named (protein, vegetable,
+fruit, dairy, grain, condiment), chosen to cover what actually shows up
+in the seeded recipe corpus and the vision-model vocabulary (phase 2.3's
+own extraction work) — chicken, chicken thigh, egg, onion, green onion,
+sweet potato, milk, butter, rice, white rice, soy sauce, honey, and so
+on, roughly 14-16 items per category.
+
+Why an item can have null for one or more of the three storage modes:
+eggs are refrigerated=35 days but frozen=null and pantry=null, since a
+whole egg genuinely isn't something you'd freeze or leave on a counter
+— null here means "this storage mode doesn't apply," not "unknown."
+
+The category-default fallback
+------------------------------------------------------
+resolve_shelf_life(canonical_item_name, category, shelf_life_map) is
+what makes an item the reference data has never heard of still get a
+sane number instead of silently going untracked: it looks up an exact
+shelf_life_reference row first, and falls back to CATEGORY_DEFAULTS[category]
+— one default ShelfLifeEntry per one of the six categories — when there
+isn't one. If even the category itself isn't recognized (not one of the
+six keys), a single last-resort default (7 days refrigerated, nothing
+else) applies. The category defaults were deliberately chosen to be
+conservative — shorter rather than longer wherever a category spans a
+wide real range of shelf lives — on the reasoning that underestimating
+just means an item gets flagged for a look sooner than strictly
+necessary, while overestimating risks something going unnoticed after
+it's actually spoiled; the same false-positive-versus-false-negative
+asymmetry phase 1.4's dietary tagging already reasoned through, applied
+here to food safety instead of allergen safety.
+
+Picking one number from three
+------------------------------------------------------
+A shelf_life_reference row (or a category default) carries three
+separate numbers — refrigerated, frozen, pantry storage — but
+pantry.estimated_shelf_days is a single column, since a real pantry item
+is stored exactly one of those three ways at a time, not all three at
+once. resolve_shelf_life picks refrigerated first, then pantry, then
+frozen last, falling back to a flat 7 if somehow all three are null. The
+ordering matters: refrigerated is the reasonable default assumption for
+a freshly-photographed item with no further information, pantry-storable
+grains and condiments are the next most common case, and frozen is
+deliberately last, since frozen storage is an active choice a user
+actually made — assuming it by default for an item that's simply sitting
+in a fridge photo would be wrong far more often than it'd be right.
+
+
+5. THE MERGE ENGINE (update_pantry)
+=============================================================
+
+Normalization and synonym resolution, reused not reimplemented
+------------------------------------------------------
+Every input item's name goes through normalize_ingredient (phase 2.1)
+and then resolve_canonical against the real ingredient_synonyms table —
+the exact same two calls, in the exact same order, the ingredient
+matcher already makes. This is what makes "scallions" reported in one
+batch and "Green Onion" reported in a later one merge into a single
+pantry row instead of two: both normalize and resolve to the same
+canonical string, "green onion", and that canonical string is what
+actually gets stored in pantry.name — comparisons are then plain
+string-equality SQL lookups, not re-normalized on every read.
+
+One real architectural wrinkle this creates, worth naming directly:
+ingredient_synonyms is a recipes.db table, not a pantry.db one (phase
+1.3's own three-database split put it there, alongside substitutions and
+nutrition_reference, since those are all "recipe-adjacent" reference
+data). update_pantry and remove_items both need that table's contents
+resolved into an in-memory dict before they can compare anything — so
+both accept an optional synonym_map argument, defaulting to loading it
+from get_recipe_db() (a second, separate database connection) when not
+supplied. This is not a SQL join across the two databases — phase 1.3
+was explicit that no such join can even exist, since SQLite has no way
+to reach across two separate physical files in one query — it's exactly
+the same pattern mealsight.matching.matcher already established:
+load a reference table into a plain Python dict once, then use that
+dict against data that came from anywhere, pantry included.
+
+Accumulate, don't replace
+------------------------------------------------------
+An input item whose canonical name matches an existing pantry row adds
+its quantity to what's already there — 6 eggs reported, then 6 more
+reported later, becomes 12, not 6 — and refreshes freshness_status and
+last_seen_date to reflect the newer report. An item with no match is
+inserted fresh, with estimated_shelf_days assigned by section 4's
+resolver at that moment.
+
+Absence is not deletion
+------------------------------------------------------
+Nothing in update_pantry ever issues a DELETE for an item simply because
+this particular batch didn't mention it. This isn't a special case
+handled with extra code — it's the natural consequence of the merge loop
+only ever touching rows whose canonical name actually appears in the
+current batch. An item sitting in a cabinet a photo never saw stays
+exactly where it was, at whatever quantity it already had, since a real
+pantry has more in it than whatever's visible in any one photo.
+
+Stale flagging
+------------------------------------------------------
+After merging the batch, update_pantry separately scans the entire
+pantry table — not just the batch just merged — for any row whose
+last_seen_date is older than settings.stale_pantry_item_days (14, the
+real configured value). This is deliberately a whole-table scan rather
+than a batch-scoped one: an item genuinely absent from a batch (section
+5's "absence is not deletion" case) is exactly the kind of item that's
+liable to go stale, and it would never get flagged at all if the check
+only ever looked at what was just reported. An item that does get
+reported in the current batch has its last_seen_date refreshed to now
+as part of the same merge, so it can never appear in the same call's
+flagged_items list — confirmed directly by a test that back-dates an
+item's last_seen_date past the threshold, re-reports that same item in
+a later batch, and checks it's no longer flagged.
+
+
+6. get_pantry
+=============================================================
+
+Every returned PantryItem carries days_remaining, computed as
+estimated_shelf_days minus how many whole days have passed since
+added_date — None whenever estimated_shelf_days itself is unknown, since
+there's nothing to count down from.
+
+freshness_filter has three values: "all" (no filtering), "fresh" (the
+stored freshness_status column must literally equal "fresh" — someone
+or something's own observation, not a computed state), and
+"expiring_soon" (days_remaining must be known and at or below
+settings.expiring_soon_days, 3 by default). "expiring_soon" deliberately
+includes items already past zero days remaining, not just ones still
+counting down — an item that's already overdue needs attention at least
+as urgently as one about to be, and excluding it from this specific
+query would mean it falls through the cracks of the one filter meant to
+surface exactly this kind of thing. category and search are both plain,
+optional additional filters — search runs the query term through the
+same normalizer pantry names are stored under, then matches it as a
+substring against the stored (already canonical) name.
+
+
+7. remove_items
+=============================================================
+
+Each requested removal resolves its name through the same normalize/
+synonym pipeline as update_pantry, then decreases the matching row's
+quantity by however much was actually available — never by the full
+requested amount if that's more than what's there. Requesting to remove
+more than exists clamps at the real available quantity rather than
+driving the stored quantity negative, and the difference between what
+was requested and what was actually removed is reported back explicitly
+as discrepancy, so a caller can tell "removed exactly what was asked"
+apart from "assumed this was already gone, here's how much of the
+request that assumption covered." A row whose quantity reaches zero or
+below after a removal is deleted outright, not left sitting at a zero
+quantity forever.
+
+Every removal that actually found a matching row — clamped or not — is
+recorded in consumption_log, with quantity_used set to the real,
+clamped amount actually removed (never the raw requested amount), and
+used_for_recipe carried through when the caller supplied one. An item
+that isn't found in the pantry at all is reported as found=False with
+the entire requested quantity as its discrepancy, and is deliberately
+not logged to consumption_log at all — there's nothing real to log
+having consumed.
+
+
+8. HOW THIS CONNECTS TO THE REST
+=============================================================
+
+Downstream, an agent (still not built) is the obvious caller of all
+three functions here — update_pantry after a vision model identifies
+what's in a photo, get_pantry to answer "what do I have" and "what's
+about to go bad," remove_items after a recipe actually gets cooked (an
+obvious pairing with phase 2's calculate_nutrition/scale_recipe, though
+nothing in this phase calls into phase 2 directly — that stitching is
+the agent's job, the same cross-database-flow principle phase 1.3
+established for pantry/recipes/user_intelligence generally). The next
+session wraps these three functions as MCP tools, the same way phase 2.4
+wrapped the Recipe Engine — this phase deliberately stops short of that,
+so the business logic gets its own full round of testing first, exactly
+as phase 2's matcher and recipe_engine did before phase 2.4 touched
+them.
+
+
+9. THE TESTS
+=============================================================
+
+conftest.py's pantry_db fixture is a fresh, throwaway Database per test,
+same shape as every other *_db fixture in this codebase going back to
+phase 1.3. Because every mealsight.pantry function takes its Database
+(and, for update_pantry/remove_items, its synonym_map) as an explicit
+optional argument, tests pass a hand-built dict directly instead of
+needing a second real recipes.db connection just to resolve one or two
+synonyms — the same testability argument phase 2's matcher tests relied
+on, and notably simpler than phase 2.4's MCP server tests, which had no
+such parameter to use and had to monkeypatch a process-wide singleton
+instead.
+
+test_shelf_life.py: confirms an exact reference-data match wins over any
+default, that a category default actually gets used for a genuinely
+unknown item, that even an unrecognized category still returns a
+positive number rather than None or an error, and that category lookup
+doesn't care about case.
+
+test_update.py: quantity accumulation across two separate calls (6 for
+6, becomes 12, not replaced); a name-synonym merge (using a hand-built
+{"scallion": "green onion"} map, not the real table, to keep this test
+independent of recipes.db's actual contents); an absent item surviving
+a second batch untouched; a brand-new item picking up a real resolved
+shelf life; stale flagging actually firing once an item's last_seen_date
+is manually pushed past the configured threshold via a direct SQL
+UPDATE; and the item-just-reported-can-never-be-flagged-stale-in-the-
+same-call case.
+
+test_query.py: expiring_soon correctly including an item with little
+time left and excluding one with plenty, and separately excluding an
+item with no known shelf life at all (nothing to compare, so it can't
+qualify either way); fresh filtering strictly on the stored status
+column, not a computed one; category and search filters independently.
+
+test_remove.py: a normal partial removal; removing exactly what's
+present deleting the row; requesting more than exists clamping the
+removed amount, reporting the exact discrepancy, and still deleting the
+now-empty row; an unknown item reported not-found with the full request
+as its discrepancy; consumption_log actually receiving a row with the
+right recipe name; consumption_log recording the clamped amount, not
+the originally requested one, when over-removal occurred; and a
+not-found removal never writing anything to consumption_log at all.
+
+
+10. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+Storing the canonical name directly in pantry.name versus a separate
+canonical column
+    A separate column would keep the original, human-typed name around
+    for display (as one already-established alternative, phase 2's
+    nutrition_reference and recipes tables all store canonical forms
+    directly instead) — but that's exactly the precedent this phase
+    followed rather than deviated from. Storing the canonical form
+    directly keeps every merge comparison a plain SQL equality check,
+    with no re-normalization needed on read, at the cost of losing
+    whatever the original raw text actually said (raw_measure on
+    recipes.ingredients plays that traceability role there; nothing
+    analogous exists here, since a pantry item's raw input text isn't
+    generally worth preserving the way a recipe's original measure
+    phrasing is).
+
+Whole-pantry staleness scan versus batch-scoped
+    Covered in section 5. A batch-scoped check (only flagging items
+    that were part of the current update_pantry call) would be cheaper
+    and simpler, but it would structurally never catch the actual
+    interesting case — an item that's stale precisely because it wasn't
+    reported. The whole-table scan is what section 5's own reasoning
+    for "absence is not deletion" implies has to happen somewhere: if
+    absent items are never touched, something else has to be the thing
+    that eventually notices one has gone quiet for too long.
+
+A separate canonical/synonym cache reset fixture versus none
+    Covered implicitly in section 9's conftest.py discussion, but worth
+    naming as a decision: this phase's tests pass synonym_map directly
+    rather than relying on mealsight.matching.synonyms' process-wide
+    cache at all, sidestepping the cross-test cache-leak hazard phase
+    2.3 and 2.4 both had to explicitly guard against with an autouse
+    reset fixture. Passing the map as a parameter made that entire
+    class of test-isolation bug simply not apply here, rather than
+    needing to be defended against after the fact.
+
+resolve_shelf_life picking refrigerated-then-pantry-then-frozen versus
+some other order
+    Covered in section 4. The alternative orderings (frozen first, or
+    picking whichever of the three happens to be set first in
+    insertion order) were rejected because they'd either assume a
+    storage mode a user never actually chose (frozen) or produce a
+    non-deterministic-feeling result depending on how a JSON object
+    happened to be authored. Refrigerated-first matches the single most
+    common real assumption for an item that was simply photographed
+    somewhere in a kitchen, with no further signal about how it's
+    actually being stored.
+
+
+11. GLOSSARY
+=============================================================
+
+canonical name
+    The standard, resolved form of an ingredient's name — see phase
+    1.4/2.1's notes for the fuller definition; this phase is the first
+    place a canonical name is what's actually stored as a table's
+    primary display value outside of recipes.db's own reference tables.
+
+category default
+    A fallback shelf-life entry (CATEGORY_DEFAULTS) applied when a
+    specific item has no exact shelf_life_reference row — one per
+    category (protein, vegetable, fruit, dairy, grain, condiment), plus
+    one further last-resort default for a category that isn't even one
+    of those six.
+
+days_remaining
+    A computed (never stored) number: estimated_shelf_days minus how
+    many whole days have passed since added_date. None whenever
+    estimated_shelf_days itself isn't known.
+
+freshness_status
+    A stored, caller-supplied label describing an item's observed
+    physical condition (default "fresh") — distinct from days_remaining,
+    which is a prediction based on elapsed time, not an observation.
+
+stale (pantry item)
+    Not "spoiled" — an item whose last_seen_date is older than
+    settings.stale_pantry_item_days, meaning it hasn't been re-confirmed
+    present in a while and may need a fresh look (it could be gone,
+    moved, or simply never re-photographed).
+
+
+12. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: update_pantry needs to resolve ingredient synonyms, but that table
+lives in a completely different physical database file than the pantry
+table itself. How did you handle that, given this project's own rule
+that there's no cross-database joins?
+
+    The rule against cross-database joins is specifically about SQL —
+    you genuinely cannot write one query that reaches into two separate
+    SQLite files at once, and phase 1.3 was explicit that this project
+    doesn't try to. But resolving a synonym doesn't need a join at all:
+    it's a lookup against a small reference table that barely changes,
+    so the actual pattern — already established by the ingredient
+    matcher back in phase 2.1 — is to load that whole table into an
+    ordinary Python dict once, and then use that dict against whatever
+    data you have in hand, regardless of which database it came from.
+    update_pantry and remove_items both take that dict as an optional
+    argument, defaulting to loading it from the real recipes.db
+    connection if nothing's supplied. It's Python doing the combining,
+    the same way the project's own docs describe an agent eventually
+    combining results from separate MCP servers — just one level lower,
+    inside a single function instead of across a whole request.
+
+Q: Why does "absence from a batch" not delete an item, and how did you
+make sure that was actually true rather than just documented as true?
+
+    Because a single photo, or a single batch of reported items, only
+    ever sees part of a real pantry — whatever's in a cabinet, a drawer,
+    or just out of frame doesn't stop existing because this particular
+    report didn't mention it. The way I made sure of it isn't a special
+    guard clause that says "don't delete absent items" — it's simply
+    that the merge loop only ever executes an UPDATE or INSERT for a
+    canonical name that appears in the current batch; there's no DELETE
+    statement anywhere in that code path at all, so an absent item is
+    never in a position to be touched in the first place. I have a test
+    that inserts two items, then runs a second batch mentioning only one
+    of them, and checks both are still there afterward — proving the
+    behavior, not just the absence of code that would break it.
+
+Q: How does staleness flagging interact with a batch that doesn't
+mention the stale item at all — wouldn't you need the item to be "in"
+the request somehow to flag it?
+
+    No, and that's actually the point. Staleness flagging is a separate
+    step that runs after the merge, and it scans the entire pantry table
+    — not just whatever was in the batch that triggered this particular
+    call. That has to be true given the previous answer: if an item can
+    go completely unmentioned in a batch and survive untouched, the only
+    way anything ever notices it's gone quiet for two weeks is a check
+    that looks at the whole table, not one scoped to whatever happened
+    to be reported this time. I have a test that deliberately back-dates
+    one item's last_seen_date via direct SQL, then runs update_pantry
+    with a completely different, unrelated item, and confirms the stale
+    one shows up in flagged_items even though it was never part of that
+    call's own input.
+
+Q: Walk me through what happens if someone tries to remove more of an
+ingredient than the pantry actually has.
+
+    The removed quantity clamps at whatever's actually present — it
+    never goes negative, and the row gets deleted once it hits zero,
+    the same as a normal complete removal. But the interesting part is
+    what gets reported back: quantity_removed is the real, clamped
+    amount, and a separate discrepancy field reports exactly how much of
+    the original request that clamp had to drop — requesting to remove
+    5 units of something that only had 2 left reports quantity_removed
+    as 2 and discrepancy as 3. That distinction matters because
+    consumption_log only ever gets the real, clamped amount written to
+    it too, not the inflated original request — so the pantry's own
+    consumption history stays honest even when the request that
+    triggered it wasn't quite accurate about what was really there.

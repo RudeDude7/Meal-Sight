@@ -1,0 +1,581 @@
+PHASE 3.3 STUDY NOTES: THE PANTRY MANAGER MCP SERVER
+=============================================================
+
+These notes cover the third round of phase 3: wrapping the Pantry
+Manager's six plain-Python functions (built across phase 3.1 and 3.2,
+described in notes/phase_3_1_pantry_manager.txt and notes/phase_3_2_
+grocery_lists_and_expiry.txt) as an actual MCP server, the same way
+phase 2.4 did for the Recipe Engine. Everything below describes code
+that really exists right now, in backend/mealsight/mcp_servers/
+pantry_manager/ and backend/tests/test_mcp_servers/test_pantry_manager/.
+It happened in two sessions - server + tools first, tests + end-to-end
+verification second - and these notes cover both as one finished phase.
+
+
+1. WHAT THIS PHASE BUILT AND WHY IT COMES NOW
+=============================================================
+
+Phase 3.1 and 3.2 together built every piece of pantry logic an agent
+would ever need - merging in what a photo reports, reading it back,
+removing what gets cooked or thrown out, flagging what's about to spoil,
+and building/reading grocery lists - but none of it was reachable from
+outside a Python process that imports mealsight directly, exactly the
+same gap phase 2.4 closed for the recipe engine. This phase closes it
+for the pantry: a second FastMCP server, six tools, each one a thin
+wrapper around a function that already existed, already had its own
+tests (backend/tests/test_pantry/), and does not change meaning here.
+
+The same binding rule from phase 2.4 governs this phase too: business
+logic lives in mealsight.pantry and stays there. mealsight/mcp_servers/
+pantry_manager/ only validates input, calls into that module, and
+serializes what comes back. The one place this phase came close to
+writing new logic - remove_items's recipe_name handling, section 5 -
+turned out to be a pure transport-shape question, not a business
+decision, and is treated as one below.
+
+
+2. FILE MAP
+=============================================================
+
+backend/mealsight/mcp_servers/errors.py  (NEW - shared with recipe_engine)
+    not_found_error, validation_error, internal_error - the three
+    structured error builders phase 2.4 originally wrote inside
+    recipe_engine/serialization.py, extracted here once a second server
+    needed the identical shapes. See section 4.
+
+backend/mealsight/mcp_servers/recipe_engine/serialization.py  (EDITED)
+    Its three error builders were removed and replaced with an import
+    from the new errors.py, re-exported through the same names via an
+    explicit __all__ - recipe_engine/server.py's own import statement
+    didn't need to change at all.
+
+backend/mealsight/mcp_servers/pantry_manager/server.py
+    The FastMCP app (mcp = FastMCP("pantry-manager")) and all six
+    @mcp.tool functions: update_pantry, get_pantry, remove_items,
+    flag_expiring, create_grocery_list, get_grocery_list. Same shape as
+    recipe_engine/server.py - validate, call the underlying function,
+    serialize, catch errors into a structured result.
+
+backend/mealsight/mcp_servers/pantry_manager/serialization.py
+    Converts every mealsight.pantry pydantic result model into a plain
+    dict, plus a re-export of the three error builders from the new
+    shared errors.py (so pantry_manager/server.py's imports read the
+    same way recipe_engine/server.py's always have).
+
+backend/mealsight/mcp_servers/pantry_manager/__main__.py
+    Runnable as `python -m mealsight.mcp_servers.pantry_manager`. Opens
+    the real pantry database connection at startup, checks
+    shelf_life_reference isn't empty (not the pantry table itself -
+    see section 7), runs the server over stdio, closes every connection
+    on the way out.
+
+backend/mealsight/mcp_servers/pantry_manager/__init__.py
+    Re-exports `mcp`, identical convention to every other __init__.py
+    in this codebase.
+
+backend/pyproject.toml
+    One new line: mealsight-pantry-server console script, alongside the
+    existing mealsight-recipe-server entry from phase 2.4.
+
+backend/tests/test_mcp_servers/test_pantry_manager/
+    conftest.py, test_tool_schemas.py, test_tools.py, test_no_stdout.py -
+    17 tests, all against the real FastMCP in-memory client. Section 9.
+
+
+3. THIN TRANSPORT SHELL, SECOND TIME
+=============================================================
+
+The discipline itself is exactly what phase 2.4 section 3 already
+described in full - validate, call the one existing function, convert
+its result to a dict, catch errors into a structured shape, nothing
+else - and this phase followed it without needing to relitigate it.
+What's worth noting is what building a second server under that same
+discipline actually revealed: the discipline itself generalizes cleanly
+(every one of the six tools fits the same four-step shape recipe_engine's
+six did), but two of pantry_manager's tools needed a real design decision
+about where the MCP-level argument shape and the underlying function's
+argument shape diverge slightly - remove_items and get_pantry, both in
+section 5 - which phase 2.4 also hit (search_recipes, find_substitutions)
+and resolved the same way: change the underlying function when the gap
+is real behavior, keep the gap and document it honestly in the docstring
+when the task's given signature is deliberately narrower.
+
+
+4. ARCHITECTURE DECISION: A SHARED ERRORS MODULE
+=============================================================
+
+Before writing pantry_manager/server.py at all, this phase had to
+decide where update_pantry's, remove_items's, and every other tool's
+not_found_error/validation_error/internal_error results would come
+from. Three options existed: duplicate the three functions into a new
+pantry_manager/serialization.py, have pantry_manager import them
+directly from its sibling recipe_engine/serialization.py, or extract
+them into a new module both packages import from.
+
+The first was rejected because these three functions have nothing
+recipe-specific about them - duplicating them creates exactly the kind
+of drift risk this project has hit before (phase 1.4's near-duplicate
+nutrition keys, phase 2.3's synonym-canonical mismatches): two copies
+that look identical today and have no mechanism keeping them that way.
+The second was rejected because one MCP server importing from another
+server's internal module is a layering violation - recipe_engine and
+pantry_manager are peers, not a dependency of each other, and nothing
+about "generic error shape" belongs conceptually inside recipe_engine
+specifically. The third - a new backend/mealsight/mcp_servers/errors.py,
+sitting one level up from both server packages - won, and is what
+actually exists now.
+
+Making this change safely meant checking, via grep, that nothing else
+in the codebase imported these three functions directly (only asserted
+on the resulting dict shapes in tests) before moving them, then
+re-exporting the same three names through recipe_engine/serialization.py
+via an explicit __all__ so recipe_engine/server.py's existing import
+statement kept working completely unchanged. ruff, mypy --strict, and
+the full existing test suite (260 tests at that point, all of phase
+1-3.2's) were run immediately after the move and before writing a
+single line of pantry_manager - confirming the refactor was safe in
+isolation, before it became load-bearing for a second server.
+
+
+5. THE SIX TOOLS
+=============================================================
+
+update_pantry(items)
+------------------------------------------------------
+Wraps mealsight.pantry.update_pantry directly, no underlying changes.
+The task called out one specific thing this tool's docstring had to
+state explicitly, and it does, in capital letters: this ADDS to
+existing quantities rather than replacing them, and NEVER deletes a
+pantry row just because that item is absent from this batch - the
+exact behavior the underlying function already has (a photo only ever
+sees part of a real kitchen), now stated as a hard boundary an agent
+can't miss. The docstring also says directly what NOT to do with this
+tool - don't call it with a smaller quantity expecting it to subtract -
+and points at remove_items as the tool that actually does that.
+
+get_pantry(category, freshness_filter, search)
+------------------------------------------------------
+Wraps mealsight.pantry.get_pantry. One real gap between the MCP-level
+signature and the underlying function: the underlying function defaults
+freshness_filter to "all", but the task's given MCP signature wants
+this argument to default to None. Resolved the same way phase 2.4
+resolved find_substitutions's reason validation: get_args(FreshnessFilter)
+(imported from pantry.models, where the Literal type is actually
+defined) supplies the three accepted values at module load, a
+validation_error names the parameter and lists them if a non-None value
+doesn't match, and None itself maps to the underlying function's own
+"all" default right before the call - never duplicating what "all"
+means, just translating one optional convention into another at the
+boundary. The docstring also points an agent toward flag_expiring
+instead, specifically for "what should I use up" questions, since that
+tool sorts by urgency and explains what to do about each item, which
+get_pantry's own "expiring_soon" filter deliberately does not.
+
+remove_items(items, recipe_name)
+------------------------------------------------------
+The one tool this phase added a genuinely new, MCP-only type for. The
+underlying mealsight.pantry.remove_items takes Sequence[RemovalItemInput],
+where each RemovalItemInput already carries its own optional per-item
+used_for_recipe field - but the task's given MCP signature wants one
+single top-level recipe_name argument applying to the entire batch
+(the real, common case: cooking one recipe consumes several ingredients
+at once, and asking an agent to repeat the same recipe name on every
+line item is friction with no benefit). Rather than either changing the
+underlying function's real per-item flexibility (which some other
+future caller might actually want) or silently accepting a schema
+mismatch, this phase defined a small, transport-only RemovalItem model
+in server.py itself - just name and quantity_used, no used_for_recipe
+field at all - and the tool function builds the real
+RemovalItemInput(name=..., quantity_used=..., used_for_recipe=recipe_name)
+list from it, applying the one top-level value to every item. This type
+deliberately does not live in mealsight/pantry/models.py: it isn't a
+business-logic shape, it's specifically what this one tool's transport
+boundary needs, and putting it in pantry/models.py would have implied
+the pantry module itself has some notion of "removal without a
+recipe-name-per-item," which it doesn't and shouldn't.
+
+The task's other required boundary statement lives here too: the
+docstring says, in capital letters, that this is called AFTER cooking
+has actually been confirmed as having happened, not when a recipe is
+merely recommended or planned - directly warning against the failure
+mode of an agent calling this the moment it suggests a recipe, which
+would incorrectly empty the pantry before anything was actually cooked.
+
+flag_expiring(days_threshold)
+------------------------------------------------------
+Thin wrap of the identically-named pantry function. Validates
+days_threshold is a positive integer when given (mirroring scale_recipe/
+calculate_nutrition's own numeric validation from phase 2.4), returning
+a structured validation_error naming the parameter rather than letting
+a bad value silently produce a nonsensical empty or full result.
+
+create_grocery_list(missing_by_recipe)
+------------------------------------------------------
+Wraps mealsight.pantry.create_grocery_list. The task's one explicit
+requirement for this tool - "its docstring must show the expected shape
+clearly enough that an LLM can construct it correctly" - drove the one
+technical experiment this phase ran before writing any code: confirming,
+live, that typing this parameter directly as
+list[RecipeMissingIngredients] (an existing pydantic model, imported
+straight from mealsight.pantry.models, with its own nested
+list[MissingIngredientInput] field) makes FastMCP auto-derive the
+complete nested JSON schema from the type hints alone - recipe_id,
+recipe_name, and missing_ingredients: [{name, quantity, unit,
+importance}], each field's meaning pulled from the underlying pydantic
+model's own docstring. No hand-written JSON schema anywhere in this
+tool's definition; the schema an agent actually sees is generated
+directly from the same type that mealsight.pantry.create_grocery_list
+itself consumes, so the two can never drift out of sync the way a
+hand-maintained parallel schema could. The docstring still spells out
+the exact nested shape as a literal JSON example - not because FastMCP
+needs it, but because an agent reading a tool description in isolation
+benefits from seeing a concrete instance, not just a schema.
+
+get_grocery_list(list_id)
+------------------------------------------------------
+Wraps mealsight.pantry.get_grocery_list, which returns None for two
+different situations: a given list_id that doesn't match anything, and
+an omitted list_id when no active list currently exists at all. Both
+map to the identical not_found_error shape - list_id's own string value
+when it was given, the literal string "(most recent active)" as a
+stand-in id when it wasn't - deliberately choosing one consistent error
+shape across both paths over inventing a second, subtly different
+"nothing to fetch" variant just for the omitted-id case.
+
+
+6. ERROR HANDLING
+=============================================================
+
+Identical shape to phase 2.4, now shared literally rather than just
+by convention (section 4): validate anything the underlying function
+can't cleanly express as its own error (freshness_filter/days_threshold's
+enum/positivity checks), call the underlying function inside a try
+block, catch a bare Exception as the outermost boundary, and return one
+of the three shared error dicts instead of ever letting an exception
+reach the caller raw. Unlike recipe_engine, none of pantry_manager's six
+underlying functions raise ValueError as a "not found" convention -
+update_pantry/get_pantry/remove_items/flag_expiring/create_grocery_list
+all either succeed unconditionally or return an empty/partial result
+rather than raising, and get_grocery_list signals "nothing found" by
+returning None rather than raising - so this phase has no ValueError
+catch clause at all, and get_grocery_list's not_found_error is built
+from an explicit `if result is None` check instead of an except block.
+That's not a gap relative to recipe_engine's pattern; it's the same
+"catch whatever the underlying function's own convention actually is"
+principle producing a different, correct shape for a module whose
+functions were written (phase 3.1/3.2) to prefer returning an empty
+result over raising wherever a truly missing thing isn't exceptional.
+
+
+7. LIFECYCLE
+=============================================================
+
+Same sync-main-wrapping-async-run shape as recipe_engine/__main__.py
+(phase 2.4), and, before that, seed_all.py's own main(). The one
+meaningful difference is what gets checked at startup before the server
+starts serving: recipe_engine checks that the recipes table itself
+isn't empty, because an empty recipes table means every tool call would
+answer against nothing. pantry_manager cannot check the pantry table
+the same way, because an empty pantry is completely normal and
+expected the first time this server ever runs - phase 3.1 built
+update_pantry specifically to grow that table from nothing. What this
+phase checks instead is shelf_life_reference: the reference dataset
+phase 3.1 seeded with 86 entries, which update_pantry and flag_expiring
+both depend on for anything beyond a flat category-level guess at shelf
+life. An empty shelf_life_reference table wouldn't make the server
+obviously broken - every call would still return a result - it would
+just make every shelf-life estimate silently worse than it should be,
+exactly the kind of quiet degradation this codebase has repeatedly
+chosen to make loud instead (phase 2.4's recipes-table check, and
+further back, phase 1's config validation).
+
+
+8. HOW THIS CONNECTS TO THE REST
+=============================================================
+
+An agent (still not built) now has two MCP servers to discover and
+call: recipe-engine (phase 2.4) and pantry-manager (this phase),
+speaking an identical error vocabulary courtesy of section 4's shared
+errors.py, and an identical thin-transport-shell discipline in both
+server.py files. The two servers are designed to be used together in
+sequence an agent would actually follow: get_pantry or flag_expiring to
+see what's on hand, search_recipes/match_ingredients (recipe-engine) to
+find something cookable, remove_items once cooking is actually
+confirmed, and create_grocery_list from whatever match_ingredients
+reported as missing. Nothing about mealsight.pantry's own public API
+changed in this phase - every underlying function this phase wraps is
+exactly what phase 3.1/3.2 already built and tested, the same "no new
+business logic" outcome phase 2.4 reached wrapping recipe_engine.
+
+
+9. THE TESTS
+=============================================================
+
+conftest.py's central problem, and how it's solved
+------------------------------------------------------
+Same problem phase 2.4's conftest.py solved, with one addition.
+pantry_manager's tools call mealsight.db.get_pantry_db() directly, so
+_fresh_pantry_db monkeypatches settings.pantry_db_path to a tmp_path
+file, calls close_all(), resets mealsight.pantry's shelf-life cache,
+and re-initializes the pantry schema - the same monkeypatch-and-reset
+shape as phase 2.4's _fresh_recipe_db. The addition: update_pantry,
+remove_items, and create_grocery_list all resolve canonical ingredient
+names through mealsight.matching.synonyms.load_synonym_map, which reads
+ingredient_synonyms out of recipes.db, not pantry.db - a real cross-
+database dependency, not a test artifact. So _fresh_pantry_db also
+monkeypatches settings.recipes_db_path and initializes a second, empty
+recipes schema every test gets - without it, any test calling one of
+those three tools would hit "no such table: ingredient_synonyms"
+against whatever recipes.db happened to already exist on the machine
+running the tests, exactly the kind of cross-test leak phase 2.3 and
+2.4 both had to guard against for the synonym cache specifically.
+
+test_tool_schemas.py (5 tests)
+------------------------------------------------------
+All six tools listed with descriptions over 50 characters; each tool's
+inputSchema property names exactly matching the task's given argument
+list; create_grocery_list's inputSchema specifically checked for the
+full nested shape (recipe_id/recipe_name/missing_ingredients, and
+missing_ingredients's own nested name/quantity/unit/importance) rather
+than just an opaque "array" or "object" type, proving section 5's
+FastMCP auto-derivation claim mechanically rather than just asserting
+it; update_pantry's and remove_items's descriptions checked for the
+literal words the task required ("add"/"never"/"delete",
+"after"/"confirmed") actually being present, the same mechanical-check
+approach phase 2.4 used for search_recipes's own required statement.
+
+test_tools.py (11 tests)
+------------------------------------------------------
+One happy path per tool, plus: update_pantry's accumulate-not-replace
+and never-delete behavior both verified through the MCP layer
+specifically (not just against the underlying function, which phase
+3.1's own tests already cover) - calling update_pantry twice through
+mcp_client.call_tool and checking both the tool's own returned counts
+and a following get_pantry call's result; remove_items against an
+unknown item returning found=false with the full requested quantity as
+discrepancy, never an exception; get_pantry's freshness_filter="bogus"
+returning a structured validation_error listing exactly the three real
+accepted values; get_grocery_list's both not-found paths (a real but
+wrong list_id, and no list_id with no active list existing at all).
+
+test_no_stdout.py (1 test)
+------------------------------------------------------
+Same shape as phase 2.4's - a mix of happy-path and error-path calls
+across all six tools in one test, asserting capsys.readouterr().out is
+empty afterward. Nothing new to fix here: phase 2.4 already found and
+fixed the one real stdout-logging bug (mealsight.utils.logging writing
+to stdout by default), and that fix lives in a shared module both
+servers use - this test exists to confirm the fix still holds for a
+second server built on top of it, not because a new bug was expected.
+
+
+10. VERIFICATION: A SECOND REAL SUBPROCESS SESSION
+=============================================================
+
+Same three-part verification phase 2.4 established: ruff check, mypy
+--strict, and the full pytest suite (277 passed after this phase's 17
+new tests, no regressions in the 260 that already existed); a real
+subprocess session - the server spawned as a genuinely separate process
+via FastMCP's StdioTransport, not the in-memory test client - driving a
+scripted sequence (list_tools, update_pantry with six items across five
+categories, flag_expiring, get_pantry, create_grocery_list from one
+recipe's missing ingredients) against a fresh temp pantry.db/recipes.db
+pair, printing every request and response; and a raw-byte stdout check
+independent of any MCP client library's own parsing - hand-rolling the
+JSON-RPC initialize/tools-list handshake directly over the subprocess's
+pipes and confirming every single line on stdout parsed as valid JSON
+with zero non-protocol bytes, while the startup log line (the
+shelf_life_reference check from section 7) showed up on stderr only.
+
+A verification-script bug, not a product bug
+------------------------------------------------------
+The first attempt at the real-subprocess script hung indefinitely with
+no output at all, before ever reaching a single print statement. The
+cause had nothing to do with pantry_manager itself: the script computed
+its own project root by walking up from `__file__` looking for
+pyproject.toml, a pattern copied out of habit - but the script itself
+lived in a scratch directory with no pyproject.toml anywhere above it,
+so the loop (`while not (path / "pyproject.toml").exists(): path =
+path.parent`) never terminated, since a filesystem root's own parent is
+itself. Confirmed by reproducing the exact same six-tool sequence as a
+short inline script with the backend path hardcoded instead, which ran
+in under a second - isolating the hang to the path-walk, not to
+anything about StdioTransport, the subprocess, or the server. Worth
+recording for the same reason phase 2.4 recorded its own stdout bug:
+not because it affected shipped code, but because "silent infinite
+loop with zero output, indistinguishable from a real hang" is exactly
+the kind of failure that's expensive to diagnose blind, and cheap to
+avoid once you know the specific shape of the mistake that causes it.
+
+
+11. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+A shared errors.py versus duplicating or cross-importing
+    Covered in full in section 4. Extraction won over both duplication
+    (drift risk) and cross-server import (layering violation).
+
+A transport-only RemovalItem model versus reusing RemovalItemInput
+directly
+    Covered in section 5. Reusing mealsight.pantry.models.RemovalItemInput
+    directly as the MCP parameter type would have exposed its per-item
+    used_for_recipe field in the tool's schema, which both contradicts
+    the task's given remove_items(items, recipe_name) signature and
+    would leave an agent needing to figure out, per item, whether to
+    set it - when the real, common case is one recipe name for the
+    whole batch. A small model with exactly the two fields this
+    transport boundary actually needs, defined in server.py rather than
+    pantry/models.py, keeps the business-logic module's own type
+    honestly describing what mealsight.pantry.remove_items can really
+    do, without forcing that flexibility onto every caller through MCP.
+
+get_pantry's freshness_filter defaulting to None at the MCP layer
+versus matching the underlying function's own "all" default exactly
+    The underlying function's default ("all") and the task's given MCP
+    default (omit the parameter entirely) mean the same thing
+    semantically, so this wasn't a behavior change the way search_
+    recipes's max_cook_time became Optional in phase 2.4 - it's a pure
+    naming-convention translation, resolved with one line mapping None
+    to "all" right at the call site, not by changing get_pantry itself.
+
+get_grocery_list's two not-found cases sharing one error shape versus
+a second, distinct "no active list" variant
+    A list_id that doesn't exist and an omitted list_id with nothing
+    active are different situations, but an agent handling either one
+    needs to do the same thing next (there's no grocery list to act
+    on), so a single not_found_error shape - with a placeholder id
+    string for the omitted case - was chosen over adding a fourth error
+    type this project's error vocabulary doesn't otherwise have, keeping
+    every one of both servers' tools speaking the exact same three-shape
+    error language established in phase 2.4.
+
+
+12. GLOSSARY
+=============================================================
+
+(Every term phase 2.4's own glossary already defined - MCP, FastMCP,
+in-memory client, JSON-RPC, stdio transport, thin transport shell, tool -
+applies identically here and isn't repeated. New terms below.)
+
+shared errors module
+    backend/mealsight/mcp_servers/errors.py - the three structured
+    error builders (not_found_error, validation_error, internal_error),
+    extracted in this phase from recipe_engine/serialization.py so both
+    MCP servers in this codebase return byte-for-byte the same error
+    shapes, rather than two independently-maintained copies.
+
+transport-only type
+    A pydantic model that exists purely to shape one MCP tool's
+    argument schema (this phase's RemovalItem, section 5/11) - not part
+    of the business-logic module's own vocabulary, and deliberately not
+    defined there, because it describes what one transport boundary
+    needs, not what the underlying domain actually models.
+
+
+13. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: You extracted three error-builder functions into a new shared module
+before writing any of the pantry server. Why not just duplicate them -
+they're tiny?
+
+    Because "they're tiny" is exactly the condition under which
+    duplication quietly rots - a three-line function copied into a
+    second file has no mechanism keeping the two copies in sync if
+    either one ever needs to change, and this project has already hit
+    that exact failure shape twice before, in phase 1.4's nutrition
+    data and phase 2.3's synonym table, both times as a silent
+    collision or drift nobody caught until it actually mattered. These
+    three functions have nothing recipe-specific in them at all, so
+    duplicating them into pantry_manager would have created a second
+    copy for no actual benefit. I checked with grep first that nothing
+    else in the codebase imported them directly, moved them to a new
+    mealsight/mcp_servers/errors.py, and re-exported the same three
+    names through recipe_engine/serialization.py so its existing import
+    statement in server.py didn't have to change at all - then ran the
+    full existing test suite before writing a single line of the new
+    server, specifically to catch any breakage from the move in
+    isolation, separately from whatever pantry_manager itself might
+    introduce.
+
+Q: remove_items ended up with a brand-new pydantic model that isn't in
+mealsight/pantry/models.py. Doesn't that break the "no new business
+logic" rule?
+
+    No, because it isn't business logic - RemovalItem has exactly two
+    fields, name and quantity_used, and does nothing except shape one
+    tool's argument schema. The real business-logic type,
+    RemovalItemInput, already exists in pantry/models.py with its own
+    per-item used_for_recipe field, and I use it unchanged inside the
+    tool function. The mismatch is that the task's given MCP signature
+    wants one recipe_name argument for the whole batch, not a
+    per-item field - that's a shape question at the transport boundary,
+    not a decision about what removing something from a pantry means.
+    Putting RemovalItem in pantry/models.py would have been the actual
+    mistake: it would suggest the pantry domain itself has some notion
+    of "an item removed without knowing which recipe," which it
+    doesn't - every removal the underlying function processes still
+    gets a real, possibly-null used_for_recipe value, it's just that
+    this one tool's transport layer decided to set it uniformly rather
+    than exposing it as a second per-item argument.
+
+Q: How did you actually confirm FastMCP generates the correct nested
+schema for create_grocery_list, rather than just trusting that typing
+the parameter as list[RecipeMissingIngredients] would work?
+
+    I ran a small, throwaway live test before writing server.py at all -
+    stood up a FastMCP app with one tool typed exactly that way, using
+    the real pydantic model imported straight from
+    mealsight.pantry.models, and inspected the tool's actual advertised
+    inputSchema through a real client. It came back with the full
+    nested structure - recipe_id, recipe_name, and missing_ingredients
+    as an array of objects with name/quantity/unit/importance - with no
+    hand-written schema anywhere. I kept that same check as a real test
+    afterward (test_create_grocery_list_schema_shows_nested_recipe_
+    shape), asserting on the actual property names in both the recipe-
+    level and ingredient-level schema, specifically so this stays
+    verified mechanically rather than resting on "I checked it once
+    during development."
+
+Q: Your verification script hung with zero output the first time you
+ran it. What happened, and how did you know it wasn't a real bug in the
+server?
+
+    The script computed its own backend directory by walking up parent
+    directories looking for pyproject.toml - a pattern that works fine
+    when the script actually lives inside the project, but this one
+    lived in a scratch directory with no pyproject.toml anywhere above
+    it in the filesystem, so the walk never terminated; a filesystem
+    root's parent is itself, so the loop just spun forever before the
+    script's own main() ever ran. I knew it wasn't the server because
+    nothing had printed yet at all - not even the schema-initialization
+    log lines that happen before the subprocess is even spawned - which
+    meant execution hadn't reached main() at all, and a hang before any
+    of your own code runs points at setup, not at whatever you're
+    trying to test. I confirmed by hardcoding the backend path instead
+    of deriving it, which ran clean in under a second - the same six-
+    tool session that had hung a moment before completed immediately
+    once the actual bug (an infinite loop in my own test scaffolding)
+    was gone.
+
+Q: pantry_manager's error handling has no ValueError catch clause at
+all, unlike recipe_engine's. Is that a gap?
+
+    No - it's the same principle producing a different, correct result.
+    recipe_engine catches ValueError specifically because every
+    recipe_engine/matching function that looks something up by id
+    raises exactly that as its established "not found" convention, from
+    phase 2.1 onward. None of pantry_manager's six underlying functions
+    follow that convention - they were written in phase 3.1/3.2 to
+    prefer returning an empty list, a zero-count result, or None over
+    raising, wherever a missing or empty thing is a normal outcome
+    rather than an exceptional one, which fits a pantry much better
+    than it fits a recipe lookup: an empty pantry, or a removal request
+    for an item that isn't there, isn't a broken state the way a
+    recipe_id that doesn't exist is. So the right thing for pantry_
+    manager's tools to catch is whatever each underlying function's own
+    convention actually is - an explicit `if result is None` for get_
+    grocery_list, nothing at all for the rest, since they don't have a
+    failure convention to catch in the first place - and a bare
+    Exception as the same outermost, genuinely-unexpected-only backstop
+    both servers share.

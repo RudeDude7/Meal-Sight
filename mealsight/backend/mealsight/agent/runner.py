@@ -38,8 +38,8 @@ async def run_recommendation(
     failed recommendation never leaves an orphaned subprocess running.
     The manager is handed to the graph via context=AgentContext(mcp=...)
     (LangGraph's own context_schema mechanism, mealsight.agent.context)
-    — nodes 1-5 reach it through their own `runtime: Runtime[
-    AgentContext]` parameter; nodes 6-11 are still plain stubs and never
+    — nodes 1-8 reach it through their own `runtime: Runtime[
+    AgentContext]` parameter; nodes 9-11 are still plain stubs and never
     see it at all.
     """
     trace_id = str(uuid.uuid4())

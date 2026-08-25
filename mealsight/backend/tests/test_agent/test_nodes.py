@@ -14,18 +14,25 @@ from typing import Any, cast
 
 import pytest
 from langgraph.runtime import Runtime
+from pydantic import BaseModel
 
 from mealsight.agent.context import AgentContext
 from mealsight.agent.mcp_client import MCPClientManager, ToolCallResult
 from mealsight.agent.nodes.get_context import get_context
+from mealsight.agent.nodes.match_rank import match_rank
 from mealsight.agent.nodes.merge import merge
 from mealsight.agent.nodes.perceive import perceive
+from mealsight.agent.nodes.reason import RecipeDecision, reason
+from mealsight.agent.nodes.search_recipes import search_recipes
 from mealsight.agent.nodes.update_pantry import update_pantry
 from mealsight.agent.nodes.validate_input import validate_input
+from mealsight.agent.state import MealSightState
 from mealsight.perception.models import (
     AudioPerception,
+    AvailableIngredient,
     IdentifiedItem,
     TextPerception,
+    UnifiedMealRequest,
     VisionPerception,
 )
 
@@ -40,6 +47,7 @@ from mealsight.perception.models import (
 # isn't fooled by the shadowing.
 perceive_module = importlib.import_module("mealsight.agent.nodes.perceive")
 update_pantry_module = importlib.import_module("mealsight.agent.nodes.update_pantry")
+reason_module = importlib.import_module("mealsight.agent.nodes.reason")
 
 
 class FakeMCP:
@@ -107,6 +115,26 @@ def _audio(**kwargs: object) -> AudioPerception:
     }
     base.update(kwargs)
     return AudioPerception(**base)  # type: ignore[arg-type]
+
+
+def _unified(**kwargs: object) -> UnifiedMealRequest:
+    base: dict[str, object] = {
+        "available_ingredients": [],
+        "freshness_alerts": [],
+        "servings": 2,
+        "max_cook_time_minutes": None,
+        "dietary_restrictions": [],
+        "cuisine_preference": None,
+        "avoid_ingredients": [],
+        "avoid_dishes": [],
+        "mood_or_preference": None,
+        "protein_preference": None,
+        "occasion": None,
+        "modalities_received": ["text"],
+        "conflicts_detected": [],
+    }
+    base.update(kwargs)
+    return UnifiedMealRequest(**base)  # type: ignore[arg-type]
 
 
 def _text(**kwargs: object) -> TextPerception:
@@ -314,6 +342,24 @@ async def test_update_pantry_skips_when_terminal() -> None:
     assert len(result["stream_messages"]) == 1
 
 
+async def test_update_pantry_populates_pantry_items_from_get_pantry() -> None:
+    mcp = FakeMCP(
+        {
+            ("pantry_manager", "flag_expiring"): ToolCallResult(success=True, data={"items": [], "count": 0}),
+            ("pantry_manager", "get_pantry"): ToolCallResult(
+                success=True,
+                data={"items": [{"name": "onion"}, {"name": "green onion"}], "count": 2},
+            ),
+        }
+    )
+
+    result = await update_pantry({"stream_messages": []}, _runtime(mcp))
+
+    called_tools = [(server, tool) for server, tool, _ in mcp.calls]
+    assert ("pantry_manager", "get_pantry") in called_tools
+    assert result["pantry_items"] == [{"name": "onion"}, {"name": "green onion"}]
+
+
 async def test_update_pantry_records_unexpected_failure_without_raising(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -369,3 +415,633 @@ async def test_get_context_skips_when_terminal() -> None:
     result = await get_context({"terminal": True, "stream_messages": []}, _runtime(mcp))
     assert mcp.calls == []
     assert len(result["stream_messages"]) == 1
+
+
+# --------------------------------------------------------------------
+# search_recipes
+# --------------------------------------------------------------------
+
+
+def _recipe(recipe_id: str = "r1", **kwargs: object) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "recipe_id": recipe_id,
+        "name": f"Recipe {recipe_id}",
+        "cuisine": "italian",
+        "cook_time_minutes": 20,
+        "dietary_tags": [],
+    }
+    base.update(kwargs)
+    return base
+
+
+class SequencedMCP:
+    """Like FakeMCP, but each (server, tool) key holds a QUEUE of
+    responses consumed in call order — needed for search_recipes' own
+    relaxation retries, where the same tool is called multiple times
+    with different arguments and must return a different result each
+    time."""
+
+    def __init__(self, sequence: dict[tuple[str, str], list[ToolCallResult]] | None = None) -> None:
+        self._sequence = {k: list(v) for k, v in (sequence or {}).items()}
+        self.calls: list[tuple[str, str, dict[str, Any]]] = []
+
+    async def call_tool(
+        self, server: str, tool_name: str, arguments: dict[str, Any] | None = None
+    ) -> ToolCallResult:
+        self.calls.append((server, tool_name, arguments or {}))
+        queue = self._sequence.get((server, tool_name))
+        if queue:
+            return queue.pop(0)
+        return ToolCallResult(success=False, error="unconfigured")
+
+
+def _sequenced_runtime(mcp: SequencedMCP) -> Runtime[AgentContext]:
+    return Runtime(context=AgentContext(mcp=cast(MCPClientManager, mcp)))
+
+
+def _fake_runtime(mcp: object) -> Runtime[AgentContext]:
+    return Runtime(context=AgentContext(mcp=cast(MCPClientManager, mcp)))
+
+
+async def test_search_recipes_succeeds_on_first_try_no_relaxation() -> None:
+    mcp = SequencedMCP(
+        {
+            ("recipe_engine", "search_recipes"): [
+                ToolCallResult(success=True, data={"results": [_recipe()], "total_matched": 1})
+            ]
+        }
+    )
+    state: MealSightState = {
+        "unified_request": _unified(
+            dietary_restrictions=["vegan"], cuisine_preference="italian", max_cook_time_minutes=20
+        ),
+        "stream_messages": [],
+    }
+    result = await search_recipes(state, _sequenced_runtime(mcp))
+
+    assert len(mcp.calls) == 1
+    assert result["recipe_candidates"] == [_recipe()]
+    assert result["total_matched"] == 1
+    assert result["search_exhausted"] is False
+    assert not any("Dropping" in m or "raising" in m for m in result["stream_messages"])
+    _, _, args = mcp.calls[0]
+    assert args["dietary_filters"] == ["vegan"]
+
+
+async def test_search_recipes_relaxes_in_order_and_never_touches_dietary() -> None:
+    empty = ToolCallResult(success=True, data={"results": [], "total_matched": 0})
+    success = ToolCallResult(success=True, data={"results": [_recipe()], "total_matched": 1})
+    mcp = SequencedMCP({("recipe_engine", "search_recipes"): [empty, empty, empty, success]})
+    state: MealSightState = {
+        "unified_request": _unified(
+            dietary_restrictions=["vegan"], cuisine_preference="italian", max_cook_time_minutes=20
+        ),
+        "context_signals": {"meal_type": "dinner"},
+        "stream_messages": [],
+    }
+    result = await search_recipes(state, _sequenced_runtime(mcp))
+
+    assert len(mcp.calls) == 4
+    call_args = [args for _, _, args in mcp.calls]
+
+    assert all(args["dietary_filters"] == ["vegan"] for args in call_args)
+
+    assert call_args[0]["cuisine"] == "italian"
+    assert call_args[0]["max_cook_time"] == 20
+    assert call_args[0]["meal_type"] == "dinner"
+
+    assert call_args[1]["cuisine"] is None
+    assert call_args[1]["max_cook_time"] == 20
+    assert call_args[1]["meal_type"] == "dinner"
+
+    assert call_args[2]["cuisine"] is None
+    assert call_args[2]["max_cook_time"] > 20
+    assert call_args[2]["meal_type"] == "dinner"
+
+    assert call_args[3]["cuisine"] is None
+    assert call_args[3]["meal_type"] is None
+
+    assert result["recipe_candidates"] == [_recipe()]
+    assert result["search_exhausted"] is False
+    assert any("Dropping the italian cuisine" in m for m in result["stream_messages"])
+    assert any("raising the cook-time limit" in m for m in result["stream_messages"])
+    assert any("dropping the dinner meal-type filter" in m for m in result["stream_messages"])
+
+
+async def test_search_recipes_zero_after_full_relaxation_marks_exhausted() -> None:
+    empty = ToolCallResult(success=True, data={"results": [], "total_matched": 0})
+    mcp = SequencedMCP({("recipe_engine", "search_recipes"): [empty, empty, empty, empty]})
+    state: MealSightState = {
+        "unified_request": _unified(
+            dietary_restrictions=["vegan", "gluten-free"],
+            cuisine_preference="italian",
+            max_cook_time_minutes=20,
+        ),
+        "context_signals": {"meal_type": "dinner"},
+        "stream_messages": [],
+    }
+    result = await search_recipes(state, _sequenced_runtime(mcp))
+
+    assert result["recipe_candidates"] == []
+    assert result["total_matched"] == 0
+    assert result["search_exhausted"] is True
+    assert any("kept throughout" in m for m in result["stream_messages"])
+    assert all(args["dietary_filters"] == ["vegan", "gluten-free"] for _, _, args in mcp.calls)
+
+
+async def test_search_recipes_skips_when_terminal() -> None:
+    mcp = SequencedMCP()
+    result = await search_recipes({"terminal": True, "stream_messages": []}, _sequenced_runtime(mcp))
+    assert mcp.calls == []
+    assert len(result["stream_messages"]) == 1
+
+
+# --------------------------------------------------------------------
+# match_rank
+# --------------------------------------------------------------------
+
+
+class RecipeAwareMCP:
+    """Fake MCP for match_rank: responses depend on the specific
+    recipe_id in the call arguments, not just (server, tool), since
+    match_rank calls the same tool once per candidate recipe."""
+
+    def __init__(
+        self,
+        match_ingredients: dict[str, dict[str, Any]] | None = None,
+        check_repetition: dict[str, dict[str, Any]] | None = None,
+        nutrition: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
+        self._match_ingredients = match_ingredients or {}
+        self._check_repetition = check_repetition or {}
+        self._nutrition = nutrition or {}
+        self.calls: list[tuple[str, str, dict[str, Any]]] = []
+
+    async def call_tool(
+        self, server: str, tool_name: str, arguments: dict[str, Any] | None = None
+    ) -> ToolCallResult:
+        arguments = arguments or {}
+        self.calls.append((server, tool_name, arguments))
+        recipe_id = str(arguments.get("recipe_id"))
+        data: dict[str, Any] | None
+        if tool_name == "match_ingredients":
+            data = self._match_ingredients.get(recipe_id)
+        elif tool_name == "check_repetition":
+            data = self._check_repetition.get(recipe_id)
+        elif tool_name == "calculate_nutrition":
+            data = self._nutrition.get(recipe_id)
+        else:
+            data = None
+        if data is None:
+            return ToolCallResult(success=False, error="unconfigured")
+        return ToolCallResult(success=True, data=data)
+
+
+def _match_data(
+    match_score: float,
+    matched_items: list[dict[str, Any]] | None = None,
+    critical_missing: list[str] | None = None,
+    can_cook: bool = True,
+) -> dict[str, Any]:
+    return {
+        "match_score": match_score,
+        "can_cook": can_cook,
+        "matched_items": matched_items or [],
+        "substitutable_items": [],
+        "partial_matches": [],
+        "missing_items": [],
+        "critical_missing": critical_missing or [],
+        "summary": "x",
+    }
+
+
+def _repetition_data(score: float = 0.0) -> dict[str, Any]:
+    return {"repetition_score": score, "reason": "x", "recommendation": "acceptable", "last_cooked": None}
+
+
+async def test_match_rank_orders_by_composite_score() -> None:
+    mcp = RecipeAwareMCP(
+        match_ingredients={
+            "r_high": _match_data(0.9),
+            "r_low": _match_data(0.3),
+        },
+        check_repetition={
+            "r_high": _repetition_data(),
+            "r_low": _repetition_data(),
+        },
+        nutrition={"r_high": {"totals": {}}, "r_low": {"totals": {}}},
+    )
+    state: MealSightState = {
+        "recipe_candidates": [_recipe("r_low"), _recipe("r_high")],
+        "unified_request": _unified(
+            available_ingredients=[AvailableIngredient(name="onion", verified=True, source="vision")]
+        ),
+        "stream_messages": [],
+    }
+    result = await match_rank(state, _fake_runtime(mcp))
+
+    ids = [r["recipe_id"] for r in result["matched_recipes"]]
+    assert ids[0] == "r_high"
+    assert ids[1] == "r_low"
+
+
+async def test_match_rank_expiring_ingredient_recipe_ranks_above_equivalent() -> None:
+    mcp = RecipeAwareMCP(
+        match_ingredients={
+            "uses_expiring": _match_data(0.5, matched_items=[{"name": "spinach"}]),
+            "no_expiring": _match_data(0.5, matched_items=[{"name": "onion"}]),
+        },
+        check_repetition={
+            "uses_expiring": _repetition_data(),
+            "no_expiring": _repetition_data(),
+        },
+        nutrition={"uses_expiring": {"totals": {}}, "no_expiring": {"totals": {}}},
+    )
+    state: MealSightState = {
+        "recipe_candidates": [_recipe("no_expiring"), _recipe("uses_expiring")],
+        "unified_request": _unified(
+            available_ingredients=[
+                AvailableIngredient(name="spinach", verified=True, source="vision"),
+                AvailableIngredient(name="onion", verified=True, source="vision"),
+            ]
+        ),
+        "expiring_items": [{"name": "spinach", "days_remaining": 1}],
+        "stream_messages": [],
+    }
+    result = await match_rank(state, _fake_runtime(mcp))
+
+    ids = [r["recipe_id"] for r in result["matched_recipes"]]
+    assert ids[0] == "uses_expiring"
+    assert result["matched_recipes"][0]["uses_expiring_ingredient"] is True
+
+
+async def test_match_rank_calls_nutrition_for_top_3_only() -> None:
+    match_scores = {"r1": 0.9, "r2": 0.8, "r3": 0.7, "r4": 0.6, "r5": 0.5}
+    mcp = RecipeAwareMCP(
+        match_ingredients={rid: _match_data(score) for rid, score in match_scores.items()},
+        check_repetition={rid: _repetition_data() for rid in match_scores},
+        nutrition={rid: {"totals": {}} for rid in match_scores},
+    )
+    state: MealSightState = {
+        "recipe_candidates": [_recipe(rid) for rid in match_scores],
+        "unified_request": _unified(),
+        "stream_messages": [],
+    }
+    result = await match_rank(state, _fake_runtime(mcp))
+
+    nutrition_calls = [args["recipe_id"] for server, tool, args in mcp.calls if tool == "calculate_nutrition"]
+    assert len(nutrition_calls) == 3
+    assert set(nutrition_calls) == {"r1", "r2", "r3"}
+
+    with_nutrition = [r["recipe_id"] for r in result["matched_recipes"] if "nutrition_info" in r]
+    assert set(with_nutrition) == {"r1", "r2", "r3"}
+
+
+async def test_match_rank_skips_when_terminal() -> None:
+    mcp = RecipeAwareMCP()
+    await match_rank({"terminal": True, "stream_messages": []}, _fake_runtime(mcp))
+    assert mcp.calls == []
+
+
+async def test_match_rank_handles_no_candidates() -> None:
+    mcp = RecipeAwareMCP()
+    result = await match_rank(
+        {"recipe_candidates": [], "unified_request": _unified(), "stream_messages": []}, _fake_runtime(mcp)
+    )
+    assert result["matched_recipes"] == []
+    assert mcp.calls == []
+
+
+async def test_match_rank_uses_persisted_pantry_not_just_vision_verified() -> None:
+    # "green onion" is only in the persisted pantry (state["pantry_items"],
+    # from update_pantry's own get_pantry read-back) — NOT in this run's
+    # own vision-verified unified_request.available_ingredients. Before the
+    # fix, match_rank only ever passed the latter to match_ingredients, so
+    # anything seen in an earlier run's photo was invisible to ranking.
+    mcp = RecipeAwareMCP(match_ingredients={"r1": _match_data(0.5)})
+    state: MealSightState = {
+        "recipe_candidates": [_recipe("r1")],
+        "pantry_items": [{"name": "green onion"}, {"name": "onion"}],
+        "unified_request": _unified(
+            available_ingredients=[AvailableIngredient(name="onion", verified=True, source="vision")]
+        ),
+        "stream_messages": [],
+    }
+    await match_rank(state, _fake_runtime(mcp))
+
+    match_call_args = next(args for _, tool, args in mcp.calls if tool == "match_ingredients")
+    assert "green onion" in match_call_args["available_ingredients"]
+    assert "onion" in match_call_args["available_ingredients"]
+
+
+async def test_match_rank_includes_unverified_mentions_alongside_pantry() -> None:
+    # An ingredient only ever mentioned in speech/text (never seen, so
+    # never written to the pantry) is still usable — just tracked
+    # separately once matched (unverified_ingredient_matches).
+    mcp = RecipeAwareMCP(
+        match_ingredients={"r1": _match_data(0.5, matched_items=[{"name": "saffron"}])}
+    )
+    state: MealSightState = {
+        "recipe_candidates": [_recipe("r1")],
+        "pantry_items": [{"name": "onion"}],
+        "unified_request": _unified(
+            available_ingredients=[
+                AvailableIngredient(name="onion", verified=True, source="vision"),
+                AvailableIngredient(name="saffron", verified=False, source="audio"),
+            ]
+        ),
+        "stream_messages": [],
+    }
+    result = await match_rank(state, _fake_runtime(mcp))
+
+    match_call_args = next(args for _, tool, args in mcp.calls if tool == "match_ingredients")
+    assert "saffron" in match_call_args["available_ingredients"]
+    assert result["matched_recipes"][0]["unverified_ingredient_matches"] == ["saffron"]
+
+
+async def test_match_rank_critical_missing_never_outranks_recipe_without() -> None:
+    # Regression case from the real diagnosis run: Coq au vin
+    # (critical_missing=['bacon'], match_score 0.0, but its matched_items
+    # still include the run's expiring "chicken thigh") used to composite
+    # to 0.225 under the old flat freshness/cuisine bonus — beating
+    # Baingan Bharta (critical_missing=[], match_score 0.1111, no bonus)
+    # at 0.14166, even though Baingan Bharta is strictly more cookable.
+    mcp = RecipeAwareMCP(
+        match_ingredients={
+            "coq_au_vin": _match_data(
+                0.0,
+                matched_items=[{"name": "chicken thigh"}, {"name": "butter"}],
+                critical_missing=["bacon"],
+                can_cook=False,
+            ),
+            "baingan_bharta": _match_data(0.1111, matched_items=[{"name": "onion"}], can_cook=False),
+        },
+        check_repetition={
+            "coq_au_vin": _repetition_data(),
+            "baingan_bharta": _repetition_data(),
+        },
+        nutrition={"coq_au_vin": {"totals": {}}, "baingan_bharta": {"totals": {}}},
+    )
+    state: MealSightState = {
+        "recipe_candidates": [_recipe("coq_au_vin"), _recipe("baingan_bharta")],
+        "pantry_items": [{"name": "onion"}, {"name": "butter"}, {"name": "chicken thigh"}],
+        "unified_request": _unified(),
+        "expiring_items": [{"name": "chicken thigh", "days_remaining": 1}],
+        "stream_messages": [],
+    }
+    result = await match_rank(state, _fake_runtime(mcp))
+
+    ranked = {r["recipe_id"]: r for r in result["matched_recipes"]}
+    assert ranked["baingan_bharta"]["composite_score"] > ranked["coq_au_vin"]["composite_score"]
+    assert result["matched_recipes"][0]["recipe_id"] == "baingan_bharta"
+
+
+# --------------------------------------------------------------------
+# reason
+# --------------------------------------------------------------------
+
+
+def _dimension(applies: bool = True, reasoning: str = "because the data says so") -> dict[str, Any]:
+    return {"applies": applies, "reasoning": reasoning}
+
+
+def _decision(chosen_recipe_id: str) -> RecipeDecision:
+    return RecipeDecision(
+        chosen_recipe_id=chosen_recipe_id,
+        ingredient_match_reasoning=_dimension(),  # type: ignore[arg-type]
+        freshness_reasoning=_dimension(),  # type: ignore[arg-type]
+        nutrition_reasoning=_dimension(),  # type: ignore[arg-type]
+        variety_reasoning=_dimension(),  # type: ignore[arg-type]
+        context_reasoning=_dimension(),  # type: ignore[arg-type]
+        taste_reasoning=_dimension(),  # type: ignore[arg-type]
+        overall_summary="A good pick given what's on hand.",
+    )
+
+
+class FakeProvider:
+    def __init__(self, decision: RecipeDecision) -> None:
+        self._decision = decision
+
+    async def complete_json(
+        self, prompt: str, schema: type[BaseModel], model_id: str, **kwargs: object
+    ) -> Any:
+        return self._decision
+
+
+async def test_reason_falls_back_when_model_returns_invalid_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(reason_module, "get_text_provider", lambda: FakeProvider(_decision("nonexistent")))
+
+    state: MealSightState = {
+        "unified_request": _unified(),
+        "matched_recipes": [
+            {
+                "recipe_id": "top",
+                "name": "Top Recipe",
+                "cuisine": "italian",
+                "cook_time_minutes": 20,
+                "match_score": 0.9,
+                "can_cook": True,
+            },
+            {
+                "recipe_id": "second",
+                "name": "Second",
+                "cuisine": "italian",
+                "cook_time_minutes": 20,
+                "match_score": 0.5,
+                "can_cook": True,
+            },
+        ],
+        "stream_messages": [],
+    }
+    result = await reason(state, _runtime(FakeMCP()))
+
+    assert result["top_recommendation"]["recipe_id"] == "top"
+    assert result["top_recommendation"]["invalid_model_choice"] is True
+
+
+async def test_reason_accepts_a_valid_model_choice(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(reason_module, "get_text_provider", lambda: FakeProvider(_decision("second")))
+
+    state: MealSightState = {
+        "unified_request": _unified(),
+        "matched_recipes": [
+            {
+                "recipe_id": "top",
+                "name": "Top",
+                "cuisine": "italian",
+                "cook_time_minutes": 20,
+                "match_score": 0.9,
+                "can_cook": True,
+            },
+            {
+                "recipe_id": "second",
+                "name": "Second",
+                "cuisine": "italian",
+                "cook_time_minutes": 20,
+                "match_score": 0.5,
+                "can_cook": True,
+            },
+        ],
+        "stream_messages": [],
+    }
+    result = await reason(state, _runtime(FakeMCP()))
+
+    assert result["top_recommendation"]["recipe_id"] == "second"
+    assert result["top_recommendation"]["invalid_model_choice"] is False
+
+
+async def test_reason_handles_no_candidates_without_calling_the_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _exploding_provider() -> Any:
+        raise AssertionError("get_text_provider should not be called when search_exhausted")
+
+    monkeypatch.setattr(reason_module, "get_text_provider", _exploding_provider)
+
+    state: MealSightState = {
+        "search_exhausted": True,
+        "unified_request": _unified(dietary_restrictions=["vegan"]),
+        "stream_messages": [],
+    }
+    result = await reason(state, _runtime(FakeMCP()))
+
+    assert result["top_recommendation"]["available"] is False
+    assert "vegan" in result["top_recommendation"]["explanation"]
+
+
+async def test_reason_explains_instead_of_recommending_when_nothing_cookable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _exploding_provider() -> Any:
+        raise AssertionError("get_text_provider should not be called when nothing is cookable")
+
+    monkeypatch.setattr(reason_module, "get_text_provider", _exploding_provider)
+
+    state: MealSightState = {
+        "unified_request": _unified(),
+        "matched_recipes": [
+            {
+                "recipe_id": "top",
+                "name": "Top Recipe",
+                "cuisine": "italian",
+                "cook_time_minutes": 20,
+                "match_score": 0.3,
+                "can_cook": False,
+                "missing_items": [{"name": "garlic"}, {"name": "tomato"}],
+            },
+            {
+                "recipe_id": "second",
+                "name": "Second",
+                "cuisine": "italian",
+                "cook_time_minutes": 20,
+                "match_score": 0.2,
+                "can_cook": False,
+                "missing_items": [{"name": "basil"}],
+            },
+        ],
+        "stream_messages": [],
+    }
+    result = await reason(state, _runtime(FakeMCP()))
+
+    assert result["top_recommendation"]["available"] is False
+    assert "garlic" in result["top_recommendation"]["explanation"]
+    assert "tomato" in result["top_recommendation"]["explanation"]
+
+
+async def test_reason_prefers_cookable_candidate_over_uncookable_model_choice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(reason_module, "get_text_provider", lambda: FakeProvider(_decision("top")))
+
+    state: MealSightState = {
+        "unified_request": _unified(),
+        "matched_recipes": [
+            {
+                "recipe_id": "top",
+                "name": "Top Recipe",
+                "cuisine": "italian",
+                "cook_time_minutes": 20,
+                "match_score": 0.9,
+                "can_cook": False,
+            },
+            {
+                "recipe_id": "second",
+                "name": "Second",
+                "cuisine": "italian",
+                "cook_time_minutes": 20,
+                "match_score": 0.5,
+                "can_cook": True,
+            },
+        ],
+        "stream_messages": [],
+    }
+    result = await reason(state, _runtime(FakeMCP()))
+
+    assert result["top_recommendation"]["recipe_id"] == "second"
+    assert result["top_recommendation"]["overrode_uncookable_choice"] is True
+    assert result["top_recommendation"]["model_chosen_recipe_id"] == "top"
+
+
+def test_reason_prompt_includes_can_cook_per_candidate() -> None:
+    candidates: list[dict[str, Any]] = [
+        {
+            "recipe_id": "r1",
+            "name": "Cookable Recipe",
+            "cuisine": "italian",
+            "cook_time_minutes": 20,
+            "match_score": 0.8,
+            "can_cook": True,
+        },
+        {
+            "recipe_id": "r2",
+            "name": "Uncookable Recipe",
+            "cuisine": "italian",
+            "cook_time_minutes": 20,
+            "match_score": 0.1,
+            "can_cook": False,
+        },
+    ]
+    prompt = reason_module.build_prompt(_unified(), candidates, [], {}, [], {})
+
+    assert "can_cook: True" in prompt
+    assert "can_cook: False" in prompt
+
+
+async def test_reason_skips_when_terminal() -> None:
+    result = await reason({"terminal": True, "stream_messages": []}, _runtime(FakeMCP()))
+    assert "top_recommendation" not in result
+
+
+def test_reason_prompt_excludes_full_recipe_steps() -> None:
+    candidates: list[dict[str, Any]] = [
+        {
+            "recipe_id": "r1",
+            "name": "Test Recipe",
+            "cuisine": "italian",
+            "cook_time_minutes": 20,
+            "match_score": 0.8,
+            "steps": ["Step 1: preheat the oven to 350F", "Step 2: mix everything together"],
+            "ingredients": ["1 cup flour", "2 eggs"],
+        }
+    ]
+    prompt = reason_module.build_prompt(_unified(), candidates, [], {}, [], {})
+
+    assert "preheat the oven" not in prompt
+    assert "1 cup flour" not in prompt
+    assert "r1" in prompt
+
+
+def test_reason_prompt_token_count_is_reasonable() -> None:
+    candidates: list[dict[str, Any]] = [
+        {
+            "recipe_id": "r1",
+            "name": "Test Recipe",
+            "cuisine": "italian",
+            "cook_time_minutes": 20,
+            "match_score": 0.8,
+        }
+    ]
+    prompt = reason_module.build_prompt(_unified(), candidates, [], {}, [], {})
+    tokens = reason_module.prompt_token_count(prompt)
+    assert tokens > 0
+    assert tokens < 5000

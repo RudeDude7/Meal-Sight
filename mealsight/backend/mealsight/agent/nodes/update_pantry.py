@@ -4,6 +4,13 @@ regardless of whether THIS run's photo produced anything new, since
 the pantry from prior runs still exists and still matters. Skips the
 write when there's nothing to write (no photo, or a photo with nothing
 identified) but never skips the expiring-items check.
+
+Also reads the pantry back via get_pantry, after the write, into
+state["pantry_items"] — the accumulated, persisted inventory (every
+prior run's photo included, not just this run's). match_rank (node 7)
+needs this: matching only against this run's own vision-verified items
+made anything seen in an earlier photo invisible to ranking, even
+though it's still physically in the fridge.
 """
 
 from __future__ import annotations
@@ -61,6 +68,15 @@ async def _check_expiring(runtime: Runtime[AgentContext]) -> tuple[list[dict[str
     return items, [f"[{NODE_NAME}] {len(items)} item(s) expiring soon: {names}."]
 
 
+async def _fetch_pantry_items(runtime: Runtime[AgentContext]) -> tuple[list[dict[str, Any]], list[str]]:
+    result = await runtime.context.mcp.call_tool("pantry_manager", "get_pantry", {})
+    if not (result.success and isinstance(result.data, dict)):
+        return [], [f"[{NODE_NAME}] Couldn't read back the pantry: {result.error or 'unknown error'}."]
+
+    items = result.data.get("items", [])
+    return items, [f"[{NODE_NAME}] Pantry now has {len(items)} item(s) on record."]
+
+
 async def update_pantry(state: MealSightState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     logger.info("node_started", node=NODE_NAME)
 
@@ -80,8 +96,15 @@ async def update_pantry(state: MealSightState, runtime: Runtime[AgentContext]) -
         logger.error("update_pantry_expiring_unexpected_failure", exc_info=True)
         expiring_items, expiring_messages = [], [f"[{NODE_NAME}] Expiring-item check failed unexpectedly."]
 
+    try:
+        pantry_items, pantry_messages = await _fetch_pantry_items(runtime)
+    except Exception:
+        logger.error("update_pantry_read_back_unexpected_failure", exc_info=True)
+        pantry_items, pantry_messages = [], [f"[{NODE_NAME}] Reading back the pantry failed unexpectedly."]
+
     logger.info("node_finished", node=NODE_NAME)
     return {
         "expiring_items": expiring_items,
-        "stream_messages": [*update_messages, *expiring_messages],
+        "pantry_items": pantry_items,
+        "stream_messages": [*update_messages, *expiring_messages, *pantry_messages],
     }

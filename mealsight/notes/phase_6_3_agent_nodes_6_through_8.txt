@@ -1,0 +1,646 @@
+PHASE 6.3 STUDY NOTES: AGENT NODES 6-8 (search_recipes, match_rank,
+reason) — IMPLEMENTATION, LIVE DIAGNOSIS, AND THREE DEFECT FIXES
+=============================================================
+
+This phase replaced the last three MEANINGFULLY-STUBBED graph nodes —
+search_recipes, match_rank, reason (nodes 9-11: generate_output,
+log_learn, present, stay untouched stubs) — with real logic, then, in a
+second round inside the same phase, diagnosed and fixed three real
+defects a live run surfaced in that first implementation. This is the
+first phase where the graph does real recipe search, real deterministic
+ranking, and a real LLM reasoning call, all against live MCP servers
+and live Mistral — and the first phase in this project where "run it
+for real and look closely at the numbers" turned up defects serious
+enough to change the ranking formula and the reasoning node's own
+control flow, not just confirm the design already worked.
+
+Files touched: mealsight/agent/nodes/{search_recipes,match_rank,
+reason,update_pantry}.py, mealsight/agent/state.py, mealsight/agent/
+runner.py (docstring only), backend/tests/test_agent/test_nodes.py.
+Test count: 411 (end of phase 6.2) -> 426 after the first
+implementation round -> 433 after the three defect fixes.
+
+
+1. A FINDING CARRIED OVER FROM RESEARCH, STILL NOT RESOLVED: DIETARY
+   VOCABULARY (HYPHEN VS UNDERSCORE)
+=============================================================
+
+Before writing search_recipes, this phase's own research pass compared
+two vocabularies directly: mealsight.perception.dietary.DIETARY_
+RESTRICTION_VOCABULARY stores every compound restriction HYPHENATED —
+"dairy-free", "gluten-free", "nut-free", "peanut-free", "shellfish-
+free", "soy-free", "egg-free", "low-sodium", "low-carb", "low-fat" (a
+deliberate choice from an earlier phase, matching real eval ground
+truth) — while recipe_engine's own real seeded corpus stores dietary_
+tags UNDERSCORED: a live search_recipes call earlier in this project
+showed real results tagged exactly `["gluten_free", "nut_free"]`.
+mealsight.recipe_engine.search.search_recipes's own matching rule is
+`required_tags.issubset(tags)` — an exact string-set comparison, no
+normalization step anywhere in that function. Passing "gluten-free"
+straight through as a dietary_filter can never match a recipe tagged
+"gluten_free"; the two strings are simply never equal.
+
+This was flagged as the single most important open question before
+writing node 6 — and it was never actually fixed. search_recipes.py's
+real implementation (section 3) passes unified.dietary_restrictions
+into the dietary_filters argument completely unchanged, exactly as
+originally written. The gap survived into every live run this phase
+performed without being caught, for an unglamorous reason: every real
+verification run in this phase used dietary_restrictions containing
+only "vegan" (single-word, no hyphen, unaffected) or, in the
+deliberately-too-tight run, "vegan" plus "gluten-free" — but that run's
+own constraints (5-minute cook time, Ethiopian cuisine) were tight
+enough that search_exhausted came back true regardless, so that run
+could never have distinguished "genuinely no gluten-free-tagged
+Ethiopian recipes under 5 minutes" from "the gluten-free filter itself
+never matched anything, silently, because of the vocabulary mismatch."
+
+Recorded here exactly as this project's own convention requires:
+honestly, as an unresolved, real defect, not quietly patched over
+mid-phase. Every SINGLE-WORD restriction (vegan, vegetarian,
+pescatarian, keto, paleo, halal, kosher) is unaffected, since single
+words don't have a hyphen to mismatch — this only silently breaks
+compound restrictions, which is exactly why it wasn't obvious in this
+phase's own live runs. Fixing it is a small, contained change
+(normalize hyphens to underscores — or vice versa — at the single
+point search_recipes.py builds its dietary_filters argument) that this
+phase did not do, because it wasn't what either the implementation
+task or the diagnosis/fix task actually asked for.
+
+
+2. FILE MAP
+=============================================================
+
+backend/mealsight/agent/nodes/search_recipes.py  (REWRITTEN, 172 lines)
+    Section 3.
+
+backend/mealsight/agent/nodes/match_rank.py  (REWRITTEN, then EDITED
+again for defect 1/2, 309 lines)
+    Sections 4 and 9.1/9.2.
+
+backend/mealsight/agent/nodes/reason.py  (REWRITTEN, then EDITED again
+for defect 3, 392 lines)
+    Sections 5-6 and 9.3.
+
+backend/mealsight/agent/nodes/update_pantry.py  (EDITED — new in this
+phase, not phase 6.2: added the get_pantry read-back)
+    Section 9.1.
+
+backend/mealsight/agent/state.py  (EDITED)
+    Added total_matched: NotRequired[int] and search_exhausted:
+    NotRequired[bool] (section 3) — pantry_items already existed as a
+    declared field since phase 6.2's own state.py, but no node had ever
+    actually populated it until this phase's defect fix (section 9.1).
+
+backend/mealsight/agent/runner.py  (EDITED, docstring only)
+    "nodes 1-5... nodes 6-11 are still plain stubs" corrected to "nodes
+    1-8... nodes 9-11 are still plain stubs" — a small but real
+    accuracy fix; the code itself needed no change since AgentContext
+    was already threaded generically.
+
+backend/tests/test_agent/test_nodes.py  (EDITED — 22 new tests, 433
+total in the whole suite)
+    Section 10.
+
+backend/mealsight/agent/nodes/{generate_output,log_learn,present}.py
+    UNCHANGED — still exactly the phase 6.1 stubs.
+
+
+3. search_recipes: PROGRESSIVE, CUMULATIVE RELAXATION — NEVER TOUCHING
+   DIETARY RESTRICTIONS
+=============================================================
+
+Calls recipe_engine's search_recipes with dietary_filters (unified.
+dietary_restrictions — hard, inviolable, per that tool's own docstring:
+"a recipe missing even one requested tag is excluded outright"),
+max_cook_time (unified.max_cook_time_minutes), cuisine (unified.
+cuisine_preference), and meal_type (state["context_signals"]["meal_
+type"], from get_context/node 5 — not a UnifiedMealRequest field at
+all, sourced separately).
+
+On zero results, relaxation is CUMULATIVE, not four independent
+attempts reset each time: drop cuisine, then (if still empty) raise the
+cook-time ceiling by COOK_TIME_RELAXATION_FACTOR (1.5x, a named
+constant), then (if still empty) drop meal_type — each retry keeps
+every earlier relaxation and adds one more, in that fixed order, and
+each step is SKIPPED (no wasted duplicate call, no misleading "relaxing
+X" message) if that particular filter was never set to begin with.
+dietary_filters is passed unchanged to literally every call in the
+whole function — there is no code path that ever touches it. Each
+relaxation step streams one plain-language message explaining exactly
+what changed and why, so a user watching stream_messages sees the same
+reasoning a person would use.
+
+total_matched is stored alongside recipe_candidates — recipe_engine's
+own count of everything that matched before max_results capped the
+list, letting reason (node 8) say how many recipes were actually
+considered, not just how many are shown. If every relaxation still
+comes back empty, recipe_candidates is left empty and state["search_
+exhausted"] = True, a new state field this phase added specifically so
+reason can produce an honest explanation instead of inventing a
+recommendation from nothing.
+
+
+4. match_rank (FIRST VERSION): A DETERMINISTIC COMPOSITE SCORE THAT
+   NARROWS THE FIELD, NOT THE FINAL DECISION
+=============================================================
+
+For the top TOP_N_CANDIDATES_TO_MATCH (10, a named, documented
+constant) candidates from search_recipes' own order, calls match_
+ingredients — originally against only the VERIFIED subset of unified_
+request.available_ingredients (this run's own photo, never an
+unverified off-camera mention) — see section 9.1 for why that choice
+turned out to be a real defect.
+
+The composite score is deterministic Python, never an LLM judgment,
+built from four named weight constants (originally summing to 1.0):
+INGREDIENT_MATCH_WEIGHT (0.6, the dominant term), FRESHNESS_BONUS_
+WEIGHT (0.15, flat — not scaled by match strength — awarded whenever a
+matched ingredient is also in expiring_items), CUISINE_PREFERENCE_
+WEIGHT (0.15, scaled by the user's own learned cuisine_preferences,
+defaulting to a NEUTRAL_CUISINE_SCORE of 0.5 for an unrated cuisine —
+absence of data isn't evidence of dislike), and REPETITION_PENALTY_
+WEIGHT (0.10, subtracted, from check_repetition's own 0.0-1.0 score).
+check_repetition is only called for the top CHECK_REPETITION_TOP_K (5)
+candidates by preliminary score, and calculate_nutrition only for the
+final top NUTRITION_TOP_K (3) — both narrowing tiers exist purely to
+keep MCP call counts and, eventually, the reasoning prompt's own
+payload small. The module's own docstring says directly what this
+ranking is FOR: narrowing the field, not making the final choice — that
+job belongs to reason (node 8), which can weigh things this node
+can't score numerically (context signals, mood, taste).
+
+All three MCP calls in this node (match_ingredients, check_repetition,
+calculate_nutrition) are fast, local, deterministic Python inside
+recipe_engine/user_intelligence — no LLM anywhere in this node, and
+therefore no rate-limit concern; that constraint applies only to
+reason's own call into REASONING_MODEL.
+
+
+5. reason (FIRST VERSION): A REAL BUG FOUND AND FIXED BEFORE THE FIRST
+   CLEAN RUN — complete_json DOESN'T EMBED THE SCHEMA
+=============================================================
+
+Builds a compact prompt for settings.REASONING_MODEL (mistral-
+medium-2505) out of available ingredients (with freshness flags),
+merged constraints, the top CANDIDATES_IN_PROMPT (5) ranked recipes as
+SUMMARIES (never full steps or ingredient quantities — matching recipe_
+engine's own search_recipes contract), expiring items, user
+preferences, recent meals, and context signals. Calls complete_json
+against a pydantic RecipeDecision schema: chosen_recipe_id plus six
+per-dimension DimensionReasoning objects (ingredient match, freshness,
+nutrition, variety, context, taste), each with its own applies: bool —
+so the model can say a dimension genuinely doesn't apply rather than
+inventing a rationale for it.
+
+The first real live run against this design failed its own reasoning
+step outright: mistral.py's own complete_json validation error showed
+the model returned `{"recipe_id": None, "reason...": ...}` — a flat,
+differently-named shape, not the nested RecipeDecision schema at all,
+and the repair attempt (complete_json's own one-shot "here's what was
+wrong, try again" retry) failed too. Reading mealsight.providers.
+mistral.py's own complete_json directly explained why: it appends only
+a generic "respond with valid JSON only, matching the required schema"
+instruction to the prompt — it does NOT serialize or embed the actual
+pydantic schema anywhere in the request. Every other real caller in
+this codebase (mealsight.perception.prompt.VISION_PERCEPTION_PROMPT,
+build_extraction_prompt) already knows this and spells out the exact
+JSON shape, key by key, directly in its own prompt text — reason's
+first draft was the one caller in the whole project that assumed
+complete_json would somehow communicate the schema on its own. Fixed by
+adding an explicit JSON-shape block (every key, its type, which ones
+are objects with applies/reasoning) to SYSTEM_PROMPT, mirroring the
+existing convention exactly. Re-run immediately after the fix: the
+model returned a fully valid, well-justified decision on the first
+attempt, no repair needed.
+
+The chosen_recipe_id is guarded against an invalid answer regardless:
+if it isn't one of the ids actually offered, this node falls back to
+the top-ranked candidate and records that the model's choice was
+invalid, rather than trusting an unverifiable string. If node 6 found
+nothing at all (search_exhausted), no LLM call is made — there's
+nothing to choose between — and this node produces a plain explanation
+of what was tried instead.
+
+
+6. FIRST-ROUND LIVE VERIFICATION: WORKED, BUT SURFACED TWO MORE
+   PROBLEMS THE TASK ITSELF DIDN'T ASK ABOUT YET
+=============================================================
+
+ruff/mypy --strict/pytest all clean (426 tests). A full real run
+(photo_01.jpg + memo_13.mp3 + a typed "twenty minutes, vegan, Mexican
+food" constraint) relaxed correctly (dropped cuisine, raised cook time
+20->30, dropped meal_type, found 10), ranked ten real candidates
+topping out at match_score 0.2 (Ratatouille, Yaki Udon), and reason
+recommended Yaki Udon with a clean, valid structured decision. A
+deliberately-too-tight run correctly exhausted every relaxation and
+explained rather than recommended.
+
+Nothing here was WRONG per the task as given — but the user's own
+follow-up question ("why are match scores so low, best candidate 0.2,
+several 0.0") is what actually surfaced the three defects section 8-9
+cover. This phase's own real lesson: a clean pass of ruff/mypy/pytest
+and even a clean live run are necessary, not sufficient — the numbers a
+live run actually produces can still be quietly wrong even when nothing
+crashes and every test passes.
+
+
+7. THE DIAGNOSIS (a separate, read-only investigation before any fix)
+=============================================================
+
+Before changing anything, a full diagnostic pass compared the top-5
+ranked recipes' own required ingredients (read directly from data/
+recipes.db's raw JSON) against the real pantry (data/pantry.db, 20
+items) side by side, using mealsight.matching's own normalize_
+ingredient + resolve_canonical directly against real data — the same
+functions match_recipe_by_id uses internally, called by hand here for
+inspection rather than trusting only the aggregate match_score.
+
+Finding 1 (normalization/synonyms): correct, not the bug. "Aubergine"
+resolved to "eggplant", "Courgettes" to "zucchini", "Spring Onions" to
+"green onion" (a real synonyms table entry), "Caster Sugar" to "sugar"
+— every one of these worked exactly as the matcher intends. The misses
+were overwhelmingly genuine absences: this pantry simply has no garlic,
+tomato, lentils, noodles, or most spices in it, under any synonym.
+
+Finding 2 (one real, different-shaped bug): exactly one ingredient —
+Yaki Udon's "Spring Onions" -> canonical "green onion" — existed in the
+real, persisted pantry.db but was invisible to the matcher, because
+match_rank only ever passed unified_request.available_ingredients
+(verified=True, i.e. THIS RUN'S own photo) to match_ingredients, never
+state["pantry_items"] (which, at diagnosis time, no node had ever
+populated at all — get_pantry was never called by anything). Re-running
+the matcher with the full 20-item pantry.db raised Yaki Udon 0.2 -> 0.3.
+This is not the matcher-vs-vision canonical-form mismatch bug pattern
+from phases 2.3/3.2/5.1 (the strings compared correctly once given the
+right input) — it's a data-SCOPE bug: the wrong subset of a
+correctly-behaving system was being fed into it. This became Defect 1.
+
+Finding 3 (a real, demonstrable ranking defect, built from real data,
+not hypothetical algebra): a recipe missing a CRITICAL ingredient has
+its match_score clamped toward 0 by mealsight.matching's own critical_
+missing_penalty, but its OWN matched_items survive that clamp — so a
+totally uncookable recipe can still earn the full flat freshness bonus.
+Concrete proof, using this exact run's own real pantry and expiring
+data: Coq au vin (critical_missing=['bacon'], match_score clamped to
+0.0, can_cook=False) still matched 'chicken thigh' — this run's real
+expiring ingredient — and composited to 0.225 under the ORIGINAL
+formula, beating Baingan Bharta's real observed 0.14166 (match_score
+0.1111, no critical ingredient missing, strictly more cookable). This
+became Defect 2.
+
+Finding 4: the recipe reason actually recommended, Yaki Udon at
+match_score 0.2, had can_cook=False (settings.min_ingredient_match is
+0.5 — 0.2 doesn't clear it) — the agent's top pick was, by the
+matcher's own definition, not something the user could actually cook.
+This became Defect 3.
+
+
+8. THREE DEFECTS FIXED
+=============================================================
+
+8.1 DEFECT 1 — RANKING NEVER SAW THE PERSISTED PANTRY
+-------------------------------------------------------------
+update_pantry (node 4) now calls get_pantry (a new _fetch_pantry_items
+helper, its own try/except, same "never raise" contract as every other
+step in this node) immediately after its existing update_pantry/flag_
+expiring calls, and writes the result to state["pantry_items"] — the
+field state.py already declared since phase 6.2 but that no node had
+ever actually populated.
+
+match_rank's own ingredient source changed from "verified vision items
+only" to a new _pantry_and_unverified_names helper: the accumulated
+pantry (state["pantry_items"]) is now the PRIMARY source, with anything
+only ever mentioned in speech/text (never seen, so never written to the
+pantry) still appended as usable — the task's own explicit instruction
+to "keep the verified/unverified distinction available" rather than
+silently dropping it. That distinction survives per matched entry as
+unverified_ingredient_matches: which of THIS recipe's matched
+ingredients came only from an unverified mention, not the real pantry —
+computed with normalize_ingredient (a pure, local, synchronous
+function; no synonym-table DB lookup needed for this auxiliary,
+informational field, unlike the real matching call itself).
+
+8.2 DEFECT 2 — CRITICAL_MISSING_PENALTY (a new, fifth weight constant)
+-------------------------------------------------------------
+The task itself offered two acceptable fixes: a hard penalty when
+can_cook is False, or gating the freshness/cuisine bonus terms behind a
+positive match score. Both were tried against the real Coq au vin /
+Baingan Bharta regression pair before picking one, and gating on
+can_cook specifically turned out NOT to work: Baingan Bharta is ALSO
+can_cook=False (0.1111 is under settings.min_ingredient_match's 0.5
+threshold) — a flat can_cook-based penalty applied equally to both
+recipes leaves their RELATIVE order exactly as broken as before, since
+the freshness bonus still tips Coq au vin above Baingan Bharta even
+after an identical penalty is subtracted from both. The distinguishing
+fact between them isn't can_cook (both False) — it's specifically
+whether critical_missing is non-empty. CRITICAL_MISSING_PENALTY (1.0,
+deliberately larger than the maximum possible combined sum of every
+other positive term: 0.6 + 0.15 + 0.15 = 0.9) is subtracted whenever
+critical_missing is non-empty, applied inside _composite_score itself
+(now taking a fifth parameter, has_critical_missing, threaded through
+both the initial scoring pass and the post-repetition re-scoring pass).
+Verified directly against the real numbers: Coq au vin composites to
+-0.775 now (0.225 - 1.0); Baingan Bharta stays at 0.14166 (no penalty
+applies) — the invariant ("a recipe missing a critical ingredient must
+never outrank one that isn't") now holds by construction, not by
+coincidence of these particular numbers.
+
+8.3 DEFECT 3 — THE PROMPT WAS BLIND TO COOKABILITY, AND NOTHING STOPPED
+     AN UNCOOKABLE RECOMMENDATION
+-------------------------------------------------------------
+Three separate changes, each addressing a different point where an
+uncookable recipe could still end up being presented as the
+recommendation:
+
+  - _format_recipe now shows can_cook and a missing-ingredient count
+    for every candidate in the prompt itself, not just match_score —
+    SYSTEM_PROMPT now explicitly instructs the model to strongly prefer
+    a can_cook=true candidate "even if [an uncookable one] ranks higher
+    in the list."
+  - A new deterministic pre-check, before any LLM call: if NONE of the
+    candidates shown have can_cook=True, reason skips the LLM
+    entirely and returns a plain explanation naming the closest
+    candidate's own missing ingredients as an actual shopping list —
+    "buy those, or relax constraints" — rather than ever asking a model
+    to pick among recipes none of which are really makeable.
+  - A code-level guard after the LLM call returns (the same "never
+    trust an unverifiable model answer" pattern the existing invalid-id
+    guard already used): if the model's own chosen recipe has can_
+    cook=False while a cookable alternative exists among the SAME
+    candidates shown, this node overrides to the top-ranked cookable
+    one and records both the override and the model's original
+    (overridden) choice — a prompt instruction is a request, not a
+    guarantee, and match_rank's own composite score can still rank an
+    uncookable recipe first in some cases even after Defect 2's fix
+    (e.g. two recipes both missing nothing critical, one merely scoring
+    higher than settings.min_ingredient_match's own 0.5 threshold and
+    one not) — so this guard is deliberately independent of whatever
+    the LLM says.
+
+
+9. THE TESTS
+=============================================================
+
+22 new tests, three new/expanded test-double helpers.
+
+SequencedMCP (new): unlike the existing FakeMCP (one fixed response per
+(server, tool) key, forever), SequencedMCP holds a QUEUE of responses
+per key, consumed in call order — needed because search_recipes calls
+the SAME tool multiple times across a relaxation sequence and each call
+must return a genuinely different result. Used for all four search_
+recipes tests: succeeds on the first try (asserts exactly 1 call, no
+relaxation messages); relaxes in the documented order and never touches
+dietary_filters (asserts all 4 calls' own arguments directly, not just
+the final outcome); zero results even after full relaxation marks
+search_exhausted and still shows dietary_filters unchanged across every
+attempt; terminal skip.
+
+RecipeAwareMCP (new): responses keyed by the actual recipe_id inside
+each call's own arguments, not just (server, tool) — needed because
+match_rank calls match_ingredients/check_repetition/calculate_nutrition
+once per candidate and different candidates need different, realistic
+responses. Used for: composite-score ordering on constructed inputs;
+expiring-ingredient recipes ranking above an otherwise-equivalent one;
+nutrition called for exactly the top 3, not all 10 (asserted directly
+against the exact set of recipe_ids calculate_nutrition was invoked
+with); terminal/no-candidates skips; a new test proving pantry_items
+(not just vision-verified names) reaches match_ingredients's own
+arguments (green onion, present only in pantry_items in the fixture);
+a new test proving an unverified-only mention still reaches match_
+ingredients and is tracked as unverified_ingredient_matches on its own
+scored entry; and the Defect 2 regression test itself — Coq au vin
+(critical_missing=['bacon'], matches the run's own expiring 'chicken
+thigh') composited BELOW Baingan Bharta (no critical ingredient
+missing), reproducing the real diagnosis numbers as a fixture rather
+than approximating them.
+
+reason tests: the existing invalid-id and valid-choice tests both
+needed a small, honest update — they'd never set can_cook on their
+fixture recipes at all, so after Defect 3's fix they immediately (and
+correctly) hit the new "nothing cookable" path instead of exercising
+what they meant to test; fixed by giving both fixture recipes can_
+cook: True, which isn't what either test is actually about. Three new
+tests: nothing cookable produces an explanation naming the real missing
+ingredients, without ever calling get_text_provider (a provider whose
+own complete_json raises AssertionError if invoked at all, proving the
+short-circuit is real and not just usually-taken); a cookable
+alternative gets substituted in when the model's own valid choice isn't
+cookable, with both overrode_uncookable_choice and the model's original
+model_chosen_recipe_id recorded; and build_prompt's own output contains
+"can_cook: True"/"can_cook: False" literally.
+
+update_pantry: one new test confirms get_pantry is actually called and
+its own "items" list reaches state["pantry_items"] unchanged.
+
+
+10. VERIFICATION: TWO ROUNDS, BOTH LIVE, BOTH AGAINST REAL SERVERS
+=============================================================
+
+Round 1 (first implementation): ruff/mypy --strict/pytest clean (426
+tests). Full live run relaxed correctly and produced a valid reasoning
+decision (after the complete_json schema-embedding fix, section 5) —
+but topped out at match_score 0.2 and recommended a can_cook=False
+recipe, which is exactly what triggered the user's own diagnosis
+request.
+
+Round 2 (after the three defect fixes): ruff/mypy --strict/pytest clean
+again (433 tests, no regressions). The SAME real scenario re-run showed
+update_pantry now logging "Pantry now has 20 item(s) on record" and
+Yaki Udon's own match_score rising from 0.2 to 0.3 — the exact gain the
+diagnosis itself predicted, confirmed empirically, not just by
+inspection. Every critical-missing recipe in the real top-10 (Corba,
+French Lentils, Kidney Bean Curry, Tahini Lentils, Vegetarian Chilli)
+now composites to -0.925, strictly below every non-critical-missing
+recipe including ones tied at the same 0.0 raw match_score. Since NO
+real candidate in this particular run had can_cook=True, reason made
+NO LLM call at all and returned a genuine shopping list ("missing:
+udon noodle, sesame seed oil, cabbage, shiitake mushroom, mirin, soy
+sauce, worcestershire sauce") instead of a recommendation — the
+deliberately-too-tight run's own relaxation messages and search_
+exhausted behavior were unaffected by any of this phase's changes, as
+expected.
+
+A third, separate live run confirmed the positive case, not just the
+negative one: with the real pantry already fully covering a specific
+recipe (Peanut Butter Cookies, id 52958 — peanut butter, sugar, egg,
+all genuinely on hand, no db mutation needed), match_rank reported
+match_score 1.0/can_cook true/composite 0.675 for it against a real
+uncookable distractor (Yaki Udon, composite 0.255), and reason's own
+real Mistral call chose it correctly on the merits — "chosen because it
+can be made with all available ingredients and has a perfect ingredient
+match score" — without needing the override guard to fire at all,
+since the model itself preferred the cookable one unprompted-by-force.
+
+
+11. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+Cumulative relaxation versus four independent, reset-each-time attempts
+    "Progressively relax" was read as a genuine ladder — each retry
+    keeps every earlier relaxation and adds one more — rather than four
+    separate one-off retries from the original filters. A reset-each-
+    attempt design was considered and rejected: it would mean, e.g., the
+    cook-time-raised attempt would ALSO have to re-include the already-
+    rejected cuisine filter, which contradicts what "progressively"
+    actually means and would need its own separate bookkeeping for no
+    real benefit.
+
+can_cook-gated penalty versus critical_missing-gated penalty (Defect 2)
+    Covered in section 8.2 in full. The task explicitly offered both as
+    acceptable; can_cook was tried first (it's the more obvious reading
+    of "hard penalty when can_cook is False") and rejected only after
+    checking it against the actual regression pair and finding it
+    doesn't distinguish two recipes that are BOTH can_cook=False for
+    different reasons — critical_missing directly is the only gate that
+    reproduces the required ordering.
+
+A code-level cookability guard in reason versus trusting the prompt
+instruction alone (Defect 3)
+    The prompt instruction to prefer a cookable candidate was added
+    regardless, since a well-instructed model is still worth having —
+    but a deterministic guard was added on top rather than relying on
+    it alone, following this node's own pre-existing pattern (the
+    invalid-recipe-id guard already established the same principle: an
+    LLM's own answer is checked against ground truth this node already
+    has, never trusted blindly, even after being explicitly asked to
+    behave a certain way).
+
+Fixing the dietary vocabulary mismatch now, since it was found again
+while writing these notes, versus leaving it recorded
+    Rejected for this phase specifically because neither the
+    implementation task nor the diagnosis/fix task actually asked for
+    it — the diagnosis task asked to report on ingredient MATCHING
+    specifically, and the fix task named three specific, different
+    defects to correct. Silently fixing a fourth, unrelated thing while
+    writing notes about the other three would blur what this phase
+    actually did and didn't cover. Recorded honestly instead (section
+    1), the same way this project has always handled a real, found gap
+    that wasn't explicitly in scope to fix yet.
+
+
+12. GLOSSARY
+=============================================================
+
+progressive (cumulative) relaxation
+    search_recipes' own retry ladder: each retry keeps every earlier
+    relaxation and adds exactly one more, in a fixed order (cuisine,
+    then cook time, then meal type), never touching dietary_filters.
+
+search_exhausted
+    A new MealSightState field (this phase): True only when every
+    relaxation step still came back empty — the signal reason uses to
+    produce an explanation instead of a recommendation.
+
+composite score / narrowing versus deciding
+    match_rank's own deterministic, Python-computed pre-ranking score —
+    exists to narrow recipe_candidates down to a short list; reason
+    (node 8) makes the actual final choice among the top few, using
+    signals (context, mood, taste) the composite score can't weigh
+    numerically.
+
+CRITICAL_MISSING_PENALTY
+    The fifth composite-score weight this phase added: a flat 1.0
+    subtracted whenever a recipe's own critical_missing list is
+    non-empty — large enough to guarantee it always ranks below any
+    recipe that isn't missing a critical ingredient, regardless of
+    freshness/cuisine/repetition bonuses.
+
+unverified_ingredient_matches
+    Per scored recipe entry (match_rank): which of ITS OWN matched
+    ingredients came only from an unverified (speech/text-only, never
+    seen) mention, not the real persisted pantry — preserves the
+    verified/unverified distinction the task explicitly asked to keep,
+    even though the persisted pantry is now the primary match source.
+
+overrode_uncookable_choice / model_chosen_recipe_id
+    New top_recommendation fields (reason, Defect 3): set only when the
+    model's own valid, schema-conforming choice was itself not
+    cookable and this node substituted the top-ranked cookable
+    alternative instead — model_chosen_recipe_id preserves what the
+    model actually said, for anyone auditing the override later.
+
+
+13. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: You found a dietary-vocabulary mismatch (hyphenated vs underscored)
+during research, before writing node 6, and your own notes say it's
+still not fixed. Why ship it unresolved instead of just fixing it since
+you already knew about it?
+
+    Because the task in front of me at the time was "implement nodes
+    6-8, report existing signatures before writing" — I flagged the
+    mismatch as a real finding worth reporting, the same way I'd flag
+    any other discovered issue, but fixing it wasn't what was actually
+    asked, and every real verification run I had access to used dietary
+    restrictions that happened not to exercise the broken path clearly
+    (single-word restrictions, or a run whose other constraints were
+    tight enough that "exhausted" was the right outcome either way).
+    When the later diagnosis and fix tasks came in, they each named
+    specific defects to investigate or fix, and this wasn't one of
+    them. The honest thing was to keep reporting it clearly in the
+    notes rather than either quietly fixing scope I wasn't asked to
+    touch, or letting a documented finding quietly disappear once it
+    stopped being the newest thing I'd found.
+
+Q: Your diagnosis found that a critical-missing recipe could outrank a
+cookable one. You had two options the task itself offered. Why did the
+first one you tried not work, and how did you know?
+
+    I didn't just pick the option that sounded more natural and move
+    on — I checked BOTH candidate fixes against the actual regression
+    pair (Coq au vin vs Baingan Bharta) using their real observed
+    numbers before committing to either. Gating the freshness/cuisine
+    bonus behind can_cook seemed like the more direct reading of "hard
+    penalty when can_cook is False," but both of those specific recipes
+    are can_cook=False — Baingan Bharta just for being under the 0.5
+    match threshold, Coq au vin for missing a critical ingredient. A
+    flat penalty applied identically to both leaves their relative
+    order completely unchanged, since the freshness bonus still tips
+    Coq au vin above Baingan Bharta after equal penalties are
+    subtracted from each. Once I ran that arithmetic through with the
+    real numbers, it was obvious the gate had to be critical_missing
+    specifically — the actual distinguishing fact between the two
+    recipes — not the coarser can_cook flag that happened to be true
+    for both of them for unrelated reasons.
+
+Q: Your reason node now has a code-level guard that can override the
+LLM's own choice. Doesn't that undercut the point of asking an LLM to
+reason about it at all?
+
+    No — it's the same principle the invalid-recipe-id guard already
+    established before this phase's diagnosis even started: an LLM's
+    output gets checked against ground truth this node already has
+    access to, not trusted as automatically correct just because it
+    came back schema-valid. I still improved the prompt itself first —
+    every candidate now shows can_cook and its missing-ingredient count,
+    and the system prompt explicitly says to prefer a cookable one even
+    if it ranks lower — because a better-informed model is still worth
+    having, and in my own live verification the model DID pick the
+    cookable recipe correctly on its own, unprompted-by-force, once it
+    could actually see can_cook in the data. The guard exists for the
+    case the prompt instruction doesn't cover: match_rank's own
+    composite score can still legitimately put an uncookable recipe
+    first even after the Defect 2 fix (two recipes that both merely
+    fall under the 0.5 match threshold, neither one missing a critical
+    ingredient) — an instruction is a request, and this node's whole
+    existing design philosophy is not to let a request stand in for a
+    guarantee when a cheap, deterministic check is available instead.
+
+Q: Walk me through how you verified Defect 1 was actually fixed, not
+just that the code looked right.
+
+    I re-ran the exact same real scenario (same photo, same audio, same
+    typed constraint) that produced the original 0.2 ceiling, and
+    checked for the specific, predicted number, not just "no crash."
+    The diagnosis had already computed, by hand, against the real
+    pantry.db, that adding green onion (present in the persisted
+    pantry, absent from that one run's own vision-verified subset)
+    would raise Yaki Udon's match_score from 0.2 to exactly 0.3. The
+    re-run's own real stream messages showed "Pantry now has 20 item(s)
+    on record" — confirming get_pantry actually ran — and the ranked
+    output showed Yaki Udon at exactly 0.3, matching the diagnosis's
+    own prediction precisely rather than just moving in a plausible
+    direction. That's a stronger check than reading the diff and
+    agreeing it looks correct.

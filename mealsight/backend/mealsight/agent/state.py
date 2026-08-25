@@ -43,6 +43,15 @@ class MealSightState(TypedDict):
     recipe_candidates: NotRequired[list[dict[str, Any]]]
     matched_recipes: NotRequired[list[dict[str, Any]]]
 
+    # Set by search_recipes: total_matched is recipe_engine's own count
+    # (which can exceed len(recipe_candidates) once max_results caps the
+    # list), and search_exhausted is True only when every relaxation
+    # step (see search_recipes's own docstring) still came back empty —
+    # reason checks this to produce an explanation instead of inventing
+    # a recommendation.
+    total_matched: NotRequired[int]
+    search_exhausted: NotRequired[bool]
+
     # --- recommendation: what the graph is actually building toward ---
     top_recommendation: NotRequired[dict[str, Any]]
     scaled_recipe: NotRequired[dict[str, Any]]

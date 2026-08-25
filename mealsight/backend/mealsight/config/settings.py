@@ -103,6 +103,25 @@ class Settings(BaseSettings):
     max_audio_duration_seconds: int = 300
     max_text_length: int = 2000
 
+    # --- API (mealsight.api) -----------------------------------------------------
+    # A per-IP submission budget for POST /api/recommend specifically — a
+    # "submission" starts a real agent run (several LLM calls plus a
+    # cascade of MCP tool calls), not a cheap read, so this is
+    # deliberately much tighter than a general request-rate limit.
+    max_submissions_per_minute: int = 10
+    # Local dev origins plus a placeholder Vercel domain — override via
+    # the CORS_ALLOWED_ORIGINS env var (a JSON array string, e.g.
+    # '["https://real-app.vercel.app"]' — pydantic-settings' own default
+    # parsing for a list field) once the real deployed frontend origin
+    # is known.
+    cors_allowed_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "https://mealsight.vercel.app",
+        ]
+    )
+
     # --- Retry policy -----------------------------------------------------------
     llm_max_retries: int = 3
     llm_retry_backoff: list[int] = Field(default_factory=lambda: [2, 5, 10])

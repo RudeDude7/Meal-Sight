@@ -1,0 +1,473 @@
+PHASE 7.1 STUDY NOTES: THE FASTAPI REST LAYER (mealsight/api/) —
+PERSISTENT MCP CONNECTIONS, ELEVEN ENDPOINTS, NO WEBSOCKETS YET
+=============================================================
+
+This phase built the first HTTP surface for MealSight: a real FastAPI
+application in backend/mealsight/api/, REST endpoints only (WebSocket
+streaming is explicitly the next session's job, not started here). It's
+also the first phase whose main change isn't inside the agent graph at
+all — the graph itself (all eleven nodes, phases 6.1-6.4) is unchanged;
+what this phase actually rebuilt is HOW the graph's own MCPClientManager
+gets created and how long it lives, because the API's whole reason to
+exist — many requests over a long-running process — is fundamentally
+incompatible with "start three subprocesses and tear them down every
+single time," which is what every prior phase's own run_recommendation
+did.
+
+Files added: mealsight/api/ (app, dependencies, errors, health,
+mcp_proxy, rate_limit, sessions, routers/{grocery,health,history,pantry,
+profile,recipes,recommend}.py — 13 files, ~900 lines), backend/tests/
+test_api/test_app.py (17 tests). Files edited: mealsight/agent/
+runner.py, mealsight/config/settings.py, backend/pyproject.toml (added
+fastapi, uvicorn, python-multipart). Test count: 445 (end of phase 6.4)
+-> 462.
+
+
+1. THE KEY CHANGE: MCPClientManager STOPS BEING PER-RECOMMENDATION
+=============================================================
+Every phase since 6.1 had MCPClientManager start and stop inside
+run_recommendation's own `async with MCPClientManager()` block — three
+subprocess launches plus a three-way health check, every single run.
+Phase 6.4's own live verification had already measured the real cost of
+this directly: roughly 13 of a real 19.4-second recommendation was pure
+subprocess-startup overhead, not agent work.
+
+run_recommendation was EXTENDED, not replaced: a new keyword-only
+`manager: MCPClientManager | None = None` parameter. Omitted (every
+script, every existing test, unchanged), the function starts and tears
+down its own manager exactly as it always has — the standalone path
+phase 6's own scripts and tests depend on keeps working with zero
+changes to any of them. Supplied (mealsight.api's own lifespan does
+this), the caller-provided manager is used directly and NEVER started
+or stopped by run_recommendation itself — its lifetime is by definition
+longer than any one recommendation, so start/stop responsibility stays
+entirely with whoever created it.
+
+A second small addition alongside `manager`: an optional `trace_id`
+parameter. Without it, run_recommendation generates a fresh uuid4 exactly
+as before. mealsight.api's own recommend router passes its session_id
+here specifically — the exact id a client sees in the 202 response is
+the same id that shows up in every log line for that run, not two
+independently-generated identifiers a caller would otherwise have to
+cross-reference by hand.
+
+
+2. CONCURRENCY: A REAL DECISION, VERIFIED BEFORE MADE, NOT ASSUMED
+=============================================================
+The task itself asked directly: can concurrent recommendations safely
+share one MCPClientManager, holding stdio sessions to three
+subprocesses, or does that need a lock? This was answered empirically,
+not by reading documentation and guessing: 20 concurrent call_tool
+invocations were fired at once against a single real MCPClientManager
+(asyncio.gather, all requesting the same recipe_id from recipe_engine)
+and every one of them returned the correct, correctly-matched data —
+no cross-talk, no id confusion. Combined with a second, independent
+fact — every MCP tool in this project is itself stateless per call,
+reading/writing its own SQLite database fresh each time, with no
+server-side per-connection state a second concurrent caller could ever
+corrupt — the decision was: NO lock. Recommendations are not serialized
+behind the shared manager. Locking here would only have traded away
+real concurrency for a safety property this system already has for
+other, more fundamental reasons (JSON-RPC id-based multiplexing at the
+transport layer, statelessness at the application layer) — adding a
+lock on top would be defending against a threat that doesn't exist,
+at the cost of throughput that does matter.
+
+
+3. THE ELEVEN ENDPOINTS
+=============================================================
+POST /api/recommend — multipart (optional image, audio, text). Reuses
+mealsight.perception.validation's own validate_image/validate_audio/
+validate_text DIRECTLY — the identical checks perceive (agent node 2)
+already runs — rather than a second, parallel rule set that could
+quietly drift from the first. Rejects on Content-Length BEFORE calling
+request.form() at all for anything over MAX_REQUEST_BYTES, so a
+genuinely oversized upload never gets buffered into memory just to be
+rejected afterward. Zero modalities (nothing usable after validation) is
+400, not silently accepted. A real per-IP submission rate limit
+(settings.max_submissions_per_minute, a NEW setting — see section 6)
+gates this endpoint specifically, not general traffic. Launches the
+actual agent run via asyncio.create_task (not FastAPI's BackgroundTasks,
+which ties a task's lifetime to the response's own finalization in a way
+that doesn't fit a run lasting many seconds past the response already
+having been sent) tracked in an in-memory SessionStore, and returns 202
+with {session_id, status: "pending", websocket_url} — the URL the next
+session's WebSocket work will actually serve, even though nothing
+listens there yet.
+
+GET /api/recommend/{session_id} — polls the SessionStore: pending,
+running, complete (with result), or failed (with error) — what makes
+this whole API usable today, before any WebSocket exists at all.
+
+GET/PATCH /api/pantry, DELETE /api/pantry/{item_id} — proxy pantry_
+manager's get_pantry/update_pantry/remove_items. DELETE by item_id
+needed two real calls, not one: remove_items only ever addresses an
+item by NAME plus a quantity to remove, never by row id, so this
+endpoint resolves the id via get_pantry first, then calls remove_items
+with that item's own full current quantity to delete the row outright.
+
+GET /api/recipes/{id}, GET /api/recipes/search — proxy recipe_engine's
+get_recipe/search_recipes. /search registered before /{recipe_id} in
+the router (FastAPI matches route order), so a literal "search" path
+segment is never captured as a recipe id.
+
+GET /api/history — proxies user_intelligence's get_meal_history.
+
+GET/PATCH /api/profile — proxy get_user_profile/update_preferences.
+
+GET /api/grocery-list — proxies get_grocery_list.
+
+Every one of these is a thin translation layer over
+runtime.context.mcp-equivalent access via the shared manager — "no
+direct database access from the API layer" is satisfied structurally:
+there is no import of mealsight.pantry/recipe_engine/user_intelligence
+anywhere in mealsight.api at all, only mealsight.agent.mcp_client.
+
+
+4. mcp_proxy.unwrap_mcp_result: ONE TRANSLATION LAYER, TWO FAILURE
+   KINDS
+=============================================================
+Every proxy router calls the identical unwrap_mcp_result(ToolCallResult)
+helper rather than each duplicating its own error-shape knowledge.
+Two genuinely different failure layers get translated differently:
+ToolCallResult.success=False is a TRANSPORT failure (the call never
+completed, even after MCPClientManager's own built-in retry) — this
+API's own fault for depending on something that didn't respond, so it's
+502. result.data itself being one of mealsight.mcp_servers.errors'
+structured shapes (not_found/validation_error/internal_error) is a
+SUCCESSFUL call reporting a business-level problem: not_found becomes
+404, validation_error becomes 400 (the caller's own fault, fixable by
+sending different input), internal_error becomes 502 (the tool ran but
+failed internally — still not something the caller did wrong).
+
+
+5. GET /health: THREE INDEPENDENT CHECKS, ONE CACHED
+=============================================================
+MCP servers: manager.list_tool_inventory() (an existing MCPClientManager
+method, not new) compared against EXPECTED_TOOLS — reports each
+server's own tool count and up/down status, down meaning genuinely
+missing an expected tool, not just "the call was slow." LLM providers:
+a REAL reachability probe (GET against Mistral's and Groq's own real
+/models endpoints — cheap, no completion, no token cost) rather than
+merely checking that an API key is configured, since a present secret
+says nothing about whether the actual account/network path is currently
+working. Recipe database: population is checked THROUGH recipe_engine's
+own search_recipes (max_results=1, checking total_matched > 0) rather
+than any direct query — the same "no direct database access" rule the
+proxy routers follow, applied to the health check too.
+
+Provider reachability is cached for HEALTH_CACHE_SECONDS (30s), keyed
+per provider, specifically so a monitoring tool polling /health every
+few seconds doesn't turn into a steady drip of real outbound calls to
+Mistral/Groq for a signal that doesn't change that fast. Returns 503
+(not 200 with a "degraded" body a caller has to remember to check) the
+moment anything is down, so a caller can branch on status code alone if
+that's all it wants to do.
+
+A real test-isolation bug found and fixed while writing tests for this:
+the reachability cache is a module-level dict, which is exactly right
+for a real running process (shared across every real request) but means
+it's ALSO shared across every test in the same pytest process — an
+earlier test's cached "up" silently made a later test's "down" scenario
+untestable, since the cache short-circuited before ever calling the
+fake, misconfigured http client. Fixed with reset_provider_cache(), a
+small test-only accessor, called via an autouse fixture in test_app.py.
+
+
+6. VALIDATION, LIMITS, AND A SETTING THAT DIDN'T EXIST YET
+=============================================================
+The task's own framing said "settings has... max_submissions_per_minute"
+— reading settings.py directly, before writing anything, showed this
+was not actually true: the field didn't exist. Reported as a finding,
+not silently assumed or silently invented without a trace: added
+max_submissions_per_minute (default 10) to settings.py's own existing
+"Input limits" section, alongside a new cors_allowed_origins list (local
+dev origins plus a placeholder Vercel domain, overridable via env var)
+needed for section 8's CORS requirement — both small, clearly-scoped
+additions to an existing settings pattern, not a parallel config system.
+
+The rate limiter itself (SubmissionRateLimiter) is a plain in-process,
+per-IP sliding window over a dict — explicitly NOT backed by Redis or
+any external store, since this API runs as one process holding one
+long-lived MCPClientManager; an in-memory limiter is the honest,
+right-sized choice for the actual current deployment shape, not a
+placeholder for something more distributed nothing here needs yet
+(mealsight.api.sessions' own in-memory SessionStore makes the identical
+trade-off, for the identical reason, documented the same way).
+
+
+7. ERRORS: ONE ENVELOPE, NEVER A TRACEBACK
+=============================================================
+Every error response — an explicitly-raised APIError, FastAPI's own
+RequestValidationError, or a genuinely unhandled exception — is
+converted to the identical {"code", "message", "trace_id"} shape by
+three handlers registered once in register_error_handlers. An
+unexpected exception is logged in full server-side (exc_info=True) and
+reported to the caller as a generic "internal_error" message only —
+nothing internal about the failure (a stack trace, an exception type
+name, a file path) ever reaches a response body, matching the exact
+same "log it in full, report it generically" pattern mealsight.
+mcp_servers.errors.internal_error already established at the MCP-server
+layer, one level up.
+
+
+8. TRACE ID PROPAGATION AND CORS
+=============================================================
+An HTTP middleware binds a trace id (a request-supplied X-Trace-Id
+header if one was sent, otherwise a fresh uuid4) via mealsight.utils.
+logging.bind_trace_id at the very start of every request, and echoes it
+back in the response's own X-Trace-Id header — so a user-reported
+failure is findable in logs by a header value that was always right
+there in the response, no separate lookup needed. This is a genuinely
+different trace id from a recommendation's own (session_id, used as
+trace_id per section 1) for the specific request that STARTED it — the
+HTTP request that returns 202 finishes almost immediately, while the
+actual recommendation keeps running in the background under its own,
+separately-tracked id; both are real trace ids, just naming two
+different-lengthed things.
+
+CORS is wired via settings.cors_allowed_origins (section 6) through
+FastAPI's own CORSMiddleware, with the trace id header explicitly
+exposed (expose_headers) — a header a browser-based frontend couldn't
+otherwise read from a cross-origin response at all, CORS's own default
+being to hide every response header except a small allow-list unless
+told otherwise.
+
+
+9. THE TESTS
+=============================================================
+17 new tests, against a real FastAPI app + httpx.AsyncClient over
+ASGI transport — but a FAKE MCPClientManager and a FAKE health-check
+http client, the identical "no real MCP servers or providers" testing
+convention mealsight.agent's own node tests already established
+(FakeMCP, tests/test_agent/test_nodes.py) — extended here with
+list_tool_inventory for the health checks. run_recommendation itself is
+monkeypatched for every recommend-endpoint test: exercising the real
+agent graph is what tests/test_agent already does exhaustively; this
+file tests the API layer's OWN behavior (status codes, session
+polling, validation, rate limiting, proxying, error shape), not agent
+correctness a second time.
+
+create_app gained a lifespan_override parameter solely so tests can
+substitute their own lifespan (one that sets a FakeManager/FakeHealth
+HttpClient on app.state instead of starting real subprocesses) without
+needing a second, parallel app-construction path — the exact same real
+create_app function, the exact same real middleware/error-handler/
+router wiring, just handed a different lifespan.
+
+health (3 tests): all servers up, healthy; a server missing an expected
+tool reports 503/degraded; a provider probe returning >=500 reports
+503, with the module-level cache reset per test (section 5).
+
+recommend (6 tests): multipart accepted, 202 with a real session_id and
+the correct websocket_url; polling genuinely observes a pre-completion
+status (pending or running) before later observing complete with a
+real result, using a fake run_recommendation with a real asyncio.sleep
+so the timing is genuine, not just theoretically possible; zero
+modalities is 400; an unknown session_id is 404; a dedicated unit test
+for _reject_oversized itself (a fake Request exposing only the header
+it needs) rather than trying to coerce httpx into sending a mismatched
+real Content-Length header for an oversized-upload integration test;
+the rate limiter genuinely fires on a second submission when configured
+with limit=1.
+
+proxy endpoints (6 tests): pantry GET, pantry DELETE (confirming the
+real two-call id-resolution sequence — asserting the actual remove_
+items call's own arguments, not just the final response), recipes GET,
+history GET, profile GET, grocery-list GET — each asserting the exact
+data a configured FakeManager response produces reaches the client
+unchanged.
+
+cross-cutting (2 tests): X-Trace-Id present and non-empty on an
+ordinary response; the error envelope's exact key set ({"code",
+"message", "trace_id"}) on a real 404 path, not just "an error came
+back."
+
+
+10. VERIFICATION: A REAL APP, REAL SUBPROCESSES, A REAL NUMBER TO
+    COMPARE
+=============================================================
+ruff/mypy --strict/pytest all clean (462 tests, no regressions across
+phases 1-6's own suite). Real verification against a genuinely running
+app (real MCPClientManager, real Mistral/Groq): two /health calls both
+reported "healthy" (3/3 MCP servers up with 6 tools each, both
+providers reachable, recipe database at 250 recipes) — and, checked
+directly against the real log output rather than assumed, "mcp_manager_
+started" appears exactly ONCE and "Starting MCP server" exactly THREE
+times (one per server) across those two /health calls plus one full
+/api/recommend call — subprocesses genuinely start once, at app
+startup, not per request. A real recommendation (photo_01 + memo_13 +
+text) posted through /api/recommend, polled via GET /api/recommend/
+{session_id} to completion, produced the correct honest "nothing
+cookable" response for that particular request's own constraints
+(consistent with phase 6.4's own live-run finding about this corpus)
+— and, the actual number this whole phase exists to produce: 12.75
+seconds wall-clock, against phase 6's own 19.4-second baseline for
+comparable real work — roughly 6.5 of the original ~13s of pure
+subprocess-startup cost eliminated by not paying it per request.
+
+One real, reported artifact: the verification script's own shell
+invocation hung past a 2-minute timeout even though the script itself
+had already completed and exited cleanly (confirmed directly via `ps` —
+no lingering process of any kind). This looks like a redirection/file-
+descriptor artifact from the stdio-based MCP subprocesses rather than
+an application bug, and is noted here rather than silently worked
+around, since anyone scripting around this app in CI would hit the
+identical thing.
+
+
+11. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+No lock on the shared MCPClientManager versus serializing every
+recommendation behind one
+    Covered in full in section 2. The alternative (a straightforward
+    asyncio.Lock around every graph run) was rejected only after
+    concrete evidence the underlying transport and every MCP tool's own
+    statelessness already make concurrent sharing safe — not rejected
+    on a hunch that it would probably be fine.
+
+asyncio.create_task versus FastAPI's own BackgroundTasks for launching
+a recommendation
+    BackgroundTasks ties a task's execution to the response's own
+    finalization — correct for genuinely short cleanup work, but a
+    recommendation can run for many seconds well past the 202 response
+    already having been sent and the client having moved on to polling.
+    A plain, independently-tracked asyncio.Task, recorded in the
+    SessionStore by session_id, matches what's actually being modeled
+    here: a real background job with its own lifecycle, not a
+    response-adjacent cleanup step.
+
+Annotated[X, Depends(...)] versus a project-wide ruff ignore for B008
+    ruff's flake8-bugbear rule (no function calls in argument defaults)
+    doesn't special-case FastAPI's own Depends() pattern, and every
+    route in this phase originally triggered it. Suppressing B008
+    project-wide was rejected as the blunter fix — it would also hide a
+    genuine instance of the same bug pattern anywhere else in the
+    codebase. Moving every dependency to a shared Annotated[...,
+    Depends(...)] alias (mealsight.api.dependencies' own MCPManagerDep
+    etc.) is the currently-recommended FastAPI idiom anyway, and
+    resolves the false positive at its actual source — the call moved
+    out of a default value entirely, rather than a lint rule being told
+    to look away from where it still applies.
+
+A real provider-reachability probe versus checking only that API keys
+are configured
+    A configured-secret check is cheaper and involves no external call,
+    but says nothing about whether the actual account or network path
+    is currently working — exactly the gap a health check exists to
+    close. The real probe (section 5) was chosen deliberately, with its
+    own cost (an external call) bounded by caching rather than avoided
+    by not checking the real thing at all.
+
+Provider call logs cached inline versus a fresh httpx.AsyncClient
+dedicated to health probes
+    A separate, small httpx.AsyncClient (app.state.health_http_client)
+    was created rather than reaching into mealsight.providers' own
+    internal, private connection pool — health probing is infrequent
+    enough that a dedicated client costs nothing meaningful, and it
+    avoids exposing a provider-internal implementation detail (its own
+    httpx client) just for this one, unrelated caller.
+
+
+12. GLOSSARY
+=============================================================
+persistent MCPClientManager
+    One MCPClientManager, started in mealsight.api.app's own lifespan
+    and held in app.state for the process's whole lifetime — the
+    subject of this entire phase; contrast with the phase 1-6 default
+    of one manager per run_recommendation call.
+
+session (mealsight.api.sessions)
+    One POST /api/recommend's own tracked background job: session_id
+    (also used as the run's own trace_id), status (pending/running/
+    complete/failed), and eventually a result or error — the whole
+    reason GET /api/recommend/{session_id} can answer "how's it going"
+    before any WebSocket exists.
+
+unwrap_mcp_result
+    The one shared translation from ToolCallResult (and the structured
+    not_found/validation_error/internal_error dicts a successful MCP
+    call can still return) into a real HTTP status — 502 for a
+    transport failure, 404/400/502 for the three business-level error
+    shapes respectively.
+
+error envelope
+    {"code", "message", "trace_id"} — the one shape every error
+    response takes, regardless of whether it came from an explicit
+    APIError, FastAPI's own request validation, or a genuinely
+    unexpected exception (logged in full server-side, never described
+    to the caller beyond "internal_error").
+
+
+13. INTERVIEW TALKING POINTS
+=============================================================
+Q: You decided not to lock the shared MCPClientManager across concurrent
+recommendations. What would have to be true about this system for that
+decision to be wrong, and how would you notice?
+
+    It would be wrong if either of the two facts I verified stopped
+    holding: if fastmcp's own Client stopped correctly multiplexing
+    concurrent requests by their own JSON-RPC id over one stdio session
+    (I'd notice as data corruption — a caller getting back a DIFFERENT
+    recipe than it asked for under concurrent load, which is exactly
+    what my own 20-concurrent-calls test was checking for directly, not
+    just "no exception raised"), or if any MCP tool stopped being
+    stateless per call — for instance, if a future tool cached
+    something in memory across calls on the same connection rather than
+    reading fresh from SQLite every time. I'd want to re-run that same
+    kind of direct concurrency test any time a new tool is added that
+    touches shared, in-memory state rather than a database row, since
+    that's specifically the property my whole decision leans on.
+
+Q: Why does GET /health make a real network call to Mistral and Groq
+instead of just checking that the API keys are set?
+
+    Because a configured secret and a working account/network path are
+    two different facts, and only one of them is what "is this
+    dependency actually healthy right now" is supposed to mean. An
+    expired key, a provider-side outage, or a network path that's
+    broken from this specific deployment would all pass a configured-
+    key check while genuinely being down — exactly the failure mode a
+    health check exists to catch. The real cost of checking the real
+    thing (an external call on every /health hit) is why it's cached
+    for 30 seconds per provider rather than left unbounded — the
+    caching handles the cost concern without giving up on checking the
+    real thing.
+
+Q: Walk me through what happens, step by step, if two people hit POST
+/api/recommend at almost the same instant from two different IPs.
+
+    Each request independently checks the shared SubmissionRateLimiter
+    keyed by ITS OWN client IP — two different IPs means two
+    independent sliding windows, neither affecting the other. Each
+    validates its own image/audio/text via the same perception
+    validators perceive already uses. Each creates its own session in
+    the shared SessionStore (a plain dict, no lock needed since nothing
+    here awaits between reading and writing it) and gets its own
+    asyncio.create_task scheduled against the ONE shared MCPClientManager.
+    From that point, both recommendations' own sequences of MCP tool
+    calls interleave freely over the same three stdio connections — safe,
+    per section 2's own verified reasoning — while separately, both
+    recommendations' own LLM calls go through the same shared
+    RateLimiter (an existing, already-concurrency-safe component from
+    phase 1.2, unchanged this phase) so neither ends up violating the
+    real per-model rate limit even though both are running at once. Each
+    person polls their own session_id independently and sees their own
+    result whenever their own graph run actually finishes — the two
+    runs' own completion times have nothing to do with each other beyond
+    sharing the same underlying rate-limited LLM budget.
+
+Q: The task said settings already had max_submissions_per_minute. It
+didn't. What did you do, and why not just add it silently?
+
+    I added it — a small, clearly-scoped field in settings.py's own
+    existing "Input limits" section, with a sensible default — but I
+    reported the discrepancy directly rather than treating the task's
+    own framing as ground truth without checking. The same habit this
+    project has followed since phase 6.1's own AgentContext finding:
+    read the actual code before trusting a description of what it
+    already does, and say so plainly when the description turns out to
+    be aspirational rather than accurate. Silently adding it without
+    mentioning the gap would have left an inaccurate shared
+    understanding of what already existed in place for the next person
+    (or the next session) to trip over again.

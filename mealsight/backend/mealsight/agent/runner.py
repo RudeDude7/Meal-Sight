@@ -21,28 +21,42 @@ async def run_recommendation(
     image_bytes: bytes | None = None,
     audio_bytes: bytes | None = None,
     text_input: str | None = None,
+    *,
+    manager: MCPClientManager | None = None,
+    trace_id: str | None = None,
 ) -> MealSightState:
     """Runs one full recommendation end to end.
 
-    Binds a fresh trace id FIRST, before anything else — every log line
+    trace_id: supply this when a caller already has an id this run
+    needs to be correlated with (mealsight.api's own recommend router
+    passes its session_id here, so the exact id returned to a client in
+    the 202 response is the same one that shows up in every log line
+    for this run — never generated independently of what the caller
+    already handed back). Omitted, a fresh one is generated exactly as
+    before this parameter existed.
+
+    Binds the trace id FIRST, before anything else — every log line
     from every node and every MCP call this run makes (mealsight.agent.
     mcp_client.MCPClientManager.call_tool's own logging included) picks
     it up automatically via mealsight.utils.logging's contextvar-based
     propagation, with no need to thread the id through any function
     signature by hand.
 
-    Starts all three MCP servers via MCPClientManager as an async
-    context manager, which is what guarantees shutdown happens even if
-    graph execution itself raises — __aexit__ runs unconditionally on
-    the way out of the `async with` block, exception or not, so a
-    failed recommendation never leaves an orphaned subprocess running.
-    The manager is handed to the graph via context=AgentContext(mcp=...)
-    (LangGraph's own context_schema mechanism, mealsight.agent.context)
-    — nodes 1-8 reach it through their own `runtime: Runtime[
-    AgentContext]` parameter; nodes 9-11 are still plain stubs and never
-    see it at all.
+    manager: an already-started MCPClientManager to reuse (mealsight.api
+    holds one for the whole process lifetime in its own lifespan,
+    starting all three MCP subprocesses ONCE instead of per request —
+    ~13s of a real ~19.4s run was pure subprocess-startup-and-health-
+    check cost before that existed). When omitted (every script and
+    test that calls this directly, unchanged from before this phase),
+    this function starts and tears down its own manager exactly as it
+    always has, via `async with MCPClientManager()` — __aexit__ runs
+    unconditionally on the way out of that block, exception or not, so
+    a failed standalone recommendation still never leaks a subprocess.
+    A caller-supplied manager is never started or shut down here; it's
+    the caller's own responsibility both ways, since its lifetime is by
+    definition longer than one recommendation.
     """
-    trace_id = str(uuid.uuid4())
+    trace_id = trace_id or str(uuid.uuid4())
     bind_trace_id(trace_id)
     logger.info("recommendation_started", trace_id=trace_id)
 
@@ -55,11 +69,18 @@ async def run_recommendation(
     }
 
     graph = build_graph()
-    async with MCPClientManager() as manager:
+
+    if manager is not None:
         final_state = cast(
             MealSightState,
             await graph.ainvoke(initial_state, context=AgentContext(mcp=manager)),
         )
+    else:
+        async with MCPClientManager() as owned_manager:
+            final_state = cast(
+                MealSightState,
+                await graph.ainvoke(initial_state, context=AgentContext(mcp=owned_manager)),
+            )
 
     logger.info("recommendation_finished", trace_id=trace_id)
     return final_state

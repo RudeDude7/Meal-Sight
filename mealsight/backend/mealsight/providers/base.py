@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -65,6 +65,16 @@ class TextProvider(ABC):
         validates, even after one repair attempt."""
         ...
 
+    @abstractmethod
+    def get_call_log(self) -> list[dict[str, Any]]:
+        """Every real completion this provider has made, across every
+        run in the process's lifetime (get_text_provider returns a
+        process-wide singleton) — filter by trace_id (mealsight.utils.
+        logging.current_trace_id) to get just one run's own calls. What
+        present (node 11) reads to report LLM calls and token usage in
+        processing_trace."""
+        ...
+
 
 class VisionProvider(ABC):
     """A provider capable of describing the contents of an image."""
@@ -85,3 +95,11 @@ class AudioProvider(ABC):
 
     @abstractmethod
     async def transcribe(self, audio_bytes: bytes, filename: str, model_id: str) -> TranscriptionResponse: ...
+
+    @abstractmethod
+    def get_call_log(self) -> list[dict[str, Any]]:
+        """Every real transcription this provider has made, across every
+        run in the process's lifetime — filter by trace_id (mealsight.
+        utils.logging.current_trace_id) to get just one run's own
+        calls."""
+        ...

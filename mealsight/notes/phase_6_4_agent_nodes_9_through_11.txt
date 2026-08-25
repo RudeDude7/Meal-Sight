@@ -1,0 +1,477 @@
+PHASE 6.4 STUDY NOTES: AGENT NODES 9-11 (generate_output, record_outcome
+[formerly log_learn], present) — COMPLETING THE GRAPH
+=============================================================
+
+This phase replaced the last three stubs — generate_output, log_learn,
+present — with real logic, completing all eleven MealSight graph nodes.
+It's also the first phase where "implement the node" required changes
+OUTSIDE the three node files themselves: neither MCPClientManager nor
+the LLM providers retained any in-memory record of what they'd called,
+and graph.py had no per-node timing at all — present's own job
+("assemble the processing trace... from everything gathered this run")
+was literally impossible without adding a small amount of new
+observability infrastructure first. This phase also renamed log_learn
+to record_outcome after confirming, before writing anything, that its
+old name promised work no current MCP tool or upstream signal actually
+supports.
+
+Files touched: mealsight/agent/{graph,mcp_client,state}.py, mealsight/
+agent/nodes/{generate_output,present}.py, mealsight/agent/nodes/log_
+learn.py -> record_outcome.py (renamed), mealsight/agent/nodes/
+__init__.py, mealsight/providers/{base,mistral,groq}.py, backend/tests/
+test_agent/test_nodes.py. Test count: 433 (end of phase 6.3) -> 445.
+
+
+1. A FINDING BEFORE WRITING ANY NODE: log_learn'S OWN OLD NAME PROMISED
+   WORK THAT ISN'T ACTUALLY AVAILABLE
+=============================================================
+
+The task's own instruction was explicit: confirm what this node can
+legitimately do before implementing it, and rename it rather than pad
+it if the honest answer is "almost nothing." Checked directly, not
+assumed:
+
+  - "increment times_recommended on the chosen recipe" — no MCP tool
+    exposes this. mealsight.agent.mcp_client.EXPECTED_TOOLS lists
+    exactly six recipe_engine tools (search_recipes, get_recipe, match_
+    ingredients, scale_recipe, calculate_nutrition, find_substitutions)
+    — no write path for times_recommended, even though that column
+    genuinely exists on the recipes table.
+  - "persist the processing trace" — no tool on any of the three
+    servers persists anything trace-shaped externally. processing_
+    trace already flows forward to present via the graph's own ordinary
+    state-passing; nothing needs to actively "carry" it.
+  - "apply any explicit preference update the request itself stated" —
+    user_intelligence's update_preferences tool genuinely exists, but
+    nothing upstream (not UnifiedMealRequest, not reason's own
+    RecipeDecision) ever distinguishes a PERSISTENT preference from a
+    one-off, this-meal-only statement. Calling update_preferences from
+    cuisine_preference/mood_or_preference/dietary_restrictions would be
+    inventing an intent the user never actually expressed.
+
+All three candidate actions the original stub docstring named are
+unavailable, not just unwise. Renamed log_learn -> record_outcome
+(file, function, and the NODE_ORDER/_NODE_FUNCTIONS entry in graph.py)
+rather than leaving a misleadingly-named node that implies real
+learning is happening. Confirmed safe before renaming: grepped the
+whole tree for the literal string "log_learn" — only graph.py and
+nodes/__init__.py referenced it, and test_graph.py derives every one of
+its own assertions from NODE_ORDER dynamically rather than hardcoding
+node names, so nothing broke.
+
+
+2. A DIFFERENT KIND OF FINDING: present COULDN'T DO ITS JOB WITHOUT NEW
+   INFRASTRUCTURE, NOT JUST NEW LOGIC
+=============================================================
+
+present's own original stub docstring already anticipated this:
+"populate processing_trace from everything logged along the way (this
+graph's own stream_messages, plus every MCPClientManager.call_tool log
+line for this run's trace_id)." Reading the actual code before writing
+anything confirmed the literal problem: mcp_client.py's call_tool logs
+via structlog (server, tool, duration_ms, success, attempt) but never
+retains those records in memory anywhere a later node could read them
+back — logs go to stderr and stay there. mealsight.providers.mistral/
+groq don't log a successful completion at all (only a validation
+failure warning) — there was no data source for "every LLM call with
+model and token usage" to read from, full stop.
+
+Three small, additive fixes, each scoped to exactly the gap it closes:
+
+  - MCPClientManager gained an in-memory _call_log (one entry per
+    CALL, not per attempt — server/tool/duration_ms/success/attempts),
+    exposed via get_call_log(). Already correctly scoped to one run,
+    since runner.py creates a fresh manager per run_recommendation call
+    — no filtering needed.
+  - MistralProvider/GroqProvider each gained the same idea, recorded
+    inside the one real choke point every completion already passes
+    through (_send_chat for Mistral, transcribe for Groq) — model_id,
+    real prompt_tokens/completion_tokens/total_tokens/latency_ms (null
+    for Groq's own token fields, honestly, since Whisper transcription
+    genuinely has no token usage to report), and current_trace_id().
+    Unlike the MCP manager, get_text_provider()/get_audio_provider()
+    are documented, deliberate PROCESS-WIDE singletons — their own call
+    logs span every run in the process's lifetime, not just one, so
+    present filters by trace_id (mealsight.utils.logging.
+    current_trace_id, already used elsewhere in this codebase for the
+    exact same reason) rather than the providers ever being reset or
+    scoped per run.
+  - TextProvider/AudioProvider (the ABCs) gained an abstract get_
+    call_log so the concrete classes' own implementations are enforced,
+    not just conventionally present.
+
+Per-node timing needed a fourth piece, in graph.py itself: a _timed(
+node_name, fn) wrapper, applied to every node at add_node time (reading
+_NODE_FUNCTIONS fresh on each build_graph() call, not once at import
+time, so a test that monkeypatches _NODE_FUNCTIONS[name] — test_graph.
+py's own test_trace_id_is_consistent_across_nodes does exactly this —
+still gets its own replacement timed and wired correctly). The one real
+risk here: does wrapping a node function break LangGraph's own runtime-
+injection, which decides whether to pass `runtime` by inspecting the
+node callable's actual parameter list (confirmed by reading langgraph.
+_internal._runnable directly — line ~339, `inspect.signature(func).
+parameters`, checking for a parameter literally named "runtime")? Since
+inspect.signature() follows __wrapped__ by default and functools.wraps
+sets that attribute, the wrapped function should still report the
+ORIGINAL signature — verified live, with a small throwaway graph (one
+node, wrapped, declaring a runtime parameter, against a real context_
+schema), before wiring this into the real graph at all, matching this
+project's own established habit of confirming a LangGraph mechanism
+works as expected rather than trusting it from documentation alone.
+
+
+3. generate_output (NODE 9): FOUR MCP TOOLS, EACH INDEPENDENTLY
+   WRAPPED, NEVER remove_items
+=============================================================
+
+Cookable path (top_recommendation["available"] is True): get_recipe
+(full ingredients/steps/servings_base), scale_recipe (target_servings =
+unified_request.servings, falling back to the recipe's own servings_
+base when the user never stated one — get_recipe has to run first for
+that fallback to be available), find_substitutions for whatever's still
+missing and NOT already resolved by match_rank's own table-driven
+substitutable_items (calling find_substitutions again for something
+already matched to a real substitute would be redundant — capped at
+SUBSTITUTION_LOOKUP_LIMIT=5 so a very sparse pantry doesn't turn into a
+dozen extra calls), and create_grocery_list for whatever's genuinely
+missing. nutrition_info is deliberately NOT recalculated — match_rank
+(node 7) already computed it, per serving, for this exact recipe;
+reusing it avoids a redundant MCP call for data that doesn't change
+with how this node happens to scale the recipe.
+
+Uncookable path (available is False): no get_recipe/scale_recipe call
+at all — there's no chosen recipe to scale — but still builds a grocery
+list for the CLOSEST candidate reason already identified (matched_
+recipes[0]), so the shopping-list explanation comes with something
+genuinely actionable rather than just naming what's missing in prose.
+
+IMPORTANT boundary honored throughout: remove_items is never called
+anywhere in this file, or anywhere in this graph — the pantry is only
+ever deducted after cooking is actually confirmed, through a separate,
+later, user-confirmed flow outside this graph entirely, the same
+boundary record_outcome respects for log_meal. A dedicated test
+(section 5) asserts this directly against the real set of tool names
+called, not just by inspecting the code.
+
+Every one of the four real MCP steps is wrapped in its own try/except,
+independent of the others — the established "one failing thing never
+blocks the others" pattern this whole graph already follows (update_
+pantry, phase 6.2, was the first node to establish it) — plus one outer
+try/except around the whole cookable-or-not dispatch, so a genuinely
+unexpected bug (not a graceful MCP failure, a real bug in this node's
+own code) still produces SOME usable final_response, built from top_
+recommendation's own explanation/overall_summary rather than an empty
+result. final_response itself is assembled as text meant to be read
+directly — recipe name, scaled ingredients, numbered steps, cook time,
+nutrition with its own coverage caveat, match score, missing/
+substitutable items, the grocery list, and only the per-dimension
+reasoning entries reason's own model marked applies=true (skipping
+"doesn't apply" ones here, since this is the human-facing text — the
+full six-dimension breakdown, applicable or not, still lives in
+top_recommendation itself for anyone wanting the raw view).
+
+
+4. record_outcome (NODE 10): AS MINIMAL AS SECTION 1 SAYS IT SHOULD BE
+=============================================================
+
+Checks state["terminal"] first like every other node, then does
+exactly one thing regardless: appends one honest stream message saying
+plainly that nothing here is currently actionable, and why (no times_
+recommended write path, no external trace-persistence tool, no
+persistent-vs-transient preference signal upstream). No MCP call, no
+state mutation beyond that message. Deliberately doesn't even take a
+runtime parameter — there's nothing here that needs to reach the MCP
+manager, so declaring one would misrepresent what this node does.
+
+
+5. present (NODE 11): ASSEMBLING THE TRACE FROM FIVE DIFFERENT SOURCES
+=============================================================
+
+processing_trace (one dict, wrapped in a single-element list to match
+state.py's own list[dict[str, Any]] declaration) pulls from exactly the
+sources section 2 built: node_timings from state itself (populated by
+graph.py's wrapper, not by any node); every MCP call from runtime.
+context.mcp.get_call_log() (already correctly scoped to this run);
+every LLM call from get_text_provider().get_call_log() + get_audio_
+provider().get_call_log(), filtered to state["trace_id"] (since those
+two ARE shared across runs); the ranking table straight from state[
+"matched_recipes"] (recipe_id, name, match_score, composite_score,
+can_cook — already fully computed by match_rank); errors (MCP calls
+with success=False) and retries (attempts > 1), both derived from the
+same MCP call log rather than tracked separately; and relaxations,
+read straight from search_recipes' own already-plain-language stream
+messages rather than re-deriving what was relaxed from scratch.
+final_response itself is NOT rebuilt here — generate_output (node 9)
+already built it in this phase's own division of labor, resolving a
+mismatch with present's phase-6.1-era stub docstring (which originally
+assumed present would build final_response) in favor of this phase's
+own, more specific instructions. One final stream message closes the
+run, phrased differently depending on whether a real recommendation
+was reached.
+
+
+6. THE TESTS
+=============================================================
+
+12 new tests, one shared-fixture extension.
+
+FakeMCP (the existing shared test double) gained a _call_log list and
+get_call_log() method, mirroring the real MCPClientManager's own new
+API — a small, backward-compatible addition to a fixture every test in
+this file already uses, not a new class.
+
+generate_output (7 tests): never calls remove_items, asserted directly
+against the real set of tool names FakeMCP received, with every other
+tool (get_recipe, scale_recipe, find_substitutions, create_grocery_
+list) configured to succeed — proving the omission is deliberate, not
+just "didn't get around to it in this fixture"; the no-cookable-recipe
+path produces both the explanation text AND a real grocery_list built
+from the closest candidate's own missing_items; scaling is genuinely
+applied (asserts result["scaled_recipe"]["target_servings"] AND that
+the actual scale_recipe call's own arguments carried the right target_
+servings, not just that the response happened to already say so);
+terminal skip; no-recommendation-at-all handling; and a failure test
+that monkeypatches _find_matched_entry itself to raise mid-node,
+confirming the outer try/except still returns a non-empty final_
+response (falling back to top_recommendation's own overall_summary)
+rather than propagating.
+
+record_outcome (2 tests): terminal skip; confirms exactly one stream
+message and nothing else changes state.
+
+present (4 tests): the trace's own mcp_calls list matches calls made
+directly against a FakeMCP beforehand, proving "every MCP call" isn't
+just aspirational; a dedicated FakeProviderWithLog double proves llm_
+calls is correctly filtered by trace_id — two calls logged, one tagged
+"match" and one "other", only the "match" one survives into a run whose
+own state["trace_id"] is "match"; the ranking table is passed through
+state["matched_recipes"] unchanged; terminal skip (and confirms
+processing_trace is absent entirely on that path, not present-but-
+empty).
+
+
+7. VERIFICATION: A REAL FINDING ABOUT THE CORPUS ITSELF, THEN A DIRECT
+   DEMONSTRATION OF THE COOKABLE PATH
+=============================================================
+
+ruff/mypy --strict/pytest all clean (445 tests, no regressions).
+
+The task asked for a full, real, end-to-end run landing on a cookable
+recipe. Two genuine attempts through the real full pipeline (photo_01 +
+memo_13 + a typed constraint biased toward a recipe the real pantry
+already fully covers, Peanut Butter Cookies — peanut butter, sugar, egg
+all genuinely on hand) both legitimately came back "nothing cookable,"
+and this is a real, reportable property of the corpus, not a bug:
+search_recipes orders its own SQL results alphabetically by name with
+no other tie-break, match_rank only scores the first TOP_N_CANDIDATES_
+TO_MATCH (10) of whatever comes back, and 18 other quick (<=10 min),
+unrestricted-diet recipes sort alphabetically ahead of "Peanut Butter
+Cookies" in the real 250-recipe corpus — no phrasing of the request
+(tried plain "10 minutes, no restrictions" and "American dessert, 9
+minutes or less") changed that ordering enough to surface it in the
+top 10. Requesting cuisine="American" didn't help either: the real
+extraction model produced "American," which doesn't exact-string-match
+the corpus's own stored "United States" value, so search_recipes'
+cuisine filter came back empty and got relaxed away (dropped first,
+per node 6's own relaxation order) before cook time ever got a chance
+to narrow things down around it.
+
+Rather than keep guessing at phrasing against an ordering this project
+doesn't currently rank by anything except name, node 6's own candidate-
+discovery behavior was already fully verified in phase 6.3 — so this
+phase's own verification of nodes 7-11 specifically used a real,
+live-MCP, live-Mistral run starting from a hand-built recipe_candidates
+list (exactly search_recipes' own output shape, Peanut Butter Cookies
+plus an uncookable Yaki Udon as a real distractor) rather than the
+natural search step. Real match_rank, reason, generate_output, record_
+outcome, and present all ran for real against real servers: match_score
+1.0/can_cook true for Peanut Butter Cookies, correctly chosen by the
+real Mistral call over Yaki Udon (can_cook false); final_response
+contained the full scaled recipe (½ cup peanut butter, ¼ cup sugar, 1
+egg, scaled from 4 to 2 servings), all 7 real steps, real nutrition with
+its own coverage note, and the reasoning dimensions that actually
+applied; the trace showed 9 real MCP calls, 1 real LLM call, 1304 real
+tokens (1024 prompt + 280 completion) — cross-checked directly against
+MistralProvider's own live call log, filtered by trace_id, not just
+trusted from present's own summary; grocery_list came back None,
+correctly, since nothing was actually missing. A separate, full,
+natural-pipeline run (the one that legitimately found nothing cookable)
+still confirmed real per-node timing end to end — perceive's own real
+Mistral+Groq calls took 12.5 real seconds, most other nodes sub-50ms —
+and real aggregate counts: 29 MCP calls, 4 LLM calls, 4698 tokens, 19.4s
+wall-clock. The unstocked-pantry run correctly produced an honest "no
+recipes matched even after relaxing everything" explanation with
+grocery_list left None (there was no candidate at all to build one
+from, a distinct case from "candidates exist but none are cookable,"
+which does produce a targeted list — already covered by its own test).
+
+
+8. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+Renaming log_learn to record_outcome versus keeping the name and just
+documenting the gap in its docstring
+    The task's own instruction was explicit about which of these it
+    wanted ("rename it... rather than padding it"), and grepping first
+    for every real reference to the literal string "log_learn" (section
+    1) confirmed the rename was safe and contained — two files, no
+    hardcoded test strings. Keeping the misleading name and only
+    documenting the gap was rejected as the weaker fix available: a
+    docstring is easy to skip; a name every caller/importer/NODE_ORDER
+    entry has to type is not.
+
+An in-memory call log on MCPClientManager/the providers versus a
+generic structlog-capturing processor for "everything logged along the
+way," matching present's own phase-6.1-era stub docstring more
+literally
+    A capture-everything structlog processor was considered (it would
+    have picked up node_started/node_finished timing for free, instead
+    of needing graph.py's own separate _timed wrapper) but rejected as
+    a bigger, riskier change to a shared module (mealsight.utils.
+    logging) every other part of the codebase depends on, with its own
+    memory-growth and cross-request-isolation concerns to solve
+    correctly. Two small, targeted, independently-testable additions
+    (one per data source actually needed) stayed contained to exactly
+    the modules that needed new capability, and were each verified in
+    isolation before being wired into present.
+
+Wrapping nodes for timing in graph.py versus switching runner.py from
+ainvoke to astream to observe per-node completion externally
+    astream's own "updates" mode would avoid touching node functions at
+    all, but reconstructing a final merged state from a stream of
+    per-node deltas means reimplementing part of LangGraph's own
+    reducer-aware state-merging by hand (operator.add fields need
+    concatenation, others need overwrite) — a much larger, more
+    error-prone change than one small, verified wrapper applied at
+    add_node time. Rejected as solving the same problem with
+    substantially more risk.
+
+Filtering the LLM call log by trace_id in present versus resetting/
+scoping MistralProvider per run
+    get_text_provider()/get_vision_provider() are explicitly documented,
+    deliberate process-wide singletons (one shared httpx.AsyncClient,
+    one shared RateLimiter, for connection pooling and a single rate
+    budget per model) — scoping a fresh provider per run would undo
+    that design for a benefit (a slightly simpler call log) this
+    project doesn't need, since mealsight.utils.logging.current_trace_
+    id already exists and is already used elsewhere for exactly this
+    "filter global state down to one run" purpose.
+
+
+9. GLOSSARY
+=============================================================
+
+record_outcome (formerly log_learn)
+    Node 10, renamed this phase after confirming its old name promised
+    real learning/persistence work no current MCP tool or upstream
+    signal actually supports — genuinely near-empty by design, not by
+    oversight.
+
+_timed (graph.py)
+    The functools.wraps-based per-node wrapper applied at add_node
+    time, feeding state["node_timings"] — verified live, before wiring
+    into the real graph, that wrapping a node function this way doesn't
+    interfere with LangGraph's own runtime-injection (which inspects
+    the wrapped callable's real parameter list via inspect.signature,
+    which follows __wrapped__).
+
+call log (MCPClientManager / MistralProvider / GroqProvider)
+    An in-memory list of {server/tool/duration_ms/success/attempts} (MCP)
+    or {model_id/prompt_tokens/completion_tokens/total_tokens/
+    latency_ms/trace_id} (LLM) records, this phase's own addition —
+    MCPClientManager's is naturally per-run (a fresh manager per
+    run_recommendation call); the providers' are process-wide and
+    require trace_id filtering to scope to one run.
+
+processing_trace
+    The single structured dict (wrapped in a one-element list to match
+    state.py's own declared type) present assembles from node_timings,
+    both call logs, the ranking table, and derived errors/retries/
+    relaxations — the debugging record and the frontend's own reasoning-
+    display raw material, per the original task's own framing.
+
+
+10. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: You renamed log_learn to record_outcome and left it doing almost
+nothing. Isn't that a worse outcome than at least trying to make it
+useful somehow?
+
+    No — inventing something for it to do would have been worse. I
+    checked, concretely, every candidate action its own original stub
+    docstring named: incrementing times_recommended has no tool;
+    persisting a trace externally has no tool; applying an "explicit
+    preference update" would require guessing which of the user's
+    stated preferences were meant to be permanent, which nothing
+    upstream in this pipeline actually records. Any of those would have
+    meant either calling a tool that doesn't exist, or calling a real
+    tool (update_preferences) with a fabricated argument the user never
+    actually asked for — the second one is actively worse than doing
+    nothing, since it would silently change stored state based on a
+    guess. Renaming it to record_outcome and documenting exactly why it
+    can't do more yet is the honest version of "not padding it" the
+    task itself asked for.
+
+Q: Your live verification couldn't get the natural pipeline to land on
+a cookable recipe even with a pantry that fully supports one. How do
+you know that's a real corpus property and not a bug you introduced in
+nodes 9-11?
+
+    Because I traced it to a specific, checkable mechanism, not just
+    accepted the outcome: search_recipes' own SQL query orders results
+    "ORDER BY name" with nothing else, match_rank only scores the first
+    10 of whatever comes back (TOP_N_CANDIDATES_TO_MATCH, unchanged
+    this phase), and I directly counted how many recipes alphabetically
+    precede "Peanut Butter Cookies" among quick, unrestricted-diet
+    matches — 18, more than enough to crowd it out of the top 10 no
+    matter how the request is phrased, since none of those upstream
+    filters rank by anything except an exact column match. That's a
+    property of two already-existing, already-verified pieces (phase
+    6.3's own search_recipes, and match_rank's own TOP_N constant) — I
+    didn't touch either this phase — combined with the specific real
+    corpus's own alphabetical distribution. Nodes 9-11 were never in
+    that path at all; I verified them separately, directly, against a
+    real cookable case.
+
+Q: Why filter the LLM call log by trace_id in present instead of just
+giving MistralProvider a way to reset its own log between runs?
+
+    Because get_text_provider() is explicitly documented as a process-
+    wide singleton on purpose — one shared httpx client, one shared
+    rate limiter, so every call in the process draws from the same
+    connection pool and the same per-model rate budget. Adding a reset
+    (or worse, a fresh provider per run) would either undo that pooling
+    for a cosmetic benefit, or introduce a second code path for "the
+    provider used during a real run" versus "the provider used for
+    logging," which is exactly the kind of inconsistency that causes
+    real bugs later. current_trace_id already exists, is already bound
+    once per run_recommendation call, and is already used to correlate
+    log lines across this whole codebase — reusing it to filter a
+    shared call log is the same idea applied to one more place, not a
+    new mechanism.
+
+Q: Walk me through what happens if generate_output's get_recipe call
+fails but everything else succeeds.
+
+    _fetch_get_recipe is wrapped in its own try/except inside _build_
+    available_response; if it fails, detail stays None, and target_
+    servings falls back to unified_request.servings directly (skipping
+    the servings_base fallback that would have come from detail, since
+    detail never arrived) — defaulting to 1 if even that's unset.
+    scale_recipe still gets called with whatever target_servings that
+    produced; if IT also fails, scaled stays None too. _format_
+    available_response is written throughout to treat detail and
+    scaled as optional — ingredients/steps come from scaled first, then
+    fall back to detail, and the recipe's own name falls back to
+    matched_entry's own summary name if get_recipe never returned
+    anything. So a get_recipe failure alone still produces a genuinely
+    useful final_response: the recipe's name (from match_rank's own
+    summary), its match score, what's missing, nutrition (already
+    computed by match_rank, never re-fetched here), and the reasoning —
+    just without full ingredient list or steps. I have a test for
+    exactly the "everything downstream still works" version of this
+    (monkeypatching a different internal call to fail and checking the
+    final_response still isn't empty), following the same "one failing
+    thing never blocks the others" contract every node in this graph
+    already follows.

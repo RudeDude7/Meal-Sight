@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import time
+from typing import Any
 
 import httpx
 
@@ -23,7 +24,7 @@ from mealsight.providers.base import AudioProvider, TranscriptionResponse
 from mealsight.providers.exceptions import InvalidResponse, ProviderUnavailable
 from mealsight.providers.rate_limiter import RateLimiter
 from mealsight.providers.retry import request_with_retry
-from mealsight.utils.logging import get_logger
+from mealsight.utils.logging import current_trace_id, get_logger
 
 BASE_URL = "https://api.groq.com/openai/v1"
 
@@ -42,6 +43,9 @@ class GroqProvider(AudioProvider):
         self._client = client
         self._rate_limiter = rate_limiter
         self._logger = get_logger("mealsight.providers.groq")
+        # Same process-wide-singleton caveat as MistralProvider's own
+        # _call_log — filter by trace_id to scope to one run.
+        self._call_log: list[dict[str, Any]] = []
 
     async def transcribe(self, audio_bytes: bytes, filename: str, model_id: str) -> TranscriptionResponse:
         # Whisper's limit on this account is RPS-only (see settings.MODEL_RATE_LIMITS,
@@ -92,4 +96,25 @@ class GroqProvider(AudioProvider):
                 cause=exc,
             ) from exc
 
+        self._call_log.append(
+            {
+                "model_id": model_id,
+                # Whisper transcription has no token usage to report —
+                # left null rather than fabricated, unlike Mistral's own
+                # real per-call usage.
+                "prompt_tokens": None,
+                "completion_tokens": None,
+                "total_tokens": None,
+                "latency_ms": round(latency_ms, 2),
+                "trace_id": current_trace_id(),
+            }
+        )
+
         return TranscriptionResponse(text=text, model_id=model_id, latency_ms=latency_ms)
+
+    def get_call_log(self) -> list[dict[str, Any]]:
+        """Every real transcription this provider has made, across every
+        run in the process's lifetime. Filter by trace_id
+        (mealsight.utils.logging.current_trace_id) to get just one run's
+        own calls."""
+        return list(self._call_log)

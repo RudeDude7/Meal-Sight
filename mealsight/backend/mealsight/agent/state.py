@@ -79,3 +79,12 @@ class MealSightState(TypedDict):
     # than each node's return value overwriting the last one's — the
     # standard LangGraph reducer idiom for an append-only field.
     stream_messages: Annotated[list[str], operator.add]
+
+    # Populated by graph.py's own per-node timing wrapper (not by any
+    # node itself) — one {"node", "duration_ms"} entry appended after
+    # every node call, real or stubbed. present (node 11) reads this for
+    # processing_trace's own per-node timing; same accumulate-don't-
+    # overwrite reducer as stream_messages, for the same reason. Unlike
+    # stream_messages, NotRequired: the wrapper supplies every entry
+    # itself, so no caller needs to seed this with an initial [].
+    node_timings: NotRequired[Annotated[list[dict[str, Any]], operator.add]]

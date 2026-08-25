@@ -18,11 +18,14 @@ from pydantic import BaseModel
 
 from mealsight.agent.context import AgentContext
 from mealsight.agent.mcp_client import MCPClientManager, ToolCallResult
+from mealsight.agent.nodes.generate_output import generate_output
 from mealsight.agent.nodes.get_context import get_context
 from mealsight.agent.nodes.match_rank import match_rank
 from mealsight.agent.nodes.merge import merge
 from mealsight.agent.nodes.perceive import perceive
+from mealsight.agent.nodes.present import present
 from mealsight.agent.nodes.reason import RecipeDecision, reason
+from mealsight.agent.nodes.record_outcome import record_outcome
 from mealsight.agent.nodes.search_recipes import search_recipes
 from mealsight.agent.nodes.update_pantry import update_pantry
 from mealsight.agent.nodes.validate_input import validate_input
@@ -48,6 +51,8 @@ from mealsight.perception.models import (
 perceive_module = importlib.import_module("mealsight.agent.nodes.perceive")
 update_pantry_module = importlib.import_module("mealsight.agent.nodes.update_pantry")
 reason_module = importlib.import_module("mealsight.agent.nodes.reason")
+generate_output_module = importlib.import_module("mealsight.agent.nodes.generate_output")
+present_module = importlib.import_module("mealsight.agent.nodes.present")
 
 
 class FakeMCP:
@@ -59,12 +64,26 @@ class FakeMCP:
     def __init__(self, responses: dict[tuple[str, str], ToolCallResult] | None = None) -> None:
         self._responses = responses or {}
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
+        self._call_log: list[dict[str, Any]] = []
 
     async def call_tool(
         self, server: str, tool_name: str, arguments: dict[str, Any] | None = None
     ) -> ToolCallResult:
         self.calls.append((server, tool_name, arguments or {}))
-        return self._responses.get((server, tool_name), ToolCallResult(success=False, error="unconfigured"))
+        result = self._responses.get((server, tool_name), ToolCallResult(success=False, error="unconfigured"))
+        self._call_log.append(
+            {
+                "server": server,
+                "tool": tool_name,
+                "duration_ms": 0.0,
+                "success": result.success,
+                "attempts": 1,
+            }
+        )
+        return result
+
+    def get_call_log(self) -> list[dict[str, Any]]:
+        return list(self._call_log)
 
 
 def _runtime(mcp: FakeMCP) -> Runtime[AgentContext]:
@@ -1045,3 +1064,307 @@ def test_reason_prompt_token_count_is_reasonable() -> None:
     tokens = reason_module.prompt_token_count(prompt)
     assert tokens > 0
     assert tokens < 5000
+
+
+# --------------------------------------------------------------------
+# generate_output
+# --------------------------------------------------------------------
+
+
+def _recipe_detail(recipe_id: str = "r1", **kwargs: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "id": recipe_id,
+        "name": "Test Recipe",
+        "cuisine": "italian",
+        "meal_type": "dinner",
+        "cook_time_minutes": 20,
+        "difficulty": "easy",
+        "servings_base": 2,
+        "dietary_tags": [],
+        "ingredients": [
+            {"name": "onion", "quantity": 1, "unit": "count", "importance": "important", "raw_measure": "1"}
+        ],
+        "steps": ["Chop the onion.", "Cook it."],
+        "image_url": None,
+    }
+    base.update(kwargs)
+    return base
+
+
+def _scaled_recipe(recipe_id: str = "r1", target_servings: int = 2, **kwargs: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "id": recipe_id,
+        "name": "Test Recipe",
+        "original_servings": 2,
+        "target_servings": target_servings,
+        "scale_factor": target_servings / 2,
+        "ingredients": [
+            {"name": "onion", "quantity_display": "1", "unit": "count", "importance": "important"}
+        ],
+        "cook_time_minutes": 20,
+        "cook_time_adjusted": False,
+        "cook_time_note": None,
+    }
+    base.update(kwargs)
+    return base
+
+
+def _grocery_list(**kwargs: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "id": 1,
+        "status": "active",
+        "created_at": "2026-01-01",
+        "sections": [
+            {
+                "section": "produce",
+                "items": [
+                    {
+                        "name": "garlic",
+                        "quantities": [],
+                        "needed_for": ["Test Recipe"],
+                        "importance": "important",
+                        "section": "produce",
+                        "is_staple": False,
+                        "verify_note": None,
+                        "checked": False,
+                    }
+                ],
+            }
+        ],
+    }
+    base.update(kwargs)
+    return base
+
+
+async def test_generate_output_never_calls_remove_items() -> None:
+    mcp = FakeMCP(
+        {
+            ("recipe_engine", "get_recipe"): ToolCallResult(success=True, data=_recipe_detail()),
+            ("recipe_engine", "scale_recipe"): ToolCallResult(success=True, data=_scaled_recipe()),
+            ("recipe_engine", "find_substitutions"): ToolCallResult(
+                success=True,
+                data={
+                    "ingredient": "garlic",
+                    "reason": "unavailable",
+                    "suggestions": [],
+                    "excluded_count": 0,
+                },
+            ),
+            ("pantry_manager", "create_grocery_list"): ToolCallResult(success=True, data=_grocery_list()),
+        }
+    )
+    state: MealSightState = {
+        "top_recommendation": {"available": True, "recipe_id": "r1", "overall_summary": "Good pick."},
+        "matched_recipes": [
+            {
+                "recipe_id": "r1",
+                "name": "Test Recipe",
+                "match_score": 0.9,
+                "missing_items": [{"name": "garlic", "importance": "important"}],
+                "substitutable_items": [],
+                "nutrition_info": None,
+            }
+        ],
+        "unified_request": _unified(servings=2),
+        "stream_messages": [],
+    }
+    await generate_output(state, _runtime(mcp))
+
+    called_tools = {tool for _, tool, _ in mcp.calls}
+    assert "remove_items" not in called_tools
+
+
+async def test_generate_output_no_cookable_recipe_produces_explanation_and_grocery_list() -> None:
+    mcp = FakeMCP(
+        {("pantry_manager", "create_grocery_list"): ToolCallResult(success=True, data=_grocery_list())}
+    )
+    state: MealSightState = {
+        "top_recommendation": {"available": False, "explanation": "Nothing was cookable. Buy garlic."},
+        "matched_recipes": [
+            {
+                "recipe_id": "closest",
+                "name": "Closest Recipe",
+                "missing_items": [{"name": "garlic", "importance": "important"}],
+            }
+        ],
+        "stream_messages": [],
+    }
+    result = await generate_output(state, _runtime(mcp))
+
+    assert "Nothing was cookable" in result["final_response"]
+    assert "garlic" in result["final_response"]
+    assert result["grocery_list"] == _grocery_list()
+    called_tools = {tool for _, tool, _ in mcp.calls}
+    assert "create_grocery_list" in called_tools
+    assert "remove_items" not in called_tools
+
+
+async def test_generate_output_applies_scaling_to_response() -> None:
+    mcp = FakeMCP(
+        {
+            ("recipe_engine", "get_recipe"): ToolCallResult(success=True, data=_recipe_detail()),
+            ("recipe_engine", "scale_recipe"): ToolCallResult(
+                success=True, data=_scaled_recipe(target_servings=4)
+            ),
+        }
+    )
+    state: MealSightState = {
+        "top_recommendation": {"available": True, "recipe_id": "r1", "overall_summary": "Great fit."},
+        "matched_recipes": [
+            {
+                "recipe_id": "r1",
+                "name": "Test Recipe",
+                "match_score": 1.0,
+                "missing_items": [],
+                "substitutable_items": [],
+            }
+        ],
+        "unified_request": _unified(servings=4),
+        "stream_messages": [],
+    }
+    result = await generate_output(state, _runtime(mcp))
+
+    assert result["scaled_recipe"]["target_servings"] == 4
+    assert "for 4 servings" in result["final_response"]
+    scale_call = next(args for _, tool, args in mcp.calls if tool == "scale_recipe")
+    assert scale_call["target_servings"] == 4
+
+
+async def test_generate_output_failure_still_yields_partial_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken_find_matched_entry(matched_recipes: object, recipe_id: object) -> object:
+        raise RuntimeError("simulated unexpected failure")
+
+    monkeypatch.setattr(generate_output_module, "_find_matched_entry", broken_find_matched_entry)
+
+    mcp = FakeMCP()
+    state: MealSightState = {
+        "top_recommendation": {"available": True, "recipe_id": "r1", "overall_summary": "Great fit."},
+        "matched_recipes": [{"recipe_id": "r1", "name": "Test Recipe"}],
+        "stream_messages": [],
+    }
+    result = await generate_output(state, _runtime(mcp))
+
+    assert result["final_response"]
+    assert "Great fit." in result["final_response"]
+    assert any("unexpectedly" in m for m in result["stream_messages"])
+
+
+async def test_generate_output_skips_when_terminal() -> None:
+    mcp = FakeMCP()
+    result = await generate_output({"terminal": True, "stream_messages": []}, _runtime(mcp))
+    assert mcp.calls == []
+    assert len(result["stream_messages"]) == 1
+
+
+async def test_generate_output_handles_no_recommendation() -> None:
+    mcp = FakeMCP()
+    result = await generate_output({"stream_messages": []}, _runtime(mcp))
+    assert mcp.calls == []
+    assert result["final_response"]
+
+
+# --------------------------------------------------------------------
+# record_outcome
+# --------------------------------------------------------------------
+
+
+async def test_record_outcome_never_calls_any_mcp_tool() -> None:
+    result = await record_outcome({"stream_messages": []})
+    assert len(result["stream_messages"]) == 1
+
+
+async def test_record_outcome_skips_when_terminal() -> None:
+    result = await record_outcome({"terminal": True, "stream_messages": []})
+    assert len(result["stream_messages"]) == 1
+
+
+# --------------------------------------------------------------------
+# present
+# --------------------------------------------------------------------
+
+
+class FakeProviderWithLog:
+    def __init__(self, call_log: list[dict[str, Any]]) -> None:
+        self._call_log = call_log
+
+    def get_call_log(self) -> list[dict[str, Any]]:
+        return self._call_log
+
+
+async def test_present_trace_contains_every_mcp_call() -> None:
+    mcp = FakeMCP({("recipe_engine", "get_recipe"): ToolCallResult(success=True, data={"id": "r1"})})
+    await mcp.call_tool("recipe_engine", "get_recipe", {"recipe_id": "r1"})
+    await mcp.call_tool("pantry_manager", "get_pantry", {})
+
+    state: MealSightState = {"stream_messages": [], "trace_id": "t1"}
+    result = await present(state, _runtime(mcp))
+
+    trace = result["processing_trace"][0]
+    assert len(trace["mcp_calls"]) == 2
+    assert {c["tool"] for c in trace["mcp_calls"]} == {"get_recipe", "get_pantry"}
+
+
+async def test_present_filters_llm_calls_by_trace_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    text_calls = [
+        {
+            "model_id": "mistral-medium-2505",
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "latency_ms": 500.0,
+            "trace_id": "match",
+        },
+        {
+            "model_id": "mistral-medium-2505",
+            "prompt_tokens": 50,
+            "completion_tokens": 10,
+            "total_tokens": 60,
+            "latency_ms": 300.0,
+            "trace_id": "other",
+        },
+    ]
+    monkeypatch.setattr(present_module, "get_text_provider", lambda: FakeProviderWithLog(text_calls))
+    monkeypatch.setattr(present_module, "get_audio_provider", lambda: FakeProviderWithLog([]))
+
+    mcp = FakeMCP()
+    state: MealSightState = {"stream_messages": [], "trace_id": "match"}
+    result = await present(state, _runtime(mcp))
+
+    llm_calls = result["processing_trace"][0]["llm_calls"]
+    assert len(llm_calls) == 1
+    assert llm_calls[0]["trace_id"] == "match"
+
+
+async def test_present_includes_ranking_table() -> None:
+    mcp = FakeMCP()
+    state: MealSightState = {
+        "stream_messages": [],
+        "matched_recipes": [
+            {
+                "recipe_id": "r1",
+                "name": "Test Recipe",
+                "match_score": 0.8,
+                "composite_score": 0.5,
+                "can_cook": True,
+            }
+        ],
+    }
+    result = await present(state, _runtime(mcp))
+    assert result["processing_trace"][0]["ranking"] == [
+        {
+            "recipe_id": "r1",
+            "name": "Test Recipe",
+            "match_score": 0.8,
+            "composite_score": 0.5,
+            "can_cook": True,
+        }
+    ]
+
+
+async def test_present_streams_completion_message_and_skips_when_terminal() -> None:
+    mcp = FakeMCP()
+    result = await present({"terminal": True, "stream_messages": []}, _runtime(mcp))
+    assert len(result["stream_messages"]) == 1
+    assert "processing_trace" not in result

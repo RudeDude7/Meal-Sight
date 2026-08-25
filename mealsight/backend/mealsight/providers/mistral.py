@@ -28,7 +28,7 @@ from mealsight.providers.base import SchemaT, TextProvider, TextResponse, Vision
 from mealsight.providers.exceptions import InvalidResponse, ProviderUnavailable
 from mealsight.providers.rate_limiter import RateLimiter
 from mealsight.providers.retry import request_with_retry
-from mealsight.utils.logging import get_logger
+from mealsight.utils.logging import current_trace_id, get_logger
 
 BASE_URL = "https://api.mistral.ai/v1"
 
@@ -85,6 +85,13 @@ class MistralProvider(TextProvider, VisionProvider):
         self._client = client
         self._rate_limiter = rate_limiter
         self._logger = get_logger("mealsight.providers.mistral")
+        # get_text_provider()/get_vision_provider() return a process-wide
+        # singleton (this module's own docstring), so this call log spans
+        # every run in the process's lifetime, not just one — present
+        # (node 11) filters it down to the current run by trace_id
+        # (mealsight.utils.logging.current_trace_id) rather than this
+        # provider ever being reset or scoped per run itself.
+        self._call_log: list[dict[str, Any]] = []
 
     def _auth_headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {settings.mistral_api_key.get_secret_value()}"}
@@ -126,6 +133,17 @@ class MistralProvider(TextProvider, VisionProvider):
         actual_tokens = int(usage.get("total_tokens", estimated_tokens))
         await self._rate_limiter.reconcile(model_id, actual_tokens, estimated_tokens)
 
+        self._call_log.append(
+            {
+                "model_id": model_id,
+                "prompt_tokens": int(usage.get("prompt_tokens", 0)),
+                "completion_tokens": int(usage.get("completion_tokens", 0)),
+                "total_tokens": int(usage.get("total_tokens", 0)),
+                "latency_ms": round(latency_ms, 2),
+                "trace_id": current_trace_id(),
+            }
+        )
+
         return TextResponse(
             text=text,
             model_id=model_id,
@@ -134,6 +152,14 @@ class MistralProvider(TextProvider, VisionProvider):
             total_tokens=int(usage.get("total_tokens", 0)),
             latency_ms=latency_ms,
         )
+
+    def get_call_log(self) -> list[dict[str, Any]]:
+        """Every real completion this provider has made (complete,
+        complete_json — including a repair retry, analyze_image), across
+        every run in the process's lifetime. Filter by trace_id
+        (mealsight.utils.logging.current_trace_id) to get just one run's
+        own calls."""
+        return list(self._call_log)
 
     async def complete(
         self,

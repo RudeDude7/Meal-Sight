@@ -9,6 +9,15 @@ servers — it never raises for a transport-level failure (one retry,
 then a structured ToolCallResult with success=False), so a node can
 reason about a failed tool call as ordinary data instead of wrapping
 every single call in its own try/except.
+
+Every call_tool invocation is also recorded in-memory (get_call_log) —
+one entry per CALL (not per attempt), the same server/tool/duration_ms/
+success shape already logged, plus how many attempts it took. present
+(node 11) reads this to build processing_trace: a fresh
+MCPClientManager is created per run_recommendation call (never a shared
+singleton the way the LLM providers in mealsight.providers are), so
+this call log is already correctly scoped to exactly one run with no
+trace_id filtering needed.
 """
 
 from __future__ import annotations
@@ -182,6 +191,7 @@ class MCPClientManager:
         self._forwarders: dict[ServerName, _StderrForwarder] = {}
         self._exit_stack = AsyncExitStack()
         self._started = False
+        self._call_log: list[dict[str, Any]] = []
 
     async def start(self) -> None:
         """Launches all three servers CONCURRENTLY (asyncio.gather, not
@@ -306,6 +316,15 @@ class MCPClientManager:
                     success=True,
                     attempt=attempt,
                 )
+                self._call_log.append(
+                    {
+                        "server": server,
+                        "tool": tool_name,
+                        "duration_ms": duration_ms,
+                        "success": True,
+                        "attempts": attempt,
+                    }
+                )
                 return ToolCallResult(success=True, data=result.data)
             except Exception as exc:
                 duration_ms = round((time.monotonic() - started) * 1000, 2)
@@ -321,7 +340,23 @@ class MCPClientManager:
                 )
 
         logger.error("mcp_tool_call_exhausted", server=server, tool=tool_name, error=last_error)
+        self._call_log.append(
+            {
+                "server": server,
+                "tool": tool_name,
+                "duration_ms": duration_ms,
+                "success": False,
+                "attempts": attempts,
+                "error": last_error,
+            }
+        )
         return ToolCallResult(success=False, error=last_error)
+
+    def get_call_log(self) -> list[dict[str, Any]]:
+        """Every call_tool invocation this manager has made so far, one
+        entry per call (not per attempt) — what present (node 11) reads
+        to build the MCP portion of processing_trace."""
+        return list(self._call_log)
 
     async def list_tool_inventory(self) -> dict[ServerName, list[str]]:
         """Returns {server: [tool names]} for every currently connected

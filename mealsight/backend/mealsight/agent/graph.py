@@ -18,6 +18,7 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from mealsight.agent.context import AgentContext
 from mealsight.agent.nodes import (
     generate_output,
     get_context,
@@ -78,8 +79,14 @@ def build_graph() -> CompiledStateGraph[Any, Any, Any, Any]:
     is free to introduce real branching (e.g. skipping update_pantry
     when there's no vision_result at all) without this function's own
     shape needing to change first.
+
+    context_schema=AgentContext is what lets nodes 1-5 (phase 6.2)
+    reach the running MCPClientManager via a `runtime: Runtime[
+    AgentContext]` second parameter — LangGraph supplies runtime only
+    to node functions that actually declare it, so nodes 6-11 (still
+    plain, state-only stubs) are unaffected by this.
     """
-    builder = StateGraph(MealSightState)
+    builder = StateGraph(MealSightState, context_schema=AgentContext)
 
     for name in NODE_ORDER:
         builder.add_node(name, _NODE_FUNCTIONS[name])

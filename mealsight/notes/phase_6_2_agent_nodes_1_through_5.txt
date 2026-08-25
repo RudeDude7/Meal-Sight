@@ -1,0 +1,524 @@
+PHASE 6.2 STUDY NOTES: AGENT NODES 1-5 (validate_input THROUGH
+get_context)
+=============================================================
+
+These notes cover the second round of phase 6: replacing the first
+five of the eleven graph stubs (phase 6.1) with real logic —
+validate_input, perceive, merge, update_pantry, get_context. Nodes
+6-11 stay stubs, unchanged. Everything below describes code that
+really exists right now, in backend/mealsight/agent/nodes/ (five
+files rewritten, six untouched) and backend/mealsight/agent/context.py
+(new), plus backend/tests/test_agent/test_nodes.py. This is the first
+phase where the agent graph does real, live, multi-modality,
+multi-server work — every prior phase in this project either built one
+piece in isolation or wired plumbing with stubs standing in for the
+logic this phase actually writes.
+
+
+1. A FINDING BEFORE WRITING ANY NODE: THE MCP MANAGER WASN'T ACTUALLY
+   REACHABLE
+=============================================================
+
+The task's own context said "the MCP manager is available to nodes —
+report how it is currently threaded through and follow that." The
+honest finding, reported before writing anything: as of the end of
+phase 6.1, it wasn't threaded through at all. runner.py opened
+MCPClientManager as an async context manager purely to satisfy "starts
+and stops on every real run," but no node function had any parameter,
+closure, or other channel to actually reach it — every node took only
+`state` as its argument, and nothing in build_graph or run_
+recommendation passed the manager anywhere a node could read it from.
+Phase 6.1's own graph ran end to end with eleven stubs and never
+noticed, because none of them needed it yet.
+
+This phase had to close that gap before any of its five real nodes
+could exist at all, since four of the five (merge, update_pantry,
+get_context, and perceive only indirectly) genuinely need to call real
+MCP tools. The fix — mealsight.agent.context.AgentContext, LangGraph's
+own context_schema mechanism — is covered in section 2. Verified live,
+with a small throwaway graph, before touching any real node: LangGraph
+supplies the runtime parameter only to node functions that actually
+declare it, so mixing five context-aware real nodes with six
+unmodified, state-only stub nodes in the same graph works cleanly with
+no changes needed to nodes 6-11 at all.
+
+
+2. FILE MAP
+=============================================================
+
+backend/mealsight/agent/context.py  (NEW)
+    AgentContext — the one-field dataclass (mcp: MCPClientManager)
+    LangGraph's context_schema mechanism threads through to any node
+    that declares a `runtime: Runtime[AgentContext]` parameter.
+
+backend/mealsight/agent/graph.py  (EDITED)
+    StateGraph(MealSightState, context_schema=AgentContext) — the one
+    line that actually makes AgentContext reachable at all.
+
+backend/mealsight/agent/runner.py  (EDITED)
+    graph.ainvoke(initial_state, context=AgentContext(mcp=manager)) —
+    the one line that actually supplies a real manager at run time.
+
+backend/mealsight/agent/state.py  (EDITED)
+    Added terminal: NotRequired[bool] and terminal_reason: NotRequired[
+    str] — section 3.
+
+backend/mealsight/agent/nodes/validate_input.py  (REWRITTEN)
+backend/mealsight/agent/nodes/perceive.py  (REWRITTEN)
+backend/mealsight/agent/nodes/merge.py  (REWRITTEN)
+backend/mealsight/agent/nodes/update_pantry.py  (REWRITTEN)
+backend/mealsight/agent/nodes/get_context.py  (REWRITTEN)
+    Sections 3-7.
+
+backend/mealsight/agent/nodes/{search_recipes,match_rank,reason,
+generate_output,log_learn,present}.py
+    UNCHANGED — still exactly the phase 6.1 stubs.
+
+backend/tests/test_agent/test_nodes.py  (NEW)
+    16 tests — 411 total in the whole suite now.
+
+
+3. THE TERMINAL SHORT-CIRCUIT: A PER-NODE CHECK, NOT A GRAPH-LEVEL
+   BRANCH
+=============================================================
+
+validate_input marks state["terminal"] = True (with a plain-language
+terminal_reason) when literally none of the three provided modalities
+both existed and passed mealsight.perception.validation's own
+format/size checks. graph.py's own phase-6.1 docstring already said
+real conditional routing was deliberately deferred — "a later session
+is free to introduce real branching... without this function's own
+shape needing to change first" — and this phase honored that literally
+rather than reaching for it early: every one of nodes 2-5 checks
+state.get("terminal") as the very first thing it does, and returns a
+short one-line stream message without doing any real work (no
+perception call, no MCP call) if it's set. The graph's own edges stay
+exactly as sequential as phase 6.1 left them; the short-circuiting
+happens inside each node, not in how they're wired together.
+
+This also turned out to double as free test coverage for "a node
+failure is recorded in state without raising" from an angle worth
+naming directly: phase 6.1's own test_graph.py test (graph_runs_end_
+to_end_and_accumulates_eleven_stream_messages) invokes the compiled
+graph with completely empty input and no context at all — and it still
+passes, unmodified, in this phase, specifically because validate_input
+marks terminal immediately, and every one of nodes 2-5 short-circuits
+before ever touching runtime.context.mcp. That test was never updated
+to account for this phase's new AgentContext requirement, and it
+didn't need to be — the terminal path structurally never reaches the
+part of any node that would need a real manager.
+
+
+4. validate_input: REUSE, NOT REIMPLEMENTATION
+=============================================================
+
+The task's own instruction — "validate sizes and formats using the
+existing perception validators rather than new logic" — is followed
+completely literally: validate_image/validate_audio/validate_text
+(phase 5.1-5.3) are called directly, and this node's own logic is only
+the layer above them — deciding, across all three modalities checked
+independently, whether anything survived. Each modality contributes to
+exactly one of two lists (valid_modalities or problems), and the node's
+own message differs depending on which case actually happened: "got
+usable input from your photo and voice memo" when something worked,
+or a specific, itemized "none of what you provided was usable: photo
+(...); voice memo (...)" naming every individual validator's own
+rejection reason when nothing did — never a generic "input was bad."
+
+One case handled deliberately, not accidentally: empty or whitespace-
+only text_input is NOT treated as a validation problem at all — it
+contributes to neither list, mirroring analyze_text_input's own
+"nothing was said" short-circuit from phase 5.3 exactly. A blank text
+box is a completely normal non-event, not a rejected input.
+
+
+5. perceive: CONCURRENCY, AND A REAL NUANCE FOUND IN THE RATE LIMITER
+=============================================================
+
+The task's own instruction was specific: run Groq transcription
+concurrently with the Mistral work, but let the Mistral calls (vision,
+text) serialize naturally rather than fighting the rate limiter.
+Reading mealsight.providers.rate_limiter.RateLimiter's actual
+implementation (phase 1.2) to ground this before writing any code
+surfaced a real nuance worth reporting directly: RateLimiter keys its
+token buckets per MODEL id, not per provider — settings.VISION_MODEL
+(mistral-medium-2505) and settings.EXTRACTION_MODEL (ministral-8b-2512)
+are two different keys with two entirely independent buckets and two
+independent asyncio.Locks. Strictly speaking, vision and text
+extraction would NOT contend with each other even run fully
+concurrently; the rate limiter's own data structure doesn't force them
+to share anything.
+
+This phase followed the task's instruction literally anyway, and said
+so directly in the code rather than silently deciding the instruction
+didn't apply: vision and text are still awaited one after another
+inside one coroutine (_perceive_mistral_modalities), which then runs
+concurrently — via asyncio.gather — against the independent Groq
+audio call. The reasoning documented alongside it: even with
+independent buckets, vision and text are still the same Mistral
+account behind the same shared httpx connection pool, and the
+instruction to keep Mistral work serialized was followed as a
+deliberate, conservative choice rather than treated as obsolete just
+because the specific mechanism (bucket contention) it named turned out
+not to be the actual constraint. Verified directly with a real timing
+test (section 8): audio genuinely overlaps with the vision+text chain,
+and vision+text genuinely do not overlap with each other.
+
+Every one of the three modality calls is wrapped in its own try/except
+— on top of the fact that analyze_fridge_photo/analyze_voice_memo/
+analyze_text_input already never raise on their own (phase 5.1-5.3's
+graceful-degradation guarantee). This node's own contract — "never
+raise" — is a genuinely stronger guarantee than what perception already
+provides: it also covers a bug in THIS node's own code, or in
+perception in a way its own degradation didn't anticipate. A caught
+failure here means exactly one thing: that modality's own state field
+is simply left unset, which is precisely the "a node may fail and
+leave its field unset" contract MealSightState's own docstring already
+promised — no special-casing needed downstream.
+
+
+6. merge: PROFILE-FIRST, BECAUSE FUSION IS DELIBERATELY DB-FREE
+=============================================================
+
+mealsight.perception.fusion.merge_perceptions (phase 5.3) was built
+specifically to never touch a database or an MCP server itself — it
+takes user_profile as a plain, already-fetched UserProfile object.
+Something upstream has to be that fetcher, and the task named this
+node directly: fetch first, merge second. merge calls user_
+intelligence's get_user_profile via the MCP manager, parses the raw
+dict into a real UserProfile via model_validate (never assuming the
+call succeeded — a failed fetch or a parse failure both simply mean
+user_profile=None gets passed into merge_perceptions, which already
+knows how to proceed with no profile at all), and — this is the detail
+that makes node 5 possible — writes the SAME raw dict into state[
+"user_profile"] in the same return. That one line is the entire reason
+get_context doesn't need its own get_user_profile call three nodes
+later.
+
+Every conflict merge_perceptions detects gets its own stream message,
+translated into the kind of sentence a real person would actually read
+("you said 30 out loud but typed 20; went with 20") rather than
+surfacing DetectedConflict's own field/audio_value/text_value/
+chosen_value shape directly — the task's own "never raise... a failed
+node records the failure... appends a human-readable stream message
+describing what happened in user-facing terms" instruction applied to
+a genuinely different kind of event (not a failure, a real detected
+disagreement) but held to the identical plain-language bar.
+
+
+7. update_pantry AND get_context: WHAT RUNS REGARDLESS, AND WHAT NEVER
+   RUNS TWICE
+=============================================================
+
+update_pantry's own real behavior split — write only when there's
+something new, but always check what's expiring — was named directly
+in the task ("If vision produced nothing, skip the update but still
+call flag_expiring — the existing pantry still matters"), and this
+phase's own live verification (section 9) confirmed both halves of it
+concretely: a text-only run correctly skipped the write ("No new items
+from a photo this run") while still surfacing the same real expiring
+chicken thigh a photo-included run also found, from the same real,
+already-populated pantry.db.
+
+get_context's own real constraint — don't refetch the profile — is
+satisfied by simple omission: this node calls exactly two tools
+(get_context_signals, get_meal_history, run concurrently via asyncio.
+gather, since neither depends on the other and neither is an LLM call
+subject to any rate-limiter concern) and never calls get_user_profile
+at all. There's no defensive check needed to prevent a second fetch;
+the code simply doesn't contain a code path that could trigger one.
+Verified directly in this phase's own tests by asserting the exact set
+of (server, tool) pairs a FakeMCP received — get_user_profile is
+checked to be absent, not just "not obviously called."
+
+
+8. THE TESTS
+=============================================================
+
+test_nodes.py (16 tests) uses two kinds of test double: FakeMCP (a
+plain class recording every call_tool invocation and returning
+pre-configured ToolCallResults, standing in for MCPClientManager) and
+a real langgraph.runtime.Runtime(context=AgentContext(mcp=fake)) —
+constructing the actual Runtime class directly turned out to be
+simpler and more honest than building a second, duck-typed fake for
+it, since Runtime's own constructor already defaults every field
+except context.
+
+validate_input (3 tests): zero modalities marks terminal; valid text
+alone is accepted; every node appends a message (checked here and,
+implicitly, by every other test in the file).
+
+perceive (4 tests): one modality (vision) failing unexpectedly doesn't
+prevent another (text) from succeeding; terminal state short-circuits
+with no modality calls attempted at all; a real timing test proves
+audio genuinely overlaps with the vision+text chain (elapsed time for
+two 0.1s sleeps is well under the 0.2s a fully sequential run would
+need, and audio's own start timestamp falls before vision's own end
+timestamp); a second real timing test proves vision and text do NOT
+overlap with each other (text's start timestamp is never before
+vision's own end timestamp) — this second test is the direct
+verification of section 5's own "serialize Mistral work" finding, not
+just an assumption that the code does what its comments say.
+
+merge (3 tests): the fetched profile's own household_size fills in an
+unspecified servings value inside a REAL merge_perceptions call (not a
+mock of fusion itself — this proves the profile genuinely reaches
+fusion, not just that merge calls get_user_profile); terminal state
+short-circuits with zero MCP calls; nothing-to-merge (no modality
+succeeded) is handled without raising.
+
+update_pantry (4 tests): empty vision skips the write but still calls
+flag_expiring (checked directly against the exact set of tool names
+FakeMCP received); a populated vision DOES call update_pantry; terminal
+short-circuits; an unexpected failure inside pantry-item conversion
+(to_pantry_item_inputs monkeypatched to raise) is caught and recorded
+as a stream message rather than propagating — a real, deliberately
+synchronous fake, since to_pantry_item_inputs is itself a plain sync
+function (phase 5.1), not async; catches an incorrect-signature test
+double.
+
+get_context (2 tests): get_user_profile is proven absent from the
+exact set of tools called; terminal short-circuits.
+
+A real gotcha found and fixed while writing these tests
+------------------------------------------------------
+monkeypatch.setattr("mealsight.agent.nodes.perceive.analyze_fridge_
+photo", fake) failed with "'function' object has no attribute
+'analyze_fridge_photo'" — and, surprisingly, so did `import mealsight.
+agent.nodes.perceive as perceive_module` followed by monkeypatch.
+setattr(perceive_module, ...). The cause: mealsight.agent.nodes'
+own __init__.py does `from mealsight.agent.nodes.perceive import
+perceive`, which rebinds the ATTRIBUTE named "perceive" on the nodes
+package object to the FUNCTION. Both pytest's dotted-string monkeypatch
+resolution AND Python's own `import a.b.c as x` statement resolve
+through that same attribute chain (walking down from the top-level
+package via getattr, not looking the real submodule up in sys.modules
+directly) — so both silently returned the shadowed function instead of
+the actual module, for the exact same underlying reason. The fix:
+importlib.import_module("mealsight.agent.nodes.perceive"), which reads
+straight from sys.modules and isn't fooled by the parent package's own
+attribute rebinding. Documented directly in the test file's own
+comment, since this is exactly the kind of subtle, easy-to-hit-again
+gotcha worth a comment where the next person will actually see it
+rather than a mental note that evaporates.
+
+
+9. VERIFICATION: LIVE, MULTI-MODALITY, MULTI-SERVER, END TO END
+=============================================================
+
+ruff/mypy --strict/full pytest all clean (411 tests total, no
+regressions across phase 1 through 6.1's own suite). Two full live
+runs via run_recommendation, against the real three servers and real
+Mistral/Groq APIs:
+
+Full run — photo_01.jpg + memo_13.mp3 (the real self-correction memo)
++ a typed message deliberately set to conflict on cook time and add a
+fresh dietary restriction and cuisine ("only twenty minutes and vegan
+please... Mexican food"). All sixteen stream messages printed in
+order: validate_input found all three modalities usable; perceive
+found 12 real photo items, understood the typed request, and heard
+audio's own self-correction transcribed and resolved correctly
+("three servings, and let's say 30 minutes"); merge combined all
+three and recorded exactly one real conflict (max_cook_time_minutes:
+audio said 30, text said 20, chose 20 — the lower value, correctly);
+update_pantry wrote 9 new items and 3 quantity updates to the real
+pantry.db and flagged chicken thigh expiring (2 days remaining,
+"freeze to extend"); get_context correctly read the real day/time.
+The full unified_request came back with servings=3 (from audio alone
+— text never stated a serving count, so no conflict there),
+max_cook_time_minutes=20 (the resolved conflict), dietary_
+restrictions=["vegan"], cuisine_preference="Mexican" — both from
+text, neither contested by audio. Total wall-clock: 21.56 seconds
+(three fresh MCP server startups, two sequential Mistral calls, one
+Groq call, and several MCP tool calls, all real).
+
+Text-only run — confirmed vision_result and audio_result both
+genuinely absent from final state (not present-but-empty; the keys
+themselves don't exist, exactly matching MealSightState's own "a node
+may leave its field unset" contract), text_result present, and —
+concretely, not just in theory — update_pantry still correctly
+skipped writing anything while still finding and reporting the same
+real expiring chicken thigh from the already-populated pantry. Total
+wall-clock: 8.29 seconds (one Mistral call instead of two, no Groq
+call, same three-server startup cost).
+
+
+10. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+
+LangGraph's context_schema/Runtime mechanism versus stashing the MCP
+manager inside MealSightState itself
+    Covered in section 1-2. Putting a live, subprocess-owning object
+    inside the graph's own state would blur a real distinction this
+    project has kept clean everywhere else — state is the graph's own
+    data (in principle serializable, inspectable, the actual "what
+    happened" record), while the MCP manager is a live resource with
+    its own lifecycle, not data. LangGraph's own context_schema exists
+    specifically for this split and was verified live to work correctly
+    alongside unmodified, state-only stub nodes before any real node
+    was written against it.
+
+Per-node terminal check versus real graph-level conditional routing
+    Covered in section 3. graph.py's own phase-6.1 docstring already
+    named this as future work, not this phase's job — introducing real
+    branching now would mean redesigning edges around behavior five
+    nodes' worth of real logic hadn't been written yet to actually
+    justify, and the task's own scope (nodes 1-5 only, 6-11 untouched)
+    argued for the smaller, node-local check that doesn't require
+    touching graph.py's own edge-building code at all.
+
+Serializing vision+text despite the rate limiter's own buckets being
+per-model, independent
+    Covered in section 5. The literal, defensible alternative — run
+    all three modalities fully concurrently, since the rate limiter's
+    real data structure wouldn't actually contend — was rejected in
+    favor of following the task's own explicit instruction, and the
+    reasoning for keeping it even after finding the buckets are
+    independent (same account, same connection pool, a genuinely
+    conservative choice) was written down rather than silently
+    deciding the instruction no longer applied once its stated
+    mechanism turned out not to be the real constraint.
+
+Writing the profile to state in merge versus having get_context fetch
+it independently but cache-check first
+    A cache-check approach (get_context calls get_user_profile only if
+    state doesn't already have one, as a defensive fallback) was
+    considered and rejected as solving a problem that doesn't exist:
+    merge always runs before get_context in this graph's own fixed
+    sequential order, so a defensive re-check would only ever paper
+    over a bug in a hypothetically reordered graph, not something this
+    phase's actual pipeline can produce. The simpler design — merge
+    fetches once, writes once, get_context trusts it's there — matches
+    what NODE_ORDER's own fixed sequence actually guarantees.
+
+importlib.import_module versus renaming the shadowed attribute in
+mealsight/agent/nodes/__init__.py to avoid the collision entirely
+    Renaming __init__.py's own re-exported name (e.g. re-exporting
+    perceive as perceive_node instead of perceive) would have avoided
+    the shadowing at its source — but that changes graph.py's own
+    import statement and _NODE_FUNCTIONS dict for a problem that only
+    ever actually manifests inside test code trying to monkeypatch a
+    specific node module's own internals. Fixing it locally, in the
+    one test file that needs it, with a documented reason, was the
+    smaller change; the package's own public API (mealsight.agent.
+    nodes.perceive meaning "the function," which is the genuinely
+    common and expected use) stays exactly as convenient as it already
+    was for every other caller.
+
+
+11. GLOSSARY
+=============================================================
+
+(Every term phase 6.1's own glossary already defined — health check,
+processing trace, stub node, trace id — applies identically here,
+just with five of the eleven "stub nodes" now real. New terms below.)
+
+AgentContext
+    The one-field dataclass (mcp: MCPClientManager) LangGraph's
+    context_schema mechanism threads through to any node declaring a
+    `runtime: Runtime[AgentContext]` parameter — mealsight.agent.
+    context, new this phase.
+
+per-node short-circuit
+    A node checking state.get("terminal") at its own entry and
+    returning early with no real work — this phase's actual mechanism
+    for "downstream nodes short-circuit," implemented without any
+    change to the graph's own sequential edges (contrast with a
+    graph-level conditional edge, which this phase deliberately did
+    not build).
+
+rate-limiter bucket (per-model)
+    mealsight.providers.rate_limiter.RateLimiter's actual keying
+    scheme — one independent token bucket and lock per model id, not
+    per provider — the real finding section 5 documents, which this
+    phase's own vision/text serialization choice was made in spite of,
+    not because of.
+
+
+12. INTERVIEW TALKING POINTS
+=============================================================
+
+Q: You found that the MCP manager wasn't actually reachable from any
+node before this phase. How did you find that, and how confident were
+you it was really true before building a fix around it?
+
+    I read runner.py and every node's own signature directly, rather
+    than assuming the task's own framing ("the MCP manager is
+    available to nodes") was accurate — every node function from phase
+    6.1 took exactly one argument, state, and nothing in build_graph
+    or run_recommendation passed the manager to anything a node could
+    read. That's not a subtle gap; it's a straightforward reading of
+    the actual function signatures. Once I'd confirmed it, I didn't
+    just assume LangGraph's context mechanism would work the way I
+    expected either — I wrote a small, throwaway graph mixing a
+    state-only node and a state-plus-runtime node in the same graph
+    and ran it for real before touching any of this phase's actual
+    node files, specifically to confirm LangGraph only injects runtime
+    into nodes that ask for it. Both the finding and the fix were
+    verified against real behavior, not assumed from documentation.
+
+Q: The task told you to keep the two Mistral calls (vision, text)
+serialized to avoid fighting the rate limiter. You found that they
+actually use independent buckets. Why follow the instruction anyway
+instead of running everything concurrently once you knew that?
+
+    Because finding that the STATED MECHANISM (shared bucket
+    contention) wasn't quite accurate doesn't automatically mean the
+    underlying CONCERN was wrong too. Vision and text still hit the
+    same Mistral account through the same shared httpx connection pool
+    — there could be other reasons (account-level throttling behavior
+    I haven't independently verified, general prudence about hammering
+    one provider with two concurrent requests) the instruction still
+    makes sense even though the specific bucket-contention story
+    doesn't hold up under close reading. Rather than silently
+    overriding an explicit instruction based on my own read of one
+    piece of the system, I followed it as given and documented exactly
+    what I found and why I still did what was asked — that's a more
+    honest outcome than either blindly following an inaccurate
+    justification or unilaterally deciding I knew better without
+    surfacing the disagreement.
+
+Q: Walk me through a case where a node in this phase actually fails,
+and what happens next.
+
+    Take update_pantry with a photo that has real identified items:
+    to_pantry_item_inputs converts them, and the call goes to the
+    pantry_manager MCP server. If that conversion itself throws — a
+    genuine bug, not the graceful-degradation paths perception already
+    handles — it's caught inside a try/except right around that one
+    step, logged with a real stack trace via exc_info=True, and turned
+    into one plain stream message: "Pantry update failed unexpectedly."
+    The function then keeps going — it still calls flag_expiring
+    afterward, in a separate try/except of its own, because that
+    failure has nothing to do with whether checking what's expiring
+    should also fail. The node returns normally, with whatever
+    messages accumulated and expiring_items set to whatever flag_
+    expiring actually returned (empty if that failed too) — nothing
+    about this node ever raises out to the graph itself. I have a real
+    test for exactly this: monkeypatching to_pantry_item_inputs to
+    raise, then asserting the node still returns a result with a
+    "failed unexpectedly" message in it rather than letting a
+    RuntimeError propagate.
+
+Q: Your perceive node has a concurrency test. What does it actually
+prove, and how did you make sure it wasn't just measuring test
+flakiness?
+
+    Two things, separately: that audio genuinely overlaps with the
+    vision+text work, and that vision and text genuinely do NOT
+    overlap with each other. For the first, I replaced both real
+    perception calls with fakes that each sleep 0.1 seconds and record
+    their own start/end timestamps, then assert two things: the total
+    elapsed time for the whole node is well under 0.2 seconds — the
+    time two fully sequential 0.1-second waits would need — and that
+    audio's own recorded start timestamp is earlier than vision's own
+    recorded end timestamp, which is what you'd only see if they
+    genuinely overlapped in real wall-clock time, not just that the
+    total came out fast for some other reason. For the second test, I
+    used a fake vision that sleeps and a fake text that doesn't, and
+    asserted text's own start timestamp is never earlier than vision's
+    own end timestamp — proving text genuinely waits for vision to
+    finish rather than merely usually finishing after it by
+    coincidence. Both are real timing assertions against real
+    timestamps recorded during actual concurrent execution, not
+    inferred from total duration alone.

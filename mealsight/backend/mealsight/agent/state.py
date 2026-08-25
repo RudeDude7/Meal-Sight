@@ -56,6 +56,15 @@ class MealSightState(TypedDict):
     # --- cross-cutting ---
     trace_id: NotRequired[str]
 
+    # Set by validate_input when NONE of the provided modalities were
+    # both present and usable. Nodes 2-5 (phase 6.2) check this at
+    # their own entry and skip their real work rather than running
+    # against genuinely empty input — a per-node self-check, not a
+    # change to the graph's own sequential edges (see graph.py's own
+    # docstring on why real branching is deferred).
+    terminal: NotRequired[bool]
+    terminal_reason: NotRequired[str]
+
     # Every node appends its own message(s); operator.add on two lists
     # is concatenation, so this accumulates across the whole run rather
     # than each node's return value overwriting the last one's — the

@@ -8,6 +8,7 @@ from __future__ import annotations
 import uuid
 from typing import cast
 
+from mealsight.agent.context import AgentContext
 from mealsight.agent.graph import build_graph
 from mealsight.agent.mcp_client import MCPClientManager
 from mealsight.agent.state import MealSightState
@@ -35,11 +36,11 @@ async def run_recommendation(
     graph execution itself raises — __aexit__ runs unconditionally on
     the way out of the `async with` block, exception or not, so a
     failed recommendation never leaves an orphaned subprocess running.
-    The graph itself is genuinely stub-only in this phase (see
-    mealsight.agent.graph and mealsight.agent.nodes) — no node here
-    actually calls into the MCP manager yet — but the manager still
-    starts and stops on every real run, exactly as a filled-in graph
-    will need it to.
+    The manager is handed to the graph via context=AgentContext(mcp=...)
+    (LangGraph's own context_schema mechanism, mealsight.agent.context)
+    — nodes 1-5 reach it through their own `runtime: Runtime[
+    AgentContext]` parameter; nodes 6-11 are still plain stubs and never
+    see it at all.
     """
     trace_id = str(uuid.uuid4())
     bind_trace_id(trace_id)
@@ -54,8 +55,11 @@ async def run_recommendation(
     }
 
     graph = build_graph()
-    async with MCPClientManager():
-        final_state = cast(MealSightState, await graph.ainvoke(initial_state))
+    async with MCPClientManager() as manager:
+        final_state = cast(
+            MealSightState,
+            await graph.ainvoke(initial_state, context=AgentContext(mcp=manager)),
+        )
 
     logger.info("recommendation_finished", trace_id=trace_id)
     return final_state

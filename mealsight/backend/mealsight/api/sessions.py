@@ -18,12 +18,15 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from mealsight.api.streaming import SessionStream
+
 SessionStatus = Literal["pending", "running", "complete", "failed"]
 
 
 @dataclass
 class RecommendationSession:
     session_id: str
+    stream: SessionStream
     status: SessionStatus = "pending"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     trace_id: str | None = None
@@ -41,7 +44,8 @@ class SessionStore:
         self._sessions: dict[str, RecommendationSession] = {}
 
     def create(self) -> RecommendationSession:
-        session = RecommendationSession(session_id=str(uuid.uuid4()))
+        session_id = str(uuid.uuid4())
+        session = RecommendationSession(session_id=session_id, stream=SessionStream(session_id))
         self._sessions[session.session_id] = session
         return session
 
@@ -62,3 +66,19 @@ class SessionStore:
         session = self._sessions[session_id]
         session.status = "failed"
         session.error = error
+
+    def sweep_expired(self, ttl_seconds: float) -> int:
+        """Deletes every session whose created_at is older than
+        ttl_seconds — the "clean up session state after a timeout" this
+        phase's own task named directly. Returns how many were removed,
+        purely for logging; called periodically from mealsight.api.
+        app's own lifespan, never from a request handler."""
+        now = datetime.now(UTC)
+        expired = [
+            session_id
+            for session_id, session in self._sessions.items()
+            if (now - session.created_at).total_seconds() > ttl_seconds
+        ]
+        for session_id in expired:
+            del self._sessions[session_id]
+        return len(expired)

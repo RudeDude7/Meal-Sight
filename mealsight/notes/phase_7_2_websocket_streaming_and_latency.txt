@@ -1,0 +1,509 @@
+PHASE 7.2 STUDY NOTES: WEBSOCKET STREAMING, THEN CUTTING THE SILENCE IT
+EXPOSED
+=============================================================
+
+This phase has two parts, done back to back, the second one a direct
+consequence of what the first one made visible for the first time. Part
+one added real-time WebSocket streaming (WS /ws/{session_id}) on top of
+phase 7.1's REST layer — a typed, versioned message envelope; a per-
+session push channel nodes write to as they work; buffering so a client
+connecting mid-run or reconnecting catches up before going live; and a
+live trace of a real run that, for the first time, showed the actual
+SILENCE a user sits through, not just an aggregate duration. That trace
+showed an 8.838-second gap during the real vision call and a 5.4-second
+gap before the very first audio message — numbers nobody could see
+before this phase, because polling (phase 7.1's own /api/recommend/
+{session_id}) only ever showed "running" the whole time. Part two used
+exactly that new visibility to fix what it found: per-modality start
+messages, a periodic heartbeat, and — the actual latency win, not just
+a perceived one — finally running vision and text extraction
+concurrently instead of sequentially, a design choice from phase 6.2
+that had outlived its own justification.
+
+Files added: mealsight/api/{messages,streaming}.py, mealsight/api/
+routers/ws.py, backend/tests/test_api/test_ws.py. Files edited:
+mealsight/agent/{context,graph,runner}.py, mealsight/agent/nodes/
+{perceive,match_rank,reason}.py, mealsight/api/{app,dependencies,
+sessions}.py, mealsight/api/routers/recommend.py, backend/tests/
+test_agent/test_nodes.py, backend/tests/test_api/test_app.py (one
+assertion updated for a URL format change). Test count: 462 (end of
+phase 7.1) -> 476.
+
+
+1. WIRING: A StreamSink PROTOCOL, NOT A DIRECT DEPENDENCY ON THE API
+   LAYER
+=============================================================
+mealsight.agent.context.AgentContext gained a second field: stream:
+StreamSink | None = None, where StreamSink is a plain Protocol defined
+IN mealsight.agent (one method: emit(event_type, **fields) -> None,
+deliberately synchronous — asyncio.Queue.put_nowait is itself non-
+blocking, so no node call site needs to await it). The concrete
+implementation (mealsight.api.streaming.SessionStream) lives entirely
+in mealsight.api and is never imported by mealsight.agent — the agent
+layer knows "something I can emit named events to, if given one,"
+never that the real implementation is a WebSocket fan-out buffer. This
+mirrors the exact same discipline phase 6.1 established for
+MCPClientManager itself (a live resource threaded through context, not
+smuggled into state) and keeps the dependency direction pointing one
+way: api depends on agent, never the reverse.
+
+None is the default and the ordinary case for every existing caller —
+every script, every test, run_recommendation called without its new
+optional stream= parameter — so every node's own progress-emitting code
+checks for None first, the identical "presence of a capability, not a
+guarantee of one" pattern already used for runtime.context.mcp before
+phase 6.1's own AgentContext even existed.
+
+
+2. GRAPH-LEVEL node_start/node_complete FOR FREE, VIA A REDESIGNED
+   _timed WRAPPER
+=============================================================
+The phase 6.4 version of graph.py's own _timed wrapper used functools.
+wraps specifically so ITS OWN advertised signature matched whatever the
+wrapped node declared, letting LangGraph decide whether to inject
+runtime by inspecting the node itself. That design couldn't emit
+node_start/node_complete uniformly for all eleven nodes, because
+several of them (validate_input, record_outcome) never declared
+runtime at all — there was nothing for the wrapper to reach a stream
+through for those.
+
+Redesigned this phase: _timed's own wrapper now ALWAYS declares (state,
+runtime) itself, regardless of what the underlying node function
+declares — LangGraph therefore always injects runtime into every
+node's wrapped call, which is what makes node_start/node_complete fire
+for every one of the eleven nodes uniformly. Whether to actually
+FORWARD runtime to the real node function is decided once, at wrap
+time, by inspecting that function's own real signature (inspect.
+signature(fn).parameters) — a node that never declared runtime before
+this phase still never receives it now; only the WRAPPER's own outward
+signature changed, not any node's own contract.
+
+Verified live before trusting this, the same way the phase 6.4 version
+was verified live before it existed: does runtime.context resolve to
+None (safe) when no context is supplied to ainvoke at all, given every
+node now unconditionally touches runtime.context.stream before even
+calling the wrapped function? Confirmed directly with a small
+throwaway graph — yes, runtime.context is None, not an error, exactly
+what test_graph.py's own existing "no context at all" test already
+depended on continuing to work.
+
+
+3. THE MESSAGE ENVELOPE: EIGHT TYPES, ONE SHARED BASE, A DISCRIMINATED
+   UNION
+=============================================================
+mealsight.api.messages defines BaseWSMessage (type, version, session_id,
+timestamp — type declared on the base itself, not just each subclass,
+specifically so code holding a plain BaseWSMessage, like SessionStream's
+own buffer/queues typed broadly to hold every message type
+interchangeably, can still check .type without narrowing first) and
+eight Literal-discriminated subclasses: NodeStartMessage, NodeComplete
+Message, IngredientFoundMessage, RecipeMatchMessage, Recommendation
+Message, StreamTokenMessage, ErrorMessage, CompleteMessage. WSMessage
+itself is the Annotated[Union[...], Field(discriminator="type")] for
+schema validation; MESSAGE_CLASSES_BY_TYPE maps each type's own string
+name to its class, which is what lets SessionStream.emit(event_type,
+**fields) build the right one from a bare string + kwargs without
+mealsight.agent ever importing pydantic models that are properly this
+module's own concern.
+
+StreamTokenMessage is defined and schema-tested despite never being
+emitted today (see section 6) — "message envelopes validate against
+their schemas" was one of this phase's own explicit test requirements,
+and that has to be true for every type this protocol defines, not just
+the ones currently in active use.
+
+
+4. SessionStream: BOUNDED BUFFER, BOUNDED CONNECTIONS, NEVER BLOCKS A
+   NODE
+=============================================================
+One SessionStream per RecommendationSession (created alongside it in
+SessionStore.create() — sessions and streams are 1:1, so there's no
+separate registry to keep in sync). Two responsibilities: emit(...)
+appends to a bounded deque (DEFAULT_BUFFER_SIZE=500 — generous relative
+to a real run's own message count, not expected to bind in normal
+operation) AND fans the same message out to every currently-subscribed
+connection's own asyncio.Queue via put_nowait (non-blocking, matching
+StreamSink's own synchronous contract); replay() returns everything
+buffered so far, oldest first — what a client connecting mid-run, or
+reconnecting after a drop, gets before switching to live delivery.
+subscribe() raises TooManyConnectionsError once MAX_CONNECTIONS_PER_
+SESSION (4) live subscribers already exist for that session — a
+deliberate, small cap, since this is a single-user recommendation
+session, not a broadcast channel.
+
+
+5. WS /ws/{session_id}: THREE CASES, EACH HANDLED DIRECTLY
+=============================================================
+unknown session_id: one error message, close (policy-violation code
+1008). Already complete or failed: the final result (or error) as a
+single message, close — no need to touch the live fan-out machinery at
+all for a session that's already done. Pending or running: replay the
+buffer, then subscribe and stream live until a complete/error message
+ends the run.
+
+LIFECYCLE, the harder half of this endpoint: a client disconnecting
+must never kill the running recommendation. This holds structurally,
+not by any special-casing in the handler — the agent run is an
+independent asyncio.Task (mealsight.api.routers.recommend's own
+_run_in_background), already fully decoupled from any one WebSocket
+connection's own lifetime before this endpoint was ever written; this
+handler's only job on disconnect is to unsubscribe its own queue from
+the SessionStream and return. Every send is wrapped (_send) to swallow
+a disconnect discovered mid-send rather than letting it propagate —
+this matters specifically because a disconnect can be discovered
+between one successful send and the next one in a loop, not just at
+connection open.
+
+A real design decision needed for WebSocket dependency injection
+specifically: FastAPI resolves a dependency by its own declared
+parameter type, and a Request-typed getter (mealsight.api.dependencies'
+existing get_sessions, from phase 7.1) silently never fires for a
+websocket route, which receives a WebSocket, not a Request — both are
+starlette.requests.HTTPConnection subclasses with identical .app.state,
+but FastAPI doesn't unify them for you. Fixed with a second, tiny
+getter (get_sessions_ws) rather than any cleverness — the plain,
+explicit answer for the route kind that actually needs it.
+
+
+6. TOKEN STREAMING: CHECKED, NOT AVAILABLE, NOT FAKED
+=============================================================
+The task's own instruction was explicit: check whether the provider
+layer supports streaming before doing anything with it, and if it
+doesn't, say so rather than faking token-by-token output. Read the
+whole provider layer (base.py, mistral.py, groq.py) before writing
+anything — no `stream` parameter on any request body, no chunked/SSE
+response parsing, nothing. complete_json's own real HTTP call to
+Mistral already waits for the full response before reason (node 8) ever
+sees any of it; there is no token boundary this node could tap into
+without first adding real streaming support to MistralProvider itself,
+a materially bigger change than what was asked. So reason emits exactly
+ONE "recommendation" event (recipe_id, summary, available) once its
+decision (or its explanation, when nothing was cookable) is ready —
+never a stream_token event. That schema still exists (section 3) for a
+future provider that genuinely supports streaming to emit against.
+
+
+7. THE TESTS (WEBSOCKET LAYER)
+=============================================================
+8 tests in test_ws.py, using FastAPI's own TestClient (Starlette under
+the hood) rather than the httpx.ASGITransport pattern phase 7.1's own
+test_app.py already used — TestClient runs the real app in a
+background thread with its own event loop specifically so a
+synchronous test can drive a WebSocket connection while a real
+background asyncio.Task (the recommendation itself) keeps running
+concurrently, exactly like production; ASGITransport alone doesn't give
+you that. run_recommendation is monkeypatched for every one of these
+tests, the same convention test_app.py already established: exercising
+the real agent graph is tests/test_agent's own job, this file proves
+the WEBSOCKET layer delivers whatever's emitted, in the right order, to
+whoever's listening.
+
+Covers: unknown/complete/failed session handling; messages arriving in
+order (pre-seeded into the buffer before connecting); a genuinely
+mid-run connection receiving buffered messages THEN live ones — the
+fake run_recommendation itself sleeps and emits partway through,
+proving the buffered/live split is real, not just plausible; a client
+disconnect (connect, then immediately exit the context manager) not
+preventing the background run from completing, confirmed by polling
+/api/recommend/{session_id} afterward; and every one of the eight
+message types round-tripping through its own real pydantic schema,
+plus one deliberately-invalid construction confirming validation
+actually rejects a missing required field.
+
+3 more tests added directly in tests/test_agent/test_nodes.py (not the
+WebSocket layer specifically, but the node-side half of the same
+wiring): perceive emits ingredient_found for all three modalities
+through a FakeStream double; match_rank emits recipe_match once per
+candidate; reason emits exactly one recommendation event with the
+right recipe_id/available. These use the exact same FakeMCP-plus-fake-
+Runtime pattern every other node test in this file already uses,
+extended with a small FakeStream recording (event_type, fields) tuples
+— no real buffering/fan-out needed at this layer, since that's already
+covered separately in test_ws.py.
+
+
+8. PART TWO: WHAT THE FIRST REAL TRACE ACTUALLY SHOWED
+=============================================================
+The phase's own first live WebSocket run (part one's own verification)
+produced numbers nobody had been able to see before: an 8.838-second
+silence during the real vision call, and — less obviously, until you
+look at the raw timestamps — nothing at all from audio for its own
+first 5.4 real seconds, because perceive's phase-6.2 design only ever
+emitted ONE message per modality, on completion. Polling could show
+"running" for the whole 15.2 seconds; it could never show that most of
+that time was one single, real, unbroken silence.
+
+
+9. A FINDING THAT DIDN'T CHECK OUT: docs/KNOWN_ISSUES.md
+=============================================================
+The task's own framing said the vision/text sequencing issue was
+"already logged in docs/KNOWN_ISSUES.md; remove the entry once fixed."
+Read that file directly before doing anything — it has exactly two
+entries (a dietary-tag substring-matching bug and a non-protein-
+critical-ingredient gap, both from phase 2.2), neither about perceive,
+neither about vision/text sequencing at all. There was nothing to
+remove. Reported this directly rather than silently treating the
+task's own premise as ground truth, or fabricating a removal for an
+entry that was never actually there — the same "verify before trusting
+a description of what already exists" habit this project has followed
+since phase 6.1's own AgentContext finding.
+
+
+10. THREE CHANGES TO perceive, IN THE ORDER THE TASK ITSELF PRIORITIZED
+=============================================================
+10.1 Start messages
+    Each modality now emits its own "ingredient_found" event
+    IMMEDIATELY before its real provider call — "Analyzing your
+    photo...", "Transcribing your voice memo...", "Reading your
+    request..." — via the exact same _emit helper already used for
+    completions, just called one line earlier than before, at the top
+    of each of the three new _run_vision/_run_audio/_run_text
+    coroutines rather than only at the bottom.
+
+10.2 Heartbeats, honest and varied
+    _run_with_heartbeat wraps each modality's own real call
+    (asyncio.ensure_future + asyncio.wait with a timeout, which only
+    ever PEEKS at whether the task is done — it never cancels or
+    otherwise interferes with the real call underneath) and emits one
+    heartbeat every HEARTBEAT_INTERVAL_SECONDS (3.0) while it's still
+    in flight, cycling (itertools.cycle) through a small, per-modality
+    set of genuinely different, honest descriptions of ongoing work —
+    never a repeated identical string, and never a fabricated
+    percentage this node has no real way to compute. A call that
+    finishes before the first interval elapses (routinely text, often
+    audio) never triggers a single heartbeat — the mechanism costs
+    nothing when it isn't needed.
+
+10.3 All three modalities run concurrently
+    The actual latency fix, not just the perceived one: vision and
+    text extraction, previously deliberately sequential inside one
+    coroutine specifically because "they're still the same Mistral
+    account behind the same shared httpx connection pool" (phase
+    6.2's own reasoning), now run via one asyncio.gather alongside
+    audio, all three at once. The rationale that justified keeping
+    them sequential was reopened and checked directly against what was
+    already known, not re-assumed: mealsight.providers.rate_limiter.
+    RateLimiter keys both its bucket AND its lock per MODEL id, not
+    per provider — settings.VISION_MODEL (mistral-medium-2505) and
+    settings.EXTRACTION_MODEL (ministral-8b-2512) are two completely
+    independent keys, confirmed by reading rate_limiter.py directly
+    this phase, not merely cited from an old docstring. There was no
+    remaining reason to keep them sequential, and doing so was
+    costing real wall-clock time for a resource contention that was
+    never actually going to happen.
+
+Only the FINAL message per modality (completion or a caught failure)
+still lands in state["stream_messages"], unchanged from before this
+phase — start/heartbeat events go through runtime.context.stream only,
+never the state accumulator, so every existing "one message per
+attempted modality" length assertion a non-streaming caller (or an
+existing test) already made stays true without modification. This is
+exactly why the task's own "existing perceive tests still pass"
+requirement could be satisfied without touching a single one of those
+assertions.
+
+
+11. THE TESTS (LATENCY REDUCTION)
+=============================================================
+One test replaced outright: test_perceive_runs_vision_and_text_
+sequentially_not_concurrently asserted the OLD, now-deliberately-
+reversed behavior — it couldn't just be left in place, since it would
+fail correctly (proving the fix works) rather than meaningfully.
+Replaced with test_perceive_runs_vision_and_text_concurrently, which
+asserts the opposite: both slow fakes sleep 0.1s, and total elapsed
+stays under 0.18s (sequential would need >=0.2s), with text's own start
+timestamp falling before vision's own end timestamp — genuinely
+overlapping in real wall-clock time, not just fast for some other
+reason.
+
+Three new tests: test_perceive_runs_all_three_modalities_concurrently
+(all three fakes sleep 0.1s; total elapsed stays under 0.2s where
+sequential would need >=0.3s; every one of the three recorded start
+timestamps falls within a 0.05s window of each other, not one only
+starting after another has already finished); test_perceive_emits_a_
+start_message_per_modality_before_its_call (a FakeStream confirms each
+modality's own FIRST emitted event — not just AN event somewhere in the
+stream — is its exact start message, cross-checked against a separate
+call_order list recorded by the fakes themselves proving the provider
+call really did happen after that message went out); test_perceive_
+emits_heartbeats_during_a_slow_call_and_stops_after (HEARTBEAT_INTERVAL_
+SECONDS monkeypatched down to 0.05s so the test doesn't need to
+actually wait 3 real seconds; a single slow fake vision call sleeping
+0.22s produces a start message, at least two heartbeats drawn from
+vision's own real heartbeat-text set, and a real completion message
+last — never a heartbeat after the call has actually finished).
+
+
+12. VERIFICATION
+=============================================================
+ruff/mypy --strict/pytest all clean both times this phase touched code
+(476 tests total, no regressions across phases 1-7.1's own suite).
+
+Part one's own live WebSocket run (photo_01 + memo_13 + a typed
+constraint, a real running uvicorn process, a real `websockets` client)
+printed 37 real messages in order with real receive-time offsets,
+establishing the baseline this phase's own part two set out to cut:
+15.2s total perceive duration, 8.838s longest silence (between two
+ingredient_found completions — audio's own at +5.4s, vision's own at
++14.25s — since neither modality emitted anything before finishing).
+
+Part two's own re-run of the IDENTICAL scenario, same real servers,
+same real Mistral/Groq: perceive dropped to 11.698s (roughly 3.5s saved
+by running vision and text concurrently rather than sequentially), and
+the longest silence anywhere in the whole run dropped to exactly 3.002s
+— one heartbeat interval, now the new theoretical ceiling for any gap,
+matching the design directly rather than coincidentally. Start messages
+for all three modalities fired at +0.015s, essentially immediately,
+replacing the previous 5.4-14.25 second silences before a user saw
+anything at all. No 429 or RateLimitExceeded appeared anywhere in the
+real run's logs.
+
+Rate-limiter behavior under the new concurrency was confirmed
+separately and directly, not just inferred from the absence of errors
+in one run: a standalone script fired 3 rapid acquire() calls each,
+concurrently, for both real models. Vision's own waits (0, 2.38, 2.38s)
+exactly matched its own 0.42 rps budget; text's own waits (0, 0.32,
+0.32s) exactly matched its own 3.13 rps budget; total elapsed for BOTH
+running together (4.765s) equaled vision's own total requirement ALONE
+— text's three calls completed entirely within vision's own window,
+proving zero cross-model blocking rather than merely an absence of
+visible symptoms.
+
+
+13. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+A StreamSink Protocol in mealsight.agent versus importing SessionStream
+directly into AgentContext
+    Covered in section 1. Importing the concrete WebSocket-fan-out
+    class into the agent layer would have been simpler by one import
+    statement and cost real architectural discipline — mealsight.agent
+    would then know about FastAPI/WebSockets, a dependency direction
+    this project has never allowed in the other direction (mealsight.
+    api already depends on mealsight.agent, never the reverse). A
+    Protocol costs nothing at runtime and keeps that boundary real.
+
+Redesigning _timed to always inject runtime versus adding runtime to
+every node file that needed a new capability this phase
+    The alternative — give validate_input and record_outcome their own
+    runtime parameter just so the graph-level wrapper could reach a
+    stream through them — would have touched two node files that
+    otherwise have no reason to know about MCP or streaming at all,
+    for a capability that's fundamentally the WRAPPER's own job
+    (timing and now progress-emission), not theirs. Redesigning the
+    wrapper once, verified live, kept both of those nodes' own
+    contracts exactly as narrow as they should be.
+
+A uniform 3-second heartbeat interval for every modality versus a
+per-modality threshold tuned to each one's own typical duration
+    A single shared constant was chosen over three separately-tuned
+    ones: it's simpler, it costs nothing extra for a fast modality
+    (the heartbeat loop simply never fires before completion), and the
+    real number that mattered — no gap longer than ~3s anywhere in the
+    whole run — is satisfied identically either way. Per-modality
+    tuning would be solving a problem that doesn't exist yet.
+
+Fixing docs/KNOWN_ISSUES.md's own inaccurate premise by adding the
+entry that should have existed, then removing it, versus just noting
+the discrepancy
+    Considered and rejected: fabricating an entry to remove would
+    manufacture a documentation trail that never happened, purely to
+    make the task's own framing look accurate in hindsight. Reporting
+    the discrepancy directly (section 9) is the same honesty standard
+    this project applies to every other "the task says X, but reading
+    the code shows Y" moment.
+
+
+14. GLOSSARY
+=============================================================
+StreamSink
+    The one-method Protocol (mealsight.agent.context) a node calls to
+    push a live progress event, if this run has one — implemented
+    concretely by mealsight.api.streaming.SessionStream, never
+    imported directly by mealsight.agent.
+
+SessionStream
+    Per-session bounded buffer + live fan-out (mealsight.api.
+    streaming) — emit() both records and broadcasts; replay() returns
+    everything buffered so far for a mid-run or reconnecting client;
+    subscribe()/unsubscribe() manage live WebSocket queues, capped at
+    MAX_CONNECTIONS_PER_SESSION.
+
+message envelope
+    One of eight Literal-discriminated pydantic models (mealsight.api.
+    messages) every WebSocket message is — node_start, node_complete,
+    ingredient_found, recipe_match, recommendation, stream_token,
+    error, complete — each carrying session_id/timestamp/version
+    regardless of type.
+
+heartbeat
+    A periodic, honestly-worded progress message emitted while a
+    modality's own real provider call is still in flight (perceive's
+    own _run_with_heartbeat) — never a fake percentage, never a
+    repeated identical string, and never fired at all for a call that
+    finishes before the first interval elapses.
+
+
+15. INTERVIEW TALKING POINTS
+=============================================================
+Q: Why does mealsight.agent define its own StreamSink Protocol instead
+of just importing SessionStream from mealsight.api?
+
+    Because mealsight.api already depends on mealsight.agent — it
+    calls run_recommendation, it builds the graph, it holds an
+    MCPClientManager built from mealsight.agent's own class. If
+    mealsight.agent turned around and imported a WebSocket-fan-out
+    class from mealsight.api, that would be a circular architectural
+    dependency, not just an inconvenient import order. A Protocol
+    lets every node ask for "something with an emit method" without
+    the agent layer ever knowing what's actually listening on the
+    other end — a plain in-memory recorder in a test, a real
+    WebSocket buffer in production, or nothing at all (None) for
+    every standalone script that doesn't need streaming.
+
+Q: You changed vision and text extraction from sequential to
+concurrent. What would have to be true for that to have been the wrong
+call, and how did you check it wasn't?
+
+    It would be wrong if the rate limiter's buckets were actually
+    shared per provider rather than per model, or if there were some
+    OTHER real resource — a shared connection limit, an account-level
+    concurrency cap Mistral enforces server-side — that the original
+    "same account, same connection pool" reasoning was gesturing at
+    even if the rate limiter itself wasn't the actual mechanism. I
+    checked the first directly, by reading rate_limiter.py itself, not
+    by trusting the old docstring's own citation of it. I checked the
+    second empirically, twice: once via a live end-to-end run (no 429s
+    anywhere in the logs), and once via a standalone script hammering
+    both real models' acquire() calls concurrently and confirming
+    their wait times were completely independent of each other. Both
+    were real checks against real behavior, not an assumption that the
+    rate limiter's own design must be the whole story.
+
+Q: Your heartbeat messages are honest instead of fake progress
+percentages. What does "honest" actually mean here, concretely?
+
+    Two things. First, the words themselves never claim to know
+    something this node doesn't actually know — there's no "73%
+    complete" anywhere, because nothing in this pipeline can compute
+    that number; the vision call is a single opaque HTTP request with
+    no intermediate progress signal at all. Second, the messages
+    genuinely vary and describe real, ongoing work ("still analyzing,"
+    "still looking closely") rather than one string repeated
+    mechanically, which would read to a user as a stuck process rather
+    than a slow one. The cycle is a small, fixed set of true
+    statements about what's happening, not a progress bar wearing a
+    disguise.
+
+Q: How do you know the client-disconnect handling actually works,
+rather than just not throwing an exception in your test?
+
+    The test connects, then immediately exits the WebSocket context
+    manager — a real disconnect from the client's side, not a
+    simulated one. Afterward it polls GET /api/recommend/{session_id}
+    and asserts the session reached "complete" with the real result
+    from the (monkeypatched, but still genuinely async and independently
+    scheduled) background task. If the disconnect had actually
+    cancelled or otherwise interfered with that task, the poll would
+    show "running" forever or "failed" — it doesn't, so the background
+    run genuinely kept going after the WebSocket went away, not merely
+    "no exception was raised while disconnecting."

@@ -30,6 +30,8 @@ has for other reasons.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -42,7 +44,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from mealsight.agent.mcp_client import MCPClientManager
 from mealsight.api.errors import register_error_handlers
 from mealsight.api.rate_limit import SubmissionRateLimiter
-from mealsight.api.routers import grocery, health, history, pantry, profile, recipes, recommend
+from mealsight.api.routers import grocery, health, history, pantry, profile, recipes, recommend, ws
 from mealsight.api.sessions import SessionStore
 from mealsight.config.settings import settings
 from mealsight.utils.logging import bind_trace_id, current_trace_id, get_logger
@@ -50,6 +52,22 @@ from mealsight.utils.logging import bind_trace_id, current_trace_id, get_logger
 logger = get_logger("mealsight.api.app")
 
 TRACE_ID_HEADER = "X-Trace-Id"
+
+# "Clean up session state after a timeout" — a session (and its
+# SessionStream's own buffered messages) is purged this long after
+# creation, whether or not anyone ever polled or connected for it.
+# Swept periodically rather than on a per-session timer, since an
+# in-process dict this small doesn't need one timer per entry.
+SESSION_TTL_SECONDS = 3600.0
+SESSION_SWEEP_INTERVAL_SECONDS = 60.0
+
+
+async def _sweep_sessions_periodically(sessions: SessionStore) -> None:
+    while True:
+        await asyncio.sleep(SESSION_SWEEP_INTERVAL_SECONDS)
+        removed = sessions.sweep_expired(SESSION_TTL_SECONDS)
+        if removed:
+            logger.info("sessions_swept", removed=removed)
 
 
 @asynccontextmanager
@@ -60,10 +78,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.sessions = SessionStore()
     app.state.rate_limiter = SubmissionRateLimiter()
     app.state.health_http_client = httpx.AsyncClient()
+    sweep_task = asyncio.create_task(_sweep_sessions_periodically(app.state.sessions))
     logger.info("api_started")
     try:
         yield
     finally:
+        sweep_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sweep_task
         await manager.shutdown()
         await app.state.health_http_client.aclose()
         logger.info("api_stopped")
@@ -109,6 +131,7 @@ def create_app(
     app.include_router(history.router)
     app.include_router(profile.router)
     app.include_router(grocery.router)
+    app.include_router(ws.router)
 
     return app
 

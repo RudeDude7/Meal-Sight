@@ -93,6 +93,8 @@ async def _run_in_background(
     audio_bytes: bytes | None,
     text_input: str | None,
 ) -> None:
+    session = sessions.get(session_id)
+    stream = session.stream if session is not None else None
     sessions.mark_running(session_id, session_id)
     try:
         final_state = await run_recommendation(
@@ -101,11 +103,18 @@ async def _run_in_background(
             text_input=text_input,
             manager=manager,
             trace_id=session_id,
+            stream=stream,
         )
-        sessions.mark_complete(session_id, _serialize_result(final_state))
+        result = _serialize_result(final_state)
+        sessions.mark_complete(session_id, result)
+        if stream is not None:
+            stream.emit("complete", result=result)
     except Exception:
         logger.error("recommend_background_task_failed", exc_info=True, session_id=session_id)
-        sessions.mark_failed(session_id, "The recommendation failed unexpectedly.")
+        error_message = "The recommendation failed unexpectedly."
+        sessions.mark_failed(session_id, error_message)
+        if stream is not None:
+            stream.emit("error", code="internal_error", message=error_message)
 
 
 @router.post("", status_code=202, response_model=RecommendationAccepted)
@@ -163,7 +172,7 @@ async def start_recommendation(
     return RecommendationAccepted(
         session_id=session.session_id,
         status=session.status,
-        websocket_url=f"/ws/recommend/{session.session_id}",
+        websocket_url=f"/ws/{session.session_id}",
     )
 
 

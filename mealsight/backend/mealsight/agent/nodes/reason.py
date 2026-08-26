@@ -29,6 +29,23 @@ LLM call is made either — there's nothing genuinely cookable to
 recommend — and this node instead names the closest candidate's missing
 ingredients as a shopping list, rather than presenting an uncookable
 recipe as if it were a real suggestion.
+
+TOKEN STREAMING, CHECKED AND NOT AVAILABLE: mealsight.providers (base.py,
+mistral.py, groq.py) has no streaming support anywhere — no `stream`
+parameter on any request body, no chunked/SSE response parsing, nothing
+— confirmed by reading the whole provider layer before writing this
+phase's own streaming work, not assumed. complete_json's own real HTTP
+call to Mistral already waits for the full response before this
+function ever sees any of it, so there is no token-by-token boundary
+this node could tap into even in principle without first adding real
+streaming support to MistralProvider itself — a materially bigger
+change than "wire up the event this node already has the data for,"
+and not what was asked. So this node does NOT emit stream_token events
+at all (faking one token at a time out of an already-complete string
+would be exactly the "faking it" this was asked not to do) — it emits
+ONE "recommendation" event, via runtime.context.stream if this run has
+one, once a decision (or an explanation, when nothing was cookable) is
+actually ready.
 """
 
 from __future__ import annotations
@@ -229,6 +246,13 @@ Context: {context_signals or "(none)"}
 Choose exactly one recipe id from the candidates above."""
 
 
+def _emit_recommendation(
+    stream: Any, *, recipe_id: str | None, summary: str, available: bool
+) -> None:
+    if stream is not None:
+        stream.emit("recommendation", recipe_id=recipe_id, summary=summary, available=available)
+
+
 def _fallback_decision(candidates: list[dict[str, Any]], reason_text: str) -> dict[str, Any]:
     top = candidates[0]
     return {
@@ -282,6 +306,8 @@ def _no_candidates_explanation(state: MealSightState) -> dict[str, Any]:
 async def reason(state: MealSightState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     logger.info("node_started", node=NODE_NAME)
 
+    stream = runtime.context.stream if runtime.context is not None else None
+
     if state.get("terminal"):
         logger.info("node_skipped", node=NODE_NAME, reason="terminal state")
         return {"stream_messages": [f"[{NODE_NAME}] Skipped — no usable input."]}
@@ -289,6 +315,9 @@ async def reason(state: MealSightState, runtime: Runtime[AgentContext]) -> dict[
     if state.get("search_exhausted") or not state.get("matched_recipes"):
         explanation = _no_candidates_explanation(state)
         logger.info("node_finished", node=NODE_NAME, available=False)
+        _emit_recommendation(
+            stream, recipe_id=None, summary=explanation["explanation"], available=False
+        )
         return {
             "top_recommendation": explanation,
             "stream_messages": [f"[{NODE_NAME}] {explanation['explanation']}"],
@@ -298,6 +327,9 @@ async def reason(state: MealSightState, runtime: Runtime[AgentContext]) -> dict[
     unified = state.get("unified_request")
     if unified is None:
         explanation = _no_candidates_explanation(state)
+        _emit_recommendation(
+            stream, recipe_id=None, summary=explanation["explanation"], available=False
+        )
         return {
             "top_recommendation": explanation,
             "stream_messages": [f"[{NODE_NAME}] {explanation['explanation']}"],
@@ -306,6 +338,9 @@ async def reason(state: MealSightState, runtime: Runtime[AgentContext]) -> dict[
     if not any(c.get("can_cook") for c in candidates):
         explanation = _no_cookable_explanation(candidates)
         logger.info("node_finished", node=NODE_NAME, available=False, reason="no_cookable_candidate")
+        _emit_recommendation(
+            stream, recipe_id=None, summary=explanation["explanation"], available=False
+        )
         return {
             "top_recommendation": explanation,
             "stream_messages": [f"[{NODE_NAME}] {explanation['explanation']}"],
@@ -344,6 +379,9 @@ async def reason(state: MealSightState, runtime: Runtime[AgentContext]) -> dict[
             result = _fallback_decision(candidates, reason_text)
             messages.append(f"[{NODE_NAME}] {result['overall_summary']}")
             logger.info("node_finished", node=NODE_NAME, available=True, fallback=True)
+            _emit_recommendation(
+                stream, recipe_id=result["recipe_id"], summary=result["overall_summary"], available=True
+            )
             return {"top_recommendation": result, "stream_messages": messages}
 
         chosen = candidates_by_id[decision.chosen_recipe_id]
@@ -369,6 +407,9 @@ async def reason(state: MealSightState, runtime: Runtime[AgentContext]) -> dict[
                 }
                 messages.append(f"[{NODE_NAME}] {result['overall_summary']}")
                 logger.info("node_finished", node=NODE_NAME, available=True, overrode_uncookable=True)
+                _emit_recommendation(
+                    stream, recipe_id=result["recipe_id"], summary=result["overall_summary"], available=True
+                )
                 return {"top_recommendation": result, "stream_messages": messages}
 
         result = {
@@ -380,11 +421,17 @@ async def reason(state: MealSightState, runtime: Runtime[AgentContext]) -> dict[
         }
         messages.append(f"[{NODE_NAME}] Recommending: {decision.overall_summary}")
         logger.info("node_finished", node=NODE_NAME, available=True, fallback=False)
+        _emit_recommendation(
+            stream, recipe_id=result["recipe_id"], summary=result["overall_summary"], available=True
+        )
         return {"top_recommendation": result, "stream_messages": messages}
     except Exception as exc:  # noqa: BLE001 — never raise out of a node
         logger.error("reason_unexpected_failure", exc_info=True)
         result = _fallback_decision(candidates, f"reasoning step failed unexpectedly ({exc})")
         messages.append(f"[{NODE_NAME}] {result['overall_summary']}")
+        _emit_recommendation(
+            stream, recipe_id=result["recipe_id"], summary=result["overall_summary"], available=True
+        )
         return {"top_recommendation": result, "stream_messages": messages}
 
 

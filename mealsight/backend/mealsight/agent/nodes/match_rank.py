@@ -25,6 +25,14 @@ LLM judgment. It exists to narrow the field; reason (node 8) makes the
 final choice among the top few using its own judgment plus data this
 node can't weigh numerically (context signals, mood, taste).
 
+Each candidate also emits a "recipe_match" progress event the moment
+its own match_ingredients call resolves, via runtime.context.stream if
+this run has one — this loop is otherwise the second-longest visible
+wait in a real run (several sequential, fast local MCP calls), and a
+per-candidate event is what lets a client show matching progress
+recipe by recipe instead of one silent wait followed by a single
+"done."
+
 Weights (see the module-level constants below) are additive except for
 the repetition penalty and the critical-missing penalty, which are
 subtracted. ingredient match score is the dominant term; freshness,
@@ -227,6 +235,7 @@ async def match_rank(state: MealSightState, runtime: Runtime[AgentContext]) -> d
     user_profile = state.get("user_profile") or {}
     cuisine_preferences = user_profile.get("cuisine_preferences") or {}
     servings = getattr(unified, "servings", None) if unified is not None else None
+    stream = runtime.context.stream if runtime.context is not None else None
 
     messages: list[str] = []
 
@@ -269,6 +278,14 @@ async def match_rank(state: MealSightState, runtime: Runtime[AgentContext]) -> d
                     ),
                 }
             )
+            if stream is not None:
+                stream.emit(
+                    "recipe_match",
+                    recipe_id=recipe_id,
+                    name=recipe.get("name"),
+                    match_score=match_score,
+                    can_cook=match_data.get("can_cook"),
+                )
         messages.append(f"[{NODE_NAME}] Matched ingredients against {len(scored)} candidate recipe(s).")
 
         scored.sort(key=lambda r: r["composite_score"], reverse=True)

@@ -90,6 +90,23 @@ def _runtime(mcp: FakeMCP) -> Runtime[AgentContext]:
     return Runtime(context=AgentContext(mcp=cast(MCPClientManager, mcp)))
 
 
+class FakeStream:
+    """Stands in for mealsight.api.streaming.SessionStream — records
+    every (event_type, fields) a node emits, without any of the real
+    buffering/fan-out machinery a WebSocket test needs (see tests/
+    test_api/test_ws.py for that layer)."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, Any]]] = []
+
+    def emit(self, event_type: str, **fields: Any) -> None:
+        self.events.append((event_type, fields))
+
+
+def _runtime_with_stream(mcp: FakeMCP, stream: FakeStream) -> Runtime[AgentContext]:
+    return Runtime(context=AgentContext(mcp=cast(MCPClientManager, mcp), stream=stream))
+
+
 def _profile_response() -> ToolCallResult:
     return ToolCallResult(
         success=True,
@@ -214,7 +231,8 @@ async def test_perceive_continues_when_one_modality_fails(monkeypatch: pytest.Mo
     monkeypatch.setattr(perceive_module, "analyze_text_input", working_text)
 
     result = await perceive(
-        {"image_bytes": b"fake", "text_input": "2 servings", "stream_messages": []}
+        {"image_bytes": b"fake", "text_input": "2 servings", "stream_messages": []},
+        _runtime(FakeMCP()),
     )
 
     assert "vision_result" not in result
@@ -223,7 +241,7 @@ async def test_perceive_continues_when_one_modality_fails(monkeypatch: pytest.Mo
 
 
 async def test_perceive_skips_when_terminal() -> None:
-    result = await perceive({"terminal": True, "stream_messages": []})
+    result = await perceive({"terminal": True, "stream_messages": []}, _runtime(FakeMCP()))
     assert "vision_result" not in result
     assert len(result["stream_messages"]) == 1
 
@@ -247,7 +265,9 @@ async def test_perceive_runs_groq_and_mistral_concurrently(monkeypatch: pytest.M
     monkeypatch.setattr(perceive_module, "analyze_voice_memo", slow_audio)
 
     started = time.monotonic()
-    await perceive({"image_bytes": b"fake", "audio_bytes": b"fake", "stream_messages": []})
+    await perceive(
+        {"image_bytes": b"fake", "audio_bytes": b"fake", "stream_messages": []}, _runtime(FakeMCP())
+    )
     elapsed = time.monotonic() - started
 
     # Sequential would take >= 0.2s; concurrent should take ~0.1s.
@@ -257,28 +277,196 @@ async def test_perceive_runs_groq_and_mistral_concurrently(monkeypatch: pytest.M
     assert events["audio_start"] < events["vision_end"]
 
 
-async def test_perceive_runs_vision_and_text_sequentially_not_concurrently(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_perceive_runs_vision_and_text_concurrently(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Reopened this phase (see perceive's own module docstring): the
+    # rate limiter keys buckets per model id, not per provider, so
+    # vision (mistral-medium-2505) and text extraction (ministral-8b-
+    # 2512) never contend — running them sequentially was pure wasted
+    # wall-clock time, not a real safety measure.
     timeline: list[tuple[str, float]] = []
 
     async def slow_vision(image_bytes: bytes, **kwargs: object) -> VisionPerception:
         timeline.append(("vision_start", time.monotonic()))
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.1)
         timeline.append(("vision_end", time.monotonic()))
         return _vision()
 
     async def slow_text(text: str, **kwargs: object) -> TextPerception:
         timeline.append(("text_start", time.monotonic()))
+        await asyncio.sleep(0.1)
+        timeline.append(("text_end", time.monotonic()))
         return _text()
 
     monkeypatch.setattr(perceive_module, "analyze_fridge_photo", slow_vision)
     monkeypatch.setattr(perceive_module, "analyze_text_input", slow_text)
 
-    await perceive({"image_bytes": b"fake", "text_input": "hello", "stream_messages": []})
+    started = time.monotonic()
+    await perceive(
+        {"image_bytes": b"fake", "text_input": "hello", "stream_messages": []}, _runtime(FakeMCP())
+    )
+    elapsed = time.monotonic() - started
+
+    # Sequential would take >= 0.2s; concurrent should take ~0.1s.
+    assert elapsed < 0.18
 
     events = dict(timeline)
-    assert events["text_start"] >= events["vision_end"]
+    assert events["text_start"] < events["vision_end"]
+
+
+async def test_perceive_runs_all_three_modalities_concurrently(monkeypatch: pytest.MonkeyPatch) -> None:
+    timeline: list[tuple[str, float]] = []
+
+    async def slow_vision(image_bytes: bytes, **kwargs: object) -> VisionPerception:
+        timeline.append(("vision_start", time.monotonic()))
+        await asyncio.sleep(0.1)
+        return _vision()
+
+    async def slow_audio(audio_bytes: bytes, **kwargs: object) -> AudioPerception:
+        timeline.append(("audio_start", time.monotonic()))
+        await asyncio.sleep(0.1)
+        return _audio()
+
+    async def slow_text(text: str, **kwargs: object) -> TextPerception:
+        timeline.append(("text_start", time.monotonic()))
+        await asyncio.sleep(0.1)
+        return _text()
+
+    monkeypatch.setattr(perceive_module, "analyze_fridge_photo", slow_vision)
+    monkeypatch.setattr(perceive_module, "analyze_voice_memo", slow_audio)
+    monkeypatch.setattr(perceive_module, "analyze_text_input", slow_text)
+
+    started = time.monotonic()
+    await perceive(
+        {
+            "image_bytes": b"fake",
+            "audio_bytes": b"fake",
+            "text_input": "hello",
+            "stream_messages": [],
+        },
+        _runtime(FakeMCP()),
+    )
+    elapsed = time.monotonic() - started
+
+    # Sequential would take >= 0.3s; concurrent should take ~0.1s.
+    assert elapsed < 0.2
+
+    starts = sorted(timeline, key=lambda pair: pair[1])
+    # All three should have STARTED within a small window of each
+    # other — not one only starting after another has already finished.
+    assert starts[-1][1] - starts[0][1] < 0.05
+
+
+async def test_perceive_emits_a_start_message_per_modality_before_its_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call_order: list[str] = []
+
+    async def fake_vision(image_bytes: bytes, **kwargs: object) -> VisionPerception:
+        call_order.append("vision_call_started")
+        return _vision()
+
+    async def fake_audio(audio_bytes: bytes, **kwargs: object) -> AudioPerception:
+        call_order.append("audio_call_started")
+        return _audio()
+
+    async def fake_text(text: str, **kwargs: object) -> TextPerception:
+        call_order.append("text_call_started")
+        return _text()
+
+    monkeypatch.setattr(perceive_module, "analyze_fridge_photo", fake_vision)
+    monkeypatch.setattr(perceive_module, "analyze_voice_memo", fake_audio)
+    monkeypatch.setattr(perceive_module, "analyze_text_input", fake_text)
+
+    stream = FakeStream()
+    await perceive(
+        {
+            "image_bytes": b"fake",
+            "audio_bytes": b"fake",
+            "text_input": "hello",
+            "stream_messages": [],
+        },
+        _runtime_with_stream(FakeMCP(), stream),
+    )
+
+    # Every modality's own FIRST emitted event is its start message, not
+    # its completion message — confirming the start message fires
+    # before the provider call, not just that it exists somewhere in
+    # the stream.
+    first_event_per_modality: dict[str, str] = {}
+    for event_type, fields in stream.events:
+        if event_type == "ingredient_found":
+            first_event_per_modality.setdefault(fields["modality"], fields["message"])
+
+    assert first_event_per_modality["vision"] == perceive_module._START_MESSAGES["vision"]
+    assert first_event_per_modality["audio"] == perceive_module._START_MESSAGES["audio"]
+    assert first_event_per_modality["text"] == perceive_module._START_MESSAGES["text"]
+    assert set(call_order) == {"vision_call_started", "audio_call_started", "text_call_started"}
+
+
+async def test_perceive_emits_heartbeats_during_a_slow_call_and_stops_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(perceive_module, "HEARTBEAT_INTERVAL_SECONDS", 0.05)
+
+    async def slow_vision(image_bytes: bytes, **kwargs: object) -> VisionPerception:
+        await asyncio.sleep(0.22)
+        return _vision()
+
+    monkeypatch.setattr(perceive_module, "analyze_fridge_photo", slow_vision)
+
+    stream = FakeStream()
+    await perceive(
+        {"image_bytes": b"fake", "stream_messages": []},
+        _runtime_with_stream(FakeMCP(), stream),
+    )
+
+    vision_events = [
+        fields["message"] for event_type, fields in stream.events if event_type == "ingredient_found"
+    ]
+    # start + at least a couple heartbeats + completion, and no more
+    # heartbeats appear after the call itself actually finished (the
+    # last event is always the real completion message, never a
+    # heartbeat).
+    assert vision_events[0] == perceive_module._START_MESSAGES["vision"]
+    assert len(vision_events) >= 4
+    assert vision_events[-1] == "[perceive] Couldn't identify anything in the photo (no items found)."
+    heartbeat_texts = set(perceive_module._HEARTBEAT_MESSAGES["vision"])
+    middle_events = vision_events[1:-1]
+    assert middle_events  # at least one heartbeat actually fired
+    assert all(message in heartbeat_texts for message in middle_events)
+
+
+async def test_perceive_emits_ingredient_found_per_modality(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_vision(image_bytes: bytes, **kwargs: object) -> VisionPerception:
+        return _vision([_vision_item()])
+
+    async def fake_audio(audio_bytes: bytes, **kwargs: object) -> AudioPerception:
+        return _audio(raw_transcript="two servings please")
+
+    async def fake_text(text: str, **kwargs: object) -> TextPerception:
+        return _text(servings=2)
+
+    monkeypatch.setattr(perceive_module, "analyze_fridge_photo", fake_vision)
+    monkeypatch.setattr(perceive_module, "analyze_voice_memo", fake_audio)
+    monkeypatch.setattr(perceive_module, "analyze_text_input", fake_text)
+
+    stream = FakeStream()
+    await perceive(
+        {
+            "image_bytes": b"fake",
+            "audio_bytes": b"fake",
+            "text_input": "2 servings",
+            "stream_messages": [],
+        },
+        _runtime_with_stream(FakeMCP(), stream),
+    )
+
+    modalities_emitted = {
+        event_fields["modality"]
+        for event_type, event_fields in stream.events
+        if event_type == "ingredient_found"
+    }
+    assert modalities_emitted == {"vision", "audio", "text"}
 
 
 # --------------------------------------------------------------------
@@ -480,6 +668,10 @@ def _sequenced_runtime(mcp: SequencedMCP) -> Runtime[AgentContext]:
 
 def _fake_runtime(mcp: object) -> Runtime[AgentContext]:
     return Runtime(context=AgentContext(mcp=cast(MCPClientManager, mcp)))
+
+
+def _fake_runtime_with_stream(mcp: object, stream: FakeStream) -> Runtime[AgentContext]:
+    return Runtime(context=AgentContext(mcp=cast(MCPClientManager, mcp), stream=stream))
 
 
 async def test_search_recipes_succeeds_on_first_try_no_relaxation() -> None:
@@ -716,6 +908,32 @@ async def test_match_rank_calls_nutrition_for_top_3_only() -> None:
     assert set(with_nutrition) == {"r1", "r2", "r3"}
 
 
+async def test_match_rank_emits_recipe_match_per_candidate() -> None:
+    mcp = RecipeAwareMCP(
+        match_ingredients={
+            "r_high": _match_data(0.9),
+            "r_low": _match_data(0.3),
+        },
+        check_repetition={
+            "r_high": _repetition_data(),
+            "r_low": _repetition_data(),
+        },
+        nutrition={"r_high": {"totals": {}}, "r_low": {"totals": {}}},
+    )
+    state: MealSightState = {
+        "recipe_candidates": [_recipe("r_low"), _recipe("r_high")],
+        "unified_request": _unified(),
+        "stream_messages": [],
+    }
+    stream = FakeStream()
+    await match_rank(state, _fake_runtime_with_stream(mcp, stream))
+
+    recipe_match_ids = {
+        fields["recipe_id"] for event_type, fields in stream.events if event_type == "recipe_match"
+    }
+    assert recipe_match_ids == {"r_low", "r_high"}
+
+
 async def test_match_rank_skips_when_terminal() -> None:
     mcp = RecipeAwareMCP()
     await match_rank({"terminal": True, "stream_messages": []}, _fake_runtime(mcp))
@@ -907,6 +1125,40 @@ async def test_reason_accepts_a_valid_model_choice(monkeypatch: pytest.MonkeyPat
 
     assert result["top_recommendation"]["recipe_id"] == "second"
     assert result["top_recommendation"]["invalid_model_choice"] is False
+
+
+async def test_reason_emits_recommendation_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(reason_module, "get_text_provider", lambda: FakeProvider(_decision("second")))
+
+    state: MealSightState = {
+        "unified_request": _unified(),
+        "matched_recipes": [
+            {
+                "recipe_id": "top",
+                "name": "Top",
+                "cuisine": "italian",
+                "cook_time_minutes": 20,
+                "match_score": 0.9,
+                "can_cook": True,
+            },
+            {
+                "recipe_id": "second",
+                "name": "Second",
+                "cuisine": "italian",
+                "cook_time_minutes": 20,
+                "match_score": 0.5,
+                "can_cook": True,
+            },
+        ],
+        "stream_messages": [],
+    }
+    stream = FakeStream()
+    await reason(state, _runtime_with_stream(FakeMCP(), stream))
+
+    recommendation_events = [fields for event_type, fields in stream.events if event_type == "recommendation"]
+    assert len(recommendation_events) == 1
+    assert recommendation_events[0]["recipe_id"] == "second"
+    assert recommendation_events[0]["available"] is True
 
 
 async def test_reason_handles_no_candidates_without_calling_the_model(

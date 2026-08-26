@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from typing import cast
 
-from mealsight.agent.context import AgentContext
+from mealsight.agent.context import AgentContext, StreamSink
 from mealsight.agent.graph import build_graph
 from mealsight.agent.mcp_client import MCPClientManager
 from mealsight.agent.state import MealSightState
@@ -24,6 +24,7 @@ async def run_recommendation(
     *,
     manager: MCPClientManager | None = None,
     trace_id: str | None = None,
+    stream: StreamSink | None = None,
 ) -> MealSightState:
     """Runs one full recommendation end to end.
 
@@ -34,6 +35,13 @@ async def run_recommendation(
     for this run — never generated independently of what the caller
     already handed back). Omitted, a fresh one is generated exactly as
     before this parameter existed.
+
+    stream: an optional mealsight.agent.context.StreamSink (mealsight.
+    api's own SessionStream, concretely) forwarded straight into
+    AgentContext — every node checks runtime.context.stream for None
+    before emitting anything, so omitting this (every script, every
+    test, unchanged) means every node's own progress-emitting code path
+    is simply never reached, not that it errors.
 
     Binds the trace id FIRST, before anything else — every log line
     from every node and every MCP call this run makes (mealsight.agent.
@@ -73,13 +81,15 @@ async def run_recommendation(
     if manager is not None:
         final_state = cast(
             MealSightState,
-            await graph.ainvoke(initial_state, context=AgentContext(mcp=manager)),
+            await graph.ainvoke(initial_state, context=AgentContext(mcp=manager, stream=stream)),
         )
     else:
         async with MCPClientManager() as owned_manager:
             final_state = cast(
                 MealSightState,
-                await graph.ainvoke(initial_state, context=AgentContext(mcp=owned_manager)),
+                await graph.ainvoke(
+                    initial_state, context=AgentContext(mcp=owned_manager, stream=stream)
+                ),
             )
 
     logger.info("recommendation_finished", trace_id=trace_id)

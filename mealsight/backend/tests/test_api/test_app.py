@@ -220,7 +220,7 @@ async def test_recommend_accepts_multipart_and_returns_202_with_session_id(
     body = response.json()
     assert "session_id" in body
     assert body["status"] == "pending"
-    assert body["websocket_url"] == f"/ws/recommend/{body['session_id']}"
+    assert body["websocket_url"] == f"/ws/{body['session_id']}"
 
 
 async def test_recommend_polling_returns_pending_then_complete(monkeypatch: pytest.MonkeyPatch) -> None:

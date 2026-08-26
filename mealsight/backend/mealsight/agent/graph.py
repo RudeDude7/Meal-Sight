@@ -18,12 +18,13 @@ rename.
 
 from __future__ import annotations
 
-import functools
+import inspect
 import time
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.runtime import Runtime
 
 from mealsight.agent.context import AgentContext
 from mealsight.agent.nodes import (
@@ -74,25 +75,40 @@ _NODE_FUNCTIONS: dict[str, Any] = {
 
 
 def _timed(node_name: str, fn: Any) -> Any:
-    """Wraps a node function so every call — success or (contract-
-    violating) failure — appends one {"node", "duration_ms"} record to
-    node_timings, without changing the wrapped function's own observable
-    signature. functools.wraps matters here for more than attribution:
-    inspect.signature() follows __wrapped__ by default, and LangGraph's
-    own runtime-injection (langgraph._internal._runnable) decides
-    whether to pass `runtime` by inspecting the node callable's real
-    parameter list — confirmed live, with a small throwaway graph,
-    before wiring this into the real one, that a functools.wraps-wrapped
-    node still receives runtime exactly when the ORIGINAL function
-    declares it, whether that original takes (state) or (state,
-    runtime).
-    """
+    """Wraps a node function so every call does three things the node
+    itself never has to: records one {"node", "duration_ms"} entry in
+    node_timings, and — new this phase — emits a node_start event before
+    calling fn and a node_complete event after, via runtime.context.
+    stream (mealsight.agent.context.StreamSink), if this run has one.
 
-    @functools.wraps(fn)
-    async def wrapped(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    Unlike the phase-6.4 version of this wrapper (which used functools.
+    wraps so its OWN advertised signature matched fn's, letting LangGraph
+    decide whether to inject runtime by inspecting fn), this wrapper now
+    ALWAYS declares (state, runtime) itself, regardless of what fn
+    declares — LangGraph therefore always injects runtime into every
+    node's own wrapped call, which is what lets node_start/node_complete
+    fire uniformly for all eleven nodes (including ones like
+    validate_input and record_outcome that have no reason to declare
+    runtime themselves, since they call no MCP tool and emit no other
+    progress). Whether to actually forward runtime to fn is decided once,
+    at wrap time, by inspecting fn's OWN real signature — a node that
+    never declared runtime before this phase still never receives it
+    now; only this wrapper's own outward-facing signature changed.
+    """
+    fn_accepts_runtime = "runtime" in inspect.signature(fn).parameters
+
+    async def wrapped(state: Any, runtime: Runtime[AgentContext]) -> dict[str, Any]:
+        stream = runtime.context.stream if runtime.context is not None else None
+        if stream is not None:
+            stream.emit("node_start", node=node_name)
+
         started = time.monotonic()
-        result = await fn(*args, **kwargs)
+        result = await (fn(state, runtime) if fn_accepts_runtime else fn(state))
         duration_ms = round((time.monotonic() - started) * 1000, 2)
+
+        if stream is not None:
+            stream.emit("node_complete", node=node_name, duration_ms=duration_ms)
+
         return {**result, "node_timings": [{"node": node_name, "duration_ms": duration_ms}]}
 
     return wrapped

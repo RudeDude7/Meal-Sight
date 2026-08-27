@@ -45,7 +45,18 @@ from mealsight.agent.mcp_client import MCPClientManager
 from mealsight.api.errors import register_error_handlers
 from mealsight.api.idempotency import IdempotencyStore
 from mealsight.api.rate_limit import SubmissionRateLimiter
-from mealsight.api.routers import cook, grocery, health, history, pantry, profile, recipes, recommend, ws
+from mealsight.api.routers import (
+    cook,
+    grocery,
+    health,
+    history,
+    interactions,
+    pantry,
+    profile,
+    recipes,
+    recommend,
+    ws,
+)
 from mealsight.api.sessions import SessionStore
 from mealsight.config.settings import settings
 from mealsight.utils.logging import bind_trace_id, current_trace_id, get_logger
@@ -137,6 +148,7 @@ def create_app(
     app.include_router(pantry.router)
     app.include_router(recipes.router)
     app.include_router(history.router)
+    app.include_router(interactions.router)
     app.include_router(profile.router)
     app.include_router(grocery.router)
     app.include_router(ws.router)

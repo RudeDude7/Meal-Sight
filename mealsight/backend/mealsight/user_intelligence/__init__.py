@@ -7,12 +7,17 @@ now.
 """
 
 from mealsight.user_intelligence.context import get_context_signals, record_cooking_pattern
+from mealsight.user_intelligence.interaction_history import (
+    get_interaction_history,
+    record_interaction,
+)
 from mealsight.user_intelligence.meal_history import get_meal_history, log_meal, rate_meal
 from mealsight.user_intelligence.models import (
     ADDITIVE_PREFERENCE_TYPES,
     BudgetSensitivity,
     ContextSignals,
     CookingSkill,
+    InteractionRecord,
     MealRecord,
     MealType,
     PreferenceType,
@@ -35,6 +40,7 @@ __all__ = [
     "BudgetSensitivity",
     "ContextSignals",
     "CookingSkill",
+    "InteractionRecord",
     "MealRecord",
     "MealType",
     "PreferenceType",
@@ -43,12 +49,14 @@ __all__ = [
     "UserProfile",
     "check_repetition",
     "get_context_signals",
+    "get_interaction_history",
     "get_meal_history",
     "get_user_profile",
     "log_meal",
     "rate_meal",
     "recompute_preference_scores",
     "record_cooking_pattern",
+    "record_interaction",
     "remove_preference",
     "update_preferences",
 ]

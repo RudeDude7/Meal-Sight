@@ -98,6 +98,14 @@ class Settings(BaseSettings):
     repetition_window_days: int = 7
     max_same_protein_per_week: int = 3
 
+    # --- Interaction history --------------------------------------------------
+    # Every completed recommendation run gets a text-only row (no image/
+    # audio bytes — see mealsight.user_intelligence.interaction_history's
+    # own module docstring) so an ephemeral demo instance's own SQLite
+    # file can't grow unbounded: record_interaction prunes back down to
+    # this many rows, oldest first, after every insert.
+    max_interaction_history_rows: int = 200
+
     # --- Input limits -------------------------------------------------------------
     max_image_size_mb: float = 10
     max_audio_duration_seconds: int = 300

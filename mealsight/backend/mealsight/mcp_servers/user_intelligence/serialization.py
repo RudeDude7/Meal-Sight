@@ -9,10 +9,18 @@ from __future__ import annotations
 from typing import Any
 
 from mealsight.mcp_servers.errors import internal_error, not_found_error, validation_error
-from mealsight.user_intelligence.models import ContextSignals, MealRecord, RepetitionCheck, UserProfile
+from mealsight.user_intelligence.models import (
+    ContextSignals,
+    InteractionRecord,
+    MealRecord,
+    RepetitionCheck,
+    UserProfile,
+)
 
 __all__ = [
     "context_signals_to_dict",
+    "interaction_history_to_dict",
+    "interaction_record_to_dict",
     "internal_error",
     "meal_history_to_dict",
     "meal_record_to_dict",
@@ -50,6 +58,24 @@ def repetition_check_to_dict(check: RepetitionCheck) -> dict[str, Any]:
     "suggest_alternative", "too_repetitive" — a signal to weigh, not a
     hard rule; see the check_repetition tool's own docstring."""
     return check.model_dump(mode="json")
+
+
+def interaction_record_to_dict(record: InteractionRecord) -> dict[str, Any]:
+    """Shape: {"id", "created_at", "trace_id", "modalities",
+    "text_input", "voice_transcript", "ingredients_summary",
+    "merged_constraints", "recommended_recipe_id",
+    "recommended_recipe_name", "any_cookable", "top_match_score",
+    "final_response"}. Text only — never an image or audio byte
+    anywhere in this shape."""
+    return record.model_dump(mode="json")
+
+
+def interaction_history_to_dict(records: list[InteractionRecord]) -> dict[str, Any]:
+    """Shape: {"interactions": [...], "count": int}, most recent first."""
+    return {
+        "interactions": [interaction_record_to_dict(record) for record in records],
+        "count": len(records),
+    }
 
 
 def context_signals_to_dict(signals: ContextSignals) -> dict[str, Any]:

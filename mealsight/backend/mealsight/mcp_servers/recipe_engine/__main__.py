@@ -18,11 +18,33 @@ from __future__ import annotations
 
 import asyncio
 
-from mealsight.db import close_all, get_recipe_db
+from mealsight.db import close_all, get_recipe_db, init_database
 from mealsight.mcp_servers.recipe_engine.server import mcp
 from mealsight.utils.logging import get_logger
 
 logger = get_logger("mealsight.mcp_servers.recipe_engine.main")
+
+
+async def _initialize_schema() -> None:
+    """Applies recipes.sql against the real database, at startup, before
+    serving any request — idempotent (CREATE TABLE IF NOT EXISTS
+    throughout), so this runs unconditionally on every boot, including
+    the very first one against a completely fresh database directory.
+
+    Deliberately schema only, never the recipe DATA itself: seeding
+    (mealsight-seed) makes real network calls to TheMealDB, which has no
+    business happening automatically on every container restart — see
+    _verify_recipes_seeded below, which stays a loud warning rather than
+    an automatic fetch specifically so a flaky/offline network at boot
+    degrades to "recipes table is empty, said so clearly" rather than a
+    slow or failed startup."""
+    db = get_recipe_db()
+    result = await init_database(db, db.schema_path)
+    logger.info(
+        "recipe_engine_schema_ready",
+        created_tables=result.created_tables,
+        existing_tables=result.existing_tables,
+    )
 
 
 async def _verify_recipes_seeded() -> None:
@@ -44,6 +66,7 @@ async def _verify_recipes_seeded() -> None:
 
 
 async def _run() -> None:
+    await _initialize_schema()
     await _verify_recipes_seeded()
     try:
         await mcp.run_stdio_async(show_banner=False)

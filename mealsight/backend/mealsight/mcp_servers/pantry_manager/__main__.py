@@ -18,34 +18,46 @@ from __future__ import annotations
 
 import asyncio
 
-from mealsight.db import close_all, get_pantry_db
+from mealsight.db import close_all, get_pantry_db, init_database
 from mealsight.mcp_servers.pantry_manager.server import mcp
+from mealsight.seed.load_shelf_life import load_shelf_life
 from mealsight.utils.logging import get_logger
 
 logger = get_logger("mealsight.mcp_servers.pantry_manager.main")
 
 
-async def _verify_shelf_life_seeded() -> None:
-    """Opens the real database connection now, at startup, rather than
-    lazily on the first tool call, and logs a loud warning if
-    shelf_life_reference is empty — unlike the pantry table itself
-    (which legitimately starts empty), an empty shelf_life_reference
-    means update_pantry/flag_expiring would silently fall back to
-    category-default shelf lives for every single item."""
+async def _initialize_schema() -> None:
+    """Applies pantry.sql against the real database, at startup, before
+    serving any request — idempotent (CREATE TABLE IF NOT EXISTS
+    throughout), so this runs unconditionally on every boot, including
+    the very first one against a completely fresh database directory."""
     db = get_pantry_db()
-    row = await db.fetch_one("SELECT COUNT(*) as count FROM shelf_life_reference")
-    count = row["count"] if row else 0
-    if count == 0:
-        logger.warning(
-            "shelf_life_reference_empty",
-            message="shelf_life_reference has 0 rows — run `mealsight-seed` before serving requests",
-        )
-    else:
-        logger.info("shelf_life_reference_verified", row_count=count)
+    result = await init_database(db, db.schema_path)
+    logger.info(
+        "pantry_manager_schema_ready",
+        created_tables=result.created_tables,
+        existing_tables=result.existing_tables,
+    )
+
+
+async def _seed_shelf_life_reference() -> None:
+    """Loads mealsight/seed/data/shelf_life.json into shelf_life_reference
+    unconditionally, every startup — unlike recipe_engine's own recipe
+    seeding (mealsight-seed, a real network call to TheMealDB), this is
+    a small LOCAL bundled file with no network involved at all, so
+    there's no real cost to re-running it every boot, and doing so
+    means shelf_life_reference is never the one seed table an operator
+    has to remember to populate separately. INSERT OR REPLACE keyed on
+    each entry's own normalized name makes this idempotent: a restart
+    with already-populated data touches the same rows with the same
+    values, not duplicates."""
+    row_count = await load_shelf_life(get_pantry_db())
+    logger.info("shelf_life_reference_seeded", row_count=row_count)
 
 
 async def _run() -> None:
-    await _verify_shelf_life_seeded()
+    await _initialize_schema()
+    await _seed_shelf_life_reference()
     try:
         await mcp.run_stdio_async(show_banner=False)
     finally:

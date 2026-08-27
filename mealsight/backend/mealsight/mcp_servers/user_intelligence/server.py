@@ -21,6 +21,8 @@ from fastmcp import FastMCP
 from mealsight.db import get_user_db
 from mealsight.mcp_servers.user_intelligence.serialization import (
     context_signals_to_dict,
+    interaction_history_to_dict,
+    interaction_record_to_dict,
     internal_error,
     meal_history_to_dict,
     meal_record_to_dict,
@@ -31,10 +33,12 @@ from mealsight.mcp_servers.user_intelligence.serialization import (
 )
 from mealsight.user_intelligence import check_repetition as _check_repetition
 from mealsight.user_intelligence import get_context_signals as _get_context_signals
+from mealsight.user_intelligence import get_interaction_history as _get_interaction_history
 from mealsight.user_intelligence import get_meal_history as _get_meal_history
 from mealsight.user_intelligence import get_user_profile as _get_user_profile
 from mealsight.user_intelligence import log_meal as _log_meal
 from mealsight.user_intelligence import rate_meal as _rate_meal
+from mealsight.user_intelligence import record_interaction as _record_interaction
 from mealsight.user_intelligence import update_preferences as _update_preferences
 from mealsight.utils.logging import get_logger
 
@@ -282,4 +286,85 @@ async def get_context_signals(
         return context_signals_to_dict(result)
     except Exception:
         logger.error("get_context_signals_failed", exc_info=True)
+        return internal_error()
+
+
+@mcp.tool
+async def record_interaction(
+    trace_id: str | None,
+    modalities: list[str],
+    text_input: str | None,
+    voice_transcript: str | None,
+    ingredients_summary: str | None,
+    merged_constraints: dict[str, Any] | None,
+    recommended_recipe_id: str | None,
+    recommended_recipe_name: str | None,
+    any_cookable: bool,
+    top_match_score: float | None,
+    final_response: str | None,
+) -> dict[str, Any]:
+    """Records one completed recommendation request and its outcome —
+    called by the agent's own present node (the last node in the graph)
+    for EVERY run, regardless of outcome, including a run that found
+    nothing cookable or nothing usable at all. This is the interaction-
+    level record; meal_history (log_meal/rate_meal) only ever gets a row
+    on a CONFIRMED cook, a much narrower and much rarer event.
+
+    TEXT ONLY: voice_transcript is the already-transcribed text, never
+    audio bytes; ingredients_summary is a short text description of what
+    a photo yielded, never the image bytes. Nothing passed to this tool
+    should ever be raw media.
+
+    Automatically prunes back down to this server's configured retention
+    cap after every insert, oldest rows first, so a long-running
+    instance's own interaction_history table can't grow unbounded.
+
+    Returns the full recorded row: {"id", "created_at", "trace_id",
+    "modalities", "text_input", "voice_transcript", "ingredients_summary",
+    "merged_constraints", "recommended_recipe_id",
+    "recommended_recipe_name", "any_cookable", "top_match_score",
+    "final_response"}.
+    """
+    try:
+        db = get_user_db()
+        result = await _record_interaction(
+            trace_id,
+            modalities,
+            text_input,
+            voice_transcript,
+            ingredients_summary,
+            merged_constraints,
+            recommended_recipe_id,
+            recommended_recipe_name,
+            any_cookable,
+            top_match_score,
+            final_response,
+            user_db=db,
+        )
+        return interaction_record_to_dict(result)
+    except Exception:
+        logger.error("record_interaction_failed", exc_info=True, trace_id=trace_id)
+        return internal_error()
+
+
+@mcp.tool
+async def get_interaction_history(days_back: int = 30, limit: int = 50) -> dict[str, Any]:
+    """Returns the most recent recommendation requests within days_back,
+    most recent first, capped at limit — every request and its outcome,
+    not just confirmed cooks (see get_meal_history for that narrower
+    record).
+
+    Returns {"interactions": [{"id", "created_at", "trace_id",
+    "modalities", "text_input", "voice_transcript",
+    "ingredients_summary", "merged_constraints", "recommended_recipe_id",
+    "recommended_recipe_name", "any_cookable", "top_match_score",
+    "final_response"}, ...], "count": int}. An empty list, not an error,
+    on an instance with no recorded interactions yet.
+    """
+    try:
+        db = get_user_db()
+        result = await _get_interaction_history(days_back=days_back, limit=limit, user_db=db)
+        return interaction_history_to_dict(result)
+    except Exception:
+        logger.error("get_interaction_history_failed", exc_info=True, days_back=days_back)
         return internal_error()

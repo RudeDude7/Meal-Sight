@@ -1,0 +1,498 @@
+PHASE 8.2 STUDY NOTES: A PLAYBACK BUG WITH A REAL BROWSER REPRO, A NEW
+HISTORY TABLE, AND A STARTUP GAP THE PHASE ITSELF SURFACED
+=============================================================
+
+Three parts, done in sequence, the third one a direct consequence of
+something found while building the second. Part one fixes VoiceInput.
+tsx's own 0:00/0:00 playback duration bug — diagnosed against a REAL
+browser (Chrome 151, headless, via puppeteer-core, not just cited
+documentation) before writing a single line of the fix. Part two adds
+interaction_history: a text-only record of every recommendation
+REQUEST and its outcome, distinct from meal_history's much narrower
+"only a confirmed cook" record. Part three exists because building part
+two required reading mealsight.db.init closely enough to notice nothing
+in this project's own production code path ever actually calls it — a
+fresh deployment's servers would fail on their very first query, a
+finding reported honestly rather than worked around silently, then
+fixed properly once asked to.
+
+Files added: frontend/src/components/recommend/AudioPlayer.tsx,
+mealsight/user_intelligence/interaction_history.py, mealsight/api/
+routers/interactions.py, frontend/src/api/interactions.ts, backend/
+tests/{test_user_intelligence/test_interaction_history.py, test_api/
+test_interactions.py, test_mcp_servers/test_fresh_deployment.py}.
+Files edited: frontend/src/components/recommend/VoiceInput.tsx,
+mealsight/config/settings.py, mealsight/db/schema/user_intelligence.sql,
+mealsight/user_intelligence/{models,__init__}.py, mealsight/mcp_servers/
+user_intelligence/{server,serialization}.py, mealsight/agent/
+{mcp_client.py,nodes/present.py}, mealsight/api/app.py, mealsight/db/
+{init,__init__}.py, mealsight/mcp_servers/{user_intelligence,
+recipe_engine,pantry_manager}/__main__.py, mealsight/seed/seed_all.py,
+frontend/src/{types/profile.ts,api/index.ts}, backend/tests/
+{test_agent/test_nodes.py, test_mcp_servers/test_user_intelligence/
+{test_tools.py,test_tool_schemas.py}, test_api/test_app.py}. Backend
+test count: 490 (end of phase 7.3 — phase 8.1 was frontend-only) -> 506
+(part two) -> 510 (part three).
+
+
+1. PART A: DIAGNOSING THE PLAYBACK BUG AGAINST A REAL BROWSER, NOT A
+   CITED ONE
+=============================================================
+The task's own framing stated the bug as established fact: MediaRecorder
+-produced WebM has no finalized Duration element, so the browser reports
+Infinity or NaN. Rather than trusting that description and patching
+blind, this phase installed puppeteer-core against the actual installed
+Chrome (151.0.7922.174, headless, --use-fake-device-for-media-stream so
+getUserMedia works without a real microphone) and reproduced the
+ACTUAL recording code path VoiceInput.tsx uses: recorder.start() with
+NO timeslice argument, meaning exactly one ondataavailable firing at
+stop() with the whole clip as a single Blob part.
+
+That single-chunk path, run for a real 3.2-second clip, reported
+audio.duration correctly (3.12) in this specific browser — the bug did
+NOT reproduce for VoiceInput.tsx's own actual code. It DID reproduce —
+confirmed as literally Infinity via Number.isFinite/Number.isNaN checks,
+not a guess — for a DIFFERENT recording shape: recorder.start(100)
+(chunked, 26 parts assembled into one Blob) over the same duration.
+This was reported plainly rather than silently accepting the task's own
+premise as verified: the underlying bug is real and well-documented
+across the wider browser ecosystem, but this specific project's own
+recording code, in this specific browser, wasn't hitting it the way the
+task assumed. The fix was built anyway, because it's strictly more
+robust regardless of which exact condition triggers the failure in any
+given browser/version a real user might have — this is the same
+"verify, then decide whether the task's framing survives, then act"
+discipline this project has followed since phase 6.1's own AgentContext
+finding.
+
+
+2. THE FIX: TRACK ELAPSED SECONDS, NEVER TRUST BLOB METADATA, REPLACE
+   THE NATIVE CONTROLS
+=============================================================
+VoiceInput.tsx already displays a live elapsed-seconds timer while
+recording (setInterval, once per second) — the fix reuses that exact
+value rather than introducing a second timing mechanism. A NEW ref
+(elapsedSecondsRef) mirrors the timer's own state so recorder.onstop
+can read the FINAL elapsed count: onstop is a callback captured once
+when startRecording runs, so reading React state directly from inside
+it would close over whatever the state was AT THAT CAPTURE TIME (0),
+not its later value — the ref sidesteps that entirely. The captured
+value is stored as recordedDurationSeconds and passed to a new
+AudioPlayer component as durationHintSeconds.
+
+AudioPlayer.tsx replaces the native <audio controls> outright, not just
+patches around it: the browser's own built-in transport UI renders its
+total-duration display straight from the media element's own (possibly
+Infinity) duration property, with no way to override just that one
+number from outside. Custom play/pause + a seek <input type="range"> +
+time labels are built instead — the range's own max is set from the
+TRACKED duration, never audio.duration, so the displayed total is never
+wrong regardless of what the underlying blob's own metadata says.
+Seeking (scrubbing) still works normally: setting audio.currentTime
+doesn't actually depend on duration being a finite number in any modern
+browser, since seeking operates on real byte/timestamp positions, not a
+percentage of a known total.
+
+For an UPLOADED file (the fallback path, not a live recording) there is
+no tracked elapsed time to fall back on — AudioPlayer instead trusts the
+browser's own reported audio.duration for that case, but ONLY once it's
+confirmed to be a real, finite number (Number.isFinite check on both
+the loadedmetadata and durationchange events) — an uploaded file is
+already a finalized, complete container in the normal case, unlike a
+live MediaRecorder stream, so this is a reasonable fallback specifically
+because it isn't the same kind of blob that caused the bug in the first
+place.
+
+
+3. PART B: interaction_history — EVERY REQUEST, NOT JUST CONFIRMED
+   COOKS
+=============================================================
+meal_history (log_meal/rate_meal, cook-confirmation phase) only ever
+gets a row when a user actually confirms cooking something — a small,
+rare subset of everything MealSight was ever asked for. interaction_
+history is the wider record: every completed recommendation run, cooked
+or not, cookable or not, including a run that found nothing usable at
+all. New table (mealsight/db/schema/user_intelligence.sql): id,
+created_at, trace_id, modalities (JSON array), text_input, voice_
+transcript, ingredients_summary, merged_constraints (JSON), recommended
+_recipe_id/_recipe_name (both nullable — most runs recommend nothing),
+any_cookable, top_match_score, final_response.
+
+TEXT ONLY, structurally, not just by convention: there is no column in
+this table an image or audio byte could even go into — ingredients_
+summary is a short generated description of what a photo yielded (e.g.
+"Found 12 item(s): sugar, heavy cream, ..."), voice_transcript is
+already-transcribed text, neither ever the underlying media. A test
+(test_media_bytes_are_never_stored) checks every value in a real
+inserted row is never a bytes object, not just that the code path looks
+like it should behave that way.
+
+
+4. WHY TWO NEW MCP TOOLS, WHEN THE TASK ONLY NAMED ONE
+=============================================================
+The task's own item 3 named exactly one new tool: get_interaction_
+history. Item 2 ("write to it from the agent's present node") needed
+something to actually reach the database with — and this project has a
+real, consistently-followed rule, verified directly by grepping every
+agent node file before writing anything: an agent node NEVER imports
+mealsight.user_intelligence (or pantry/recipe_engine) directly to touch
+a database; it only ever reaches one through runtime.context.mcp.
+call_tool(server, tool, args), because the real MCP servers run as
+separate stdio subprocesses even though the underlying Python packages
+are technically importable from the agent's own process too. Writing
+present.py to call mealsight.user_intelligence.interaction_history.
+record_interaction directly would have been a one-line shortcut that
+broke that rule for the first time anywhere in this codebase — merge.py
+'s own type-only UserProfile import is the ONLY existing exception, and
+it never touches a database.
+
+So record_interaction became a second new MCP tool, symmetric with
+get_interaction_history the same way log_meal/get_meal_history already
+are a write/read pair. Real resulting count on user_intelligence: NINE
+tools (seven existing + two new), not the seven the task's own framing
+implied — EXPECTED_TOOLS (mealsight.agent.mcp_client) and both
+dependent test fixtures were updated to the real number, not the
+assumed one.
+
+
+5. WHAT present.py ACTUALLY SENDS: DERIVED FROM STATE, NEVER
+   RE-QUERYING ANYTHING
+=============================================================
+_attempted_modalities prefers unified_request.modalities_received when
+perception actually ran; falls back to which of image_bytes/audio_bytes
+/text_input were raw-supplied when it didn't (a terminal run) — this is
+specifically what makes "failures should record what was attempted"
+true even when there's no UnifiedMealRequest to read from at all.
+_ingredients_summary builds a short, capped (15 names + a "+N more"
+tail) plain-text description from vision_result.identified_items, never
+touching image_bytes itself. _merged_constraints pulls exactly the
+constraint-shaped fields off UnifiedMealRequest (servings, max_cook_
+time_minutes, dietary_restrictions, cuisine_preference, avoid_
+ingredients, avoid_dishes, mood_or_preference, protein_preference,
+occasion) — deliberately NOT available_ingredients/freshness_alerts/
+conflicts_detected, which are about ingredients and disagreements, not
+what was actually asked for.
+
+any_cookable and top_match_score are computed directly from state[
+"matched_recipes"] — match_rank's own real candidate list — rather than
+read off top_recommendation, specifically so they stay a true reflection
+of what was FOUND this run even when reason (node 8) ends in an
+explanation instead of a pick (a "nothing cookable" run still correctly
+reports whatever match scores were actually seen, not null-because-
+nothing-was-recommended). This distinction mattered enough to write a
+dedicated test for it (test_present_records_interaction_even_with_no_
+cookable_recipe) proving any_cookable is false and top_match_score is
+the real 0.4, not absent, on exactly that kind of run.
+
+_record_interaction itself never raises out of the node — the same
+try/except-and-log discipline present.py already applies to its own
+mcp_calls/llm_calls reads. Called from BOTH the terminal early-return
+branch (with a fallback final_response) and the normal completion
+branch, deliberately AFTER processing_trace's own mcp_calls snapshot is
+already captured — get_call_log() is read earlier in the function, so
+the record_interaction call itself never pollutes that snapshot's own
+count, which is why every pre-existing present() test (asserting exact
+mcp_calls counts) needed zero changes.
+
+
+6. RETENTION: COUNT FIRST, THEN DELETE — NOT execute()'s OWN RETURN
+   VALUE
+=============================================================
+Database.execute() returns cursor.lastrowid (meaningful after an
+INSERT), not an affected-row count — there is no lastrowid to speak of
+after a DELETE. _prune_interaction_history runs a real SELECT COUNT(*)
+first, only issues the DELETE if that count exceeds settings.max_
+interaction_history_rows, and reports total - max_rows as the number
+removed — computed from a fact actually queried, not inferred from a
+return value that was never going to mean what it looked like it meant.
+Enforced after every single insert (no separate scheduled sweep task
+needed), keyed on (created_at DESC, id DESC) with id as an explicit
+tiebreaker since two rows can share the same CURRENT_TIMESTAMP second.
+
+
+7. PART C: THE STARTUP GAP THIS PHASE'S OWN PART B WORK SURFACED
+=============================================================
+Reading mealsight.db.init closely enough to know how a new table would
+actually get created in a real deployment turned up something worth
+reporting rather than quietly working around: init_all_databases() is
+called ONLY from test conftest fixtures, anywhere in this whole
+repository. Not from mealsight.api.app's own lifespan, not from any of
+the three MCP servers' own __main__.py. The real data/*.db files this
+project has been live-verifying against all session had their schema
+from a manual, ad hoc step run at some earlier point in this same
+long-running conversation — not from anything a genuinely fresh
+deployment (a new Docker volume, a freshly cloned repo, an HF Spaces
+rebuild) would ever hit on its own. Reported directly, then fixed once
+asked to — the same "say what's actually true before treating a
+convenient assumption as verified" standard this project applies
+everywhere else.
+
+
+8. THE FIX: SCHEMA INIT ON EVERY BOOT, SEEDING SPLIT BY WHETHER IT
+   TOUCHES THE NETWORK
+=============================================================
+mealsight.db.init.init_database was extended to return (and log) a new
+SchemaInitResult — created_tables versus existing_tables, diffed by
+querying sqlite_master BEFORE and AFTER applying the schema script, not
+just "here are all the tables now" (which can't distinguish a genuinely
+fresh table from an ordinary restart against a database that already
+has everything). Each MCP server's own __main__.py now calls
+init_database against its own real database, unconditionally, before
+serving anything — safe on every restart precisely because every schema
+file already used CREATE TABLE IF NOT EXISTS throughout, which is
+exactly what makes running it every single boot a no-op against an
+already-initialized database rather than a risk.
+
+Seeding is a genuinely different decision, and treating it as one
+undifferentiated "seed data" concern would have been wrong: mealsight-
+seed (recipes, ingredient synonyms, substitutions, nutrition reference)
+makes REAL network calls to TheMealDB — automatically re-running that
+on every container restart would make every boot depend on a third-
+party API's availability for no benefit (recipe data doesn't change
+between restarts), so this stays exactly what it already was: a
+separate, explicit deploy step, with recipe_engine's own existing
+_verify_recipes_seeded warning as the loud, correct signal an operator
+still needs to run it.
+
+shelf_life_reference turned out to be a DIFFERENT case, found while
+checking pantry_manager's own seed dependency: mealsight/seed/
+load_shelf_life.py already existed, loading a small LOCAL bundled JSON
+file with zero network calls — and it was never wired into mealsight-
+seed at all. This is a second, real, previously-invisible gap: unlike
+recipes, there was no deploy step anywhere that populated shelf_life_
+reference, manual or automatic. Since it's local and cheap (508 rows,
+sub-millisecond in the live verification run below), pantry_manager's
+own __main__.py now calls it unconditionally on every boot — idempotent
+via INSERT OR REPLACE keyed on each entry's own normalized name, so a
+restart with data already loaded touches the same rows with the same
+values, never duplicates. Recipe seeding and shelf-life seeding
+genuinely warranted different treatment because they have genuinely
+different cost/risk profiles, not because of an arbitrary line drawn
+between "schema" and "everything else."
+
+seed_all.py (mealsight-seed) itself was also given a defensive
+init_database call on recipes.db before it does anything else — this
+command is meant to be runnable as its own standalone deploy/CI step,
+potentially before recipe_engine's own MCP server has ever started
+once, so it can't assume a recipes table already exists to insert into.
+
+
+9. THE FRESH-DEPLOYMENT TEST: CALLING THE SAME FUNCTIONS __main__.py
+   ACTUALLY CALLS
+=============================================================
+tests/test_mcp_servers/test_fresh_deployment.py points all three
+settings db paths at files inside a pytest tmp_path — guaranteed not to
+exist on disk at all, the literal condition a fresh deployment starts
+from — then calls each server's own _initialize_schema() (and, for
+pantry_manager, _seed_shelf_life_reference()) directly, via importlib.
+import_module("mealsight.mcp_servers.<x>.__main__") for each, the same
+reason every other test file in this project uses importlib rather than
+a plain import for anything that could be shadowed: mealsight.mcp_
+servers' own __init__.py doesn't re-export these specific names, but
+using the identical, already-established pattern here costs nothing and
+keeps the whole test suite's own import discipline uniform rather than
+"careful everywhere except this one new file."
+
+Four tests: each server independently proven to work end-to-end (a
+real FastMCP in-memory Client call against a database that had zero
+tables a moment earlier) with no manual init step anywhere in the test
+itself; a fourth checks that all three .db files, and specifically
+interaction_history alongside meal_history, genuinely exist on disk
+with real tables afterward — not just that an in-memory query happened
+to succeed, which could theoretically be true even if nothing was
+actually persisted.
+
+
+10. VERIFICATION
+=============================================================
+Backend: ruff check — all checks passed, both after part B and again
+after part C. mypy --strict — no issues found, 119 source files, both
+times. Full pytest: 490 -> 506 (part B, +16: 4 present-node tests, 5
+domain-level interaction_history tests, 4 MCP-tool-level tests, 3 API-
+level tests) -> 510 (part C, +4 fresh-deployment tests). Frontend:
+typecheck/lint/build all clean after the VoiceInput/AudioPlayer changes
+and the new interactions API client addition.
+
+Live verification (part B, initial): started the real backend (real
+MCPClientManager, three real subprocesses, real SQLite databases),
+submitted photo_01.jpg plus a typed constraint, then a second text-only
+request, both through the real POST /api/recommend -> WS /ws/{id} path
+end to end. GET /api/interactions returned both rows, most recent
+first, both with any_cookable: false (neither run found a cookable
+recipe against the real, current pantry state) and both fields
+correctly populated — recommended_recipe_id/name both null,
+ingredients_summary a real plain-text description of the photo's own
+12 identified items, merged_constraints a real JSON object of what each
+request actually asked for. A direct scan for control-byte sequences
+across every string field in both rows found none.
+
+Live verification (part C): a genuinely useful accident. The very
+first /health check against the newly-restarted backend still reported
+user_intelligence at 7 tools, not the expected 9 — investigated
+directly rather than assumed to be a code bug, and found to be a STALE
+uvicorn process left running from an earlier turn in this same session,
+bound specifically to localhost:8000 while the new process bound to
+0.0.0.0:8000 — two sockets that can coexist without a port conflict,
+with the OS routing a plain `curl localhost:8000` to the more specific
+(localhost-only) listener, which happened to be the old one running the
+pre-fix code. Killing the stale process (and its own three orphaned MCP
+subprocesses) and re-checking confirmed the real, current server
+correctly reports 9 tools, with the live log showing pantry_manager_
+schema_ready (existing_tables listing all five real pantry tables,
+created_tables empty — an ordinary restart, not a fresh directory) and
+shelf_life_reference_seeded row_count=508 on that same real boot.
+
+
+11. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+Patching the native <audio controls> element (e.g. forcibly setting
+some property after load) versus replacing it with a custom player
+    Rejected once confirmed the native control's own total-duration
+    display is rendered by the browser directly from the media
+    element's own duration property, with no supported way to override
+    just that one displayed number from JavaScript. A custom player
+    with its own range input and labels was the only option that could
+    actually show the tracked, always-correct value instead.
+
+Trusting a description of a well-known bug versus reproducing it
+against this project's own actual code in a real browser first
+    Rejected trusting the description outright: a real repro (puppeteer
+    -core against the system's installed Chrome, with a fake audio
+    device) showed the bug does NOT reproduce for VoiceInput.tsx's own
+    single-chunk recording path in this specific browser version,
+    though it does for a differently-shaped (chunked) recording. The
+    fix was still built, since it's strictly more correct regardless —
+    but reporting the actual repro result, rather than silently
+    agreeing with an unverified premise, is what this project has done
+    at every prior "task states X as fact" moment too.
+
+present.py importing mealsight.user_intelligence.interaction_history
+directly versus adding a second new MCP tool
+    Rejected the direct import: every agent node in this codebase
+    reaches user_intelligence/pantry/recipe_engine data ONLY through
+    runtime.context.mcp.call_tool, with a single, narrow, type-only
+    exception (merge.py's own UserProfile import, which never touches
+    a database) — verified by grepping every node file before writing
+    anything. Breaking that rule for the first time, just to avoid
+    adding one more tool, would have been inconsistent with how every
+    other piece of data this graph touches already works.
+
+Running mealsight-seed's full network-dependent seeding automatically
+on every server boot versus keeping it a manual step
+    Rejected automatic seeding: recipe data doesn't change between
+    restarts, so re-fetching it from TheMealDB on every single boot
+    would make ordinary container restarts depend on a third-party
+    API's availability for zero real benefit, and would slow down
+    every restart for no reason a schema-only init doesn't already
+    solve. The existing loud empty-table warning is the correct signal
+    for an operator to actually run the real seed step once.
+
+Leaving shelf_life_reference exactly as found (a warning-only, manual-
+seed-implied table with no actual seed step wired anywhere) versus
+auto-seeding it at boot
+    Rejected leaving it as found, once its own actual cost profile was
+    checked directly: unlike recipes, shelf_life.json is a small local
+    bundled file with no network call at all, so there is no real
+    downside to loading it on every boot, and doing so closes a gap
+    (there was previously no deploy step of ANY kind — manual or
+    automatic — that populated this table) rather than merely
+    documenting that the gap exists.
+
+
+12. GLOSSARY
+=============================================================
+InteractionRecord
+    One interaction_history row (mealsight.user_intelligence.models) —
+    every recommendation request and its outcome, cooked or not,
+    cookable or not; text only, structurally incapable of holding raw
+    media.
+
+record_interaction / get_interaction_history
+    The write/read MCP tool pair on user_intelligence
+    (mealsight.mcp_servers.user_intelligence.server) that reaches
+    interaction_history — the second new tool added specifically to
+    keep present.py's own write inside this project's MCP-only data-
+    access rule.
+
+SchemaInitResult
+    The dataclass mealsight.db.init.init_database now returns —
+    created_tables versus existing_tables, diffed by querying
+    sqlite_master before and after applying a schema file, so a caller
+    can log (and a test can assert on) the difference between a
+    genuinely fresh database and an ordinary restart.
+
+AudioPlayer
+    The custom play/pause + seek-range + time-label component
+    (frontend/src/components/recommend/AudioPlayer.tsx) that replaced
+    VoiceInput.tsx's own native <audio controls>, specifically so a
+    tracked, always-correct duration can actually reach the screen.
+
+durationHintSeconds
+    AudioPlayer's own prop: the independently-tracked recording
+    duration for a live recording, or null for an uploaded file (which
+    falls back to the browser's own reported, confirmed-finite
+    duration instead).
+
+
+13. INTERVIEW TALKING POINTS
+=============================================================
+Q: You said the playback bug didn't actually reproduce for
+VoiceInput.tsx's own real code path. Why fix it at all, then?
+
+    Because "didn't reproduce in this one browser, for this one test"
+    is not the same claim as "doesn't happen." The underlying mechanism
+    — a live-recorded WebM blob with no finalized Duration element in
+    its own container header — is real and well documented across
+    browser engines and versions; what I actually confirmed is that
+    THIS specific Chrome build's demuxer happens to compute a correct
+    duration for a single, un-timesliced Blob part, not that no browser
+    a real user might have ever mishandles it. The fix (track duration
+    independently, never trust the blob) is correct regardless of which
+    browser or version is actually affected, and costs nothing extra
+    for the browsers where the bug never would have shown up anyway.
+
+Q: Why does any_cookable get computed from matched_recipes instead of
+just reading whether top_recommendation.available is true?
+
+    Because those two things answer different questions.
+    top_recommendation.available tells you whether reason (node 8)
+    ultimately RECOMMENDED something — which requires a cookable
+    candidate, so on a successful recommendation the two happen to
+    agree. But on a run that explicitly explains "nothing was cookable"
+    (reason's own no-cookable-candidate branch), available is false
+    while matched_recipes might still contain candidates worth knowing
+    the real can_cook/match_score values of. Reading any_cookable and
+    top_match_score straight from match_rank's own real candidate list
+    means the interaction record stays an honest account of what was
+    actually FOUND, independent of whatever reason (node 8) chose to do
+    with that information.
+
+Q: How did you actually confirm the stale-process issue during live
+verification, rather than just assuming your code fix was somehow
+wrong when /health still showed 7 tools?
+
+    I didn't take the 7 at face value in either direction — I didn't
+    assume it proved my fix was broken, and I didn't assume it was a
+    fluke to ignore either. I directly queried the in-process tool list
+    (a plain FastMCP in-memory Client against the real server.py
+    module, no subprocess involved) and got 9 back immediately,
+    which meant the CODE was correct and the discrepancy had to be
+    somewhere in how the request was actually being served. From there
+    it was a matter of checking `lsof`/`ps` for what was actually
+    listening on port 8000, which showed two separate processes bound
+    to two different addresses — that's what actually explained it,
+    not a guess.
+
+Q: Why does mealsight-seed now also call init_database, when the real
+recipe_engine MCP server already does that on its own startup?
+
+    Because mealsight-seed is meant to be runnable as its own
+    standalone command — a CI job, a one-shot seeding container, a
+    fresh deploy's first step — and none of those are guaranteed to
+    have ever started the recipe_engine MCP server first. If seed_all.
+    py assumed the recipes table already existed, it would fail with
+    "no such table" on a genuinely fresh database, which is exactly the
+    class of failure this whole phase exists to eliminate. Calling
+    init_database again there is a no-op in the common case (the server
+    already initialized it) and the thing that makes seeding actually
+    stand alone in the uncommon one.

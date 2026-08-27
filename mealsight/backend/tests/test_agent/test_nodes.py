@@ -477,9 +477,7 @@ async def test_perceive_emits_ingredient_found_per_modality(monkeypatch: pytest.
 async def test_merge_passes_the_profile_through_to_merge_perceptions() -> None:
     mcp = FakeMCP({("user_intelligence", "get_user_profile"): _profile_response()})
 
-    result = await merge(
-        {"audio_result": _audio(servings=None), "stream_messages": []}, _runtime(mcp)
-    )
+    result = await merge({"audio_result": _audio(servings=None), "stream_messages": []}, _runtime(mcp))
 
     assert ("user_intelligence", "get_user_profile", {}) in mcp.calls
     # Profile's household_size=2 should fill the unspecified servings.
@@ -603,9 +601,7 @@ async def test_get_context_does_not_refetch_the_profile() -> None:
         }
     )
 
-    result = await get_context(
-        {"user_profile": {"household_size": 2}, "stream_messages": []}, _runtime(mcp)
-    )
+    result = await get_context({"user_profile": {"household_size": 2}, "stream_messages": []}, _runtime(mcp))
 
     called_tools = {(server, tool) for server, tool, _ in mcp.calls}
     assert ("user_intelligence", "get_user_profile") not in called_tools
@@ -975,9 +971,7 @@ async def test_match_rank_includes_unverified_mentions_alongside_pantry() -> Non
     # An ingredient only ever mentioned in speech/text (never seen, so
     # never written to the pantry) is still usable — just tracked
     # separately once matched (unverified_ingredient_matches).
-    mcp = RecipeAwareMCP(
-        match_ingredients={"r1": _match_data(0.5, matched_items=[{"name": "saffron"}])}
-    )
+    mcp = RecipeAwareMCP(match_ingredients={"r1": _match_data(0.5, matched_items=[{"name": "saffron"}])})
     state: MealSightState = {
         "recipe_candidates": [_recipe("r1")],
         "pantry_items": [{"name": "onion"}],
@@ -1620,3 +1614,114 @@ async def test_present_streams_completion_message_and_skips_when_terminal() -> N
     result = await present({"terminal": True, "stream_messages": []}, _runtime(mcp))
     assert len(result["stream_messages"]) == 1
     assert "processing_trace" not in result
+
+
+# --------------------------------------------------------------------
+# present: interaction_history recording
+# --------------------------------------------------------------------
+
+
+async def test_present_records_interaction_even_with_no_cookable_recipe() -> None:
+    mcp = FakeMCP()
+    state: MealSightState = {
+        "stream_messages": [],
+        "trace_id": "t1",
+        "text_input": "something quick",
+        "final_response": "Nothing cookable this run.",
+        "matched_recipes": [
+            {"recipe_id": "r1", "name": "Uncookable Thing", "match_score": 0.4, "can_cook": False}
+        ],
+        "top_recommendation": {"available": False, "explanation": "Nothing cookable this run."},
+    }
+    await present(state, _runtime(mcp))
+
+    record_calls = [c for c in mcp.calls if c[:2] == ("user_intelligence", "record_interaction")]
+    assert len(record_calls) == 1
+    args = record_calls[0][2]
+    assert args["recommended_recipe_id"] is None
+    assert args["recommended_recipe_name"] is None
+    assert args["any_cookable"] is False
+    assert args["top_match_score"] == 0.4
+    assert args["final_response"] == "Nothing cookable this run."
+
+
+async def test_present_records_interaction_with_the_chosen_recipe_when_available() -> None:
+    mcp = FakeMCP()
+    state: MealSightState = {
+        "stream_messages": [],
+        "matched_recipes": [
+            {"recipe_id": "r1", "name": "Cookable Thing", "match_score": 0.9, "can_cook": True}
+        ],
+        "top_recommendation": {"available": True, "recipe_id": "r1"},
+        "final_response": "Make Cookable Thing.",
+    }
+    await present(state, _runtime(mcp))
+
+    args = next(args for _, tool, args in mcp.calls if tool == "record_interaction")
+    assert args["recommended_recipe_id"] == "r1"
+    assert args["recommended_recipe_name"] == "Cookable Thing"
+    assert args["any_cookable"] is True
+    assert args["top_match_score"] == 0.9
+
+
+async def test_present_records_interaction_from_raw_inputs_when_terminal() -> None:
+    mcp = FakeMCP()
+    state: MealSightState = {
+        "terminal": True,
+        "stream_messages": [],
+        "image_bytes": b"not a real image",
+        "terminal_reason": "No usable input.",
+    }
+    await present(state, _runtime(mcp))
+
+    args = next(args for _, tool, args in mcp.calls if tool == "record_interaction")
+    assert args["modalities"] == ["vision"]
+    assert args["final_response"] == "No usable input."
+    assert args["recommended_recipe_id"] is None
+    assert args["any_cookable"] is False
+
+
+async def test_present_never_stores_raw_media_bytes_in_the_interaction_record() -> None:
+    mcp = FakeMCP()
+    state: MealSightState = {
+        "stream_messages": [],
+        "image_bytes": b"\xff\xd8\xff totally real jpeg bytes",
+        "audio_bytes": b"\x1a\x45\xdf\xa3 totally real webm bytes",
+        "vision_result": VisionPerception(
+            identified_items=[
+                IdentifiedItem(
+                    name="egg",
+                    quantity=6.0,
+                    unit="count",
+                    category="protein",
+                    freshness="fresh",
+                    confidence="high",
+                )
+            ],
+            total_items_found=1,
+            photo_quality="good",
+            notes=None,
+        ),
+        "audio_result": AudioPerception(
+            raw_transcript="I have eggs",
+            servings=None,
+            max_cook_time_minutes=None,
+            dietary_restrictions=[],
+            cuisine_preference=None,
+            avoid_ingredients=[],
+            avoid_dishes=[],
+            mood_or_preference=None,
+            protein_preference=None,
+            occasion=None,
+            additional_context=None,
+        ),
+    }
+    await present(state, _runtime(mcp))
+
+    args = next(args for _, tool, args in mcp.calls if tool == "record_interaction")
+    serialized = str(args)
+    assert "\\xff\\xd8\\xff" not in serialized
+    assert "totally real jpeg bytes" not in serialized
+    assert "totally real webm bytes" not in serialized
+    assert args["voice_transcript"] == "I have eggs"
+    assert args["ingredients_summary"] == "Found 1 item(s): egg"

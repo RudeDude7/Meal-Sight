@@ -125,3 +125,63 @@ async def test_get_context_signals_happy_path(mcp_client: Client[Any]) -> None:
 
     assert result.data["meal_type"] == "dinner"
     assert len(result.data["context_notes"]) >= 1
+
+
+def _record_interaction_arguments(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "trace_id": "t1",
+        "modalities": ["text"],
+        "text_input": "something quick",
+        "voice_transcript": None,
+        "ingredients_summary": None,
+        "merged_constraints": None,
+        "recommended_recipe_id": None,
+        "recommended_recipe_name": None,
+        "any_cookable": False,
+        "top_match_score": None,
+        "final_response": "Nothing cookable this run.",
+    }
+    base.update(overrides)
+    return base
+
+
+async def test_record_interaction_with_no_cookable_recipe_still_records_a_row(
+    mcp_client: Client[Any],
+) -> None:
+    result = await mcp_client.call_tool("record_interaction", _record_interaction_arguments())
+
+    assert result.data["any_cookable"] is False
+    assert result.data["recommended_recipe_id"] is None
+    assert result.data["final_response"] == "Nothing cookable this run."
+
+
+async def test_record_interaction_never_stores_media_bytes(mcp_client: Client[Any]) -> None:
+    result = await mcp_client.call_tool(
+        "record_interaction",
+        _record_interaction_arguments(
+            modalities=["vision", "audio"],
+            voice_transcript="a plain-text transcript",
+            ingredients_summary="Found 2 item(s): egg, milk",
+        ),
+    )
+
+    for value in result.data.values():
+        assert not isinstance(value, bytes)
+    assert result.data["voice_transcript"] == "a plain-text transcript"
+
+
+async def test_get_interaction_history_returns_most_recent_first(mcp_client: Client[Any]) -> None:
+    for trace_id in ("first", "second", "third"):
+        await mcp_client.call_tool("record_interaction", _record_interaction_arguments(trace_id=trace_id))
+
+    result = await mcp_client.call_tool("get_interaction_history", {"days_back": 30, "limit": 50})
+
+    assert [r["trace_id"] for r in result.data["interactions"]] == ["third", "second", "first"]
+    assert result.data["count"] == 3
+
+
+async def test_get_interaction_history_empty_on_a_fresh_database(mcp_client: Client[Any]) -> None:
+    result = await mcp_client.call_tool("get_interaction_history", {})
+
+    assert result.data["interactions"] == []
+    assert result.data["count"] == 0

@@ -74,6 +74,8 @@ DEFAULT_INVENTORY: dict[str, list[str]] = {
         "get_meal_history",
         "check_repetition",
         "get_context_signals",
+        "record_interaction",
+        "get_interaction_history",
     ],
 }
 

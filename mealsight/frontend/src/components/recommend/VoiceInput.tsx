@@ -1,0 +1,271 @@
+import { useEffect, useRef, useState } from 'react'
+
+import { AudioPlayer } from '@/components/recommend/AudioPlayer'
+import { MAX_AUDIO_DURATION_SECONDS, validateAudioFile } from '@/lib/inputLimits'
+
+interface VoiceInputProps {
+  file: File | null
+  onChange: (file: File | null) => void
+  disabled?: boolean
+}
+
+type RecorderState =
+  'idle' | 'requesting-permission' | 'recording' | 'recorded' | 'permission-denied'
+
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+const mediaRecorderSupported =
+  typeof window !== 'undefined' && typeof window.MediaRecorder !== 'undefined'
+
+/**
+ * Records via MediaRecorder when available; always offers a plain file
+ * upload as a fallback, both for browsers with no MediaRecorder support
+ * at all and for a user who'd rather upload an existing voice memo than
+ * record a new one. A denied microphone permission gets its own
+ * explanatory state, never a silent no-op — the recording button simply
+ * not working, with nothing said about why, is exactly the failure mode
+ * this is written to avoid.
+ */
+export function VoiceInput({ file, onChange, disabled = false }: VoiceInputProps) {
+  const [state, setState] = useState<RecorderState>('idle')
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  // The duration to trust for playback — set from the SAME live timer
+  // already shown while recording, never from the recorded blob's own
+  // reported duration. See this component's own comment on
+  // handleStop below for why the blob's reported duration can't be
+  // trusted here. null for an uploaded (not self-recorded) file, since
+  // there's nothing tracked to report for that case — AudioPlayer
+  // falls back to the browser's own duration then.
+  const [recordedDurationSeconds, setRecordedDurationSeconds] = useState<number | null>(null)
+  // Read inside recorder.onstop via a ref, not the elapsedSeconds state
+  // directly — onstop is a callback captured once when startRecording
+  // runs, so it would otherwise close over whatever elapsedSeconds was
+  // AT THAT TIME (0), not its later, final value.
+  const elapsedSecondsRef = useRef(0)
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl(null)
+      return
+    }
+    const url = URL.createObjectURL(file)
+    setPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [file])
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+    }
+  }, [])
+
+  function stopTimer(): void {
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+  }
+
+  function stopStream(): void {
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+  }
+
+  async function startRecording(): Promise<void> {
+    setUploadError(null)
+    setState('requesting-permission')
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = stream
+      chunksRef.current = []
+
+      const recorder = new MediaRecorder(stream)
+      mediaRecorderRef.current = recorder
+
+      recorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data)
+      }
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' })
+        const extension = blob.type.includes('mp4') ? 'm4a' : 'webm'
+        // The tracked elapsed time, not blob.duration (there is no such
+        // property on a Blob to even read) and not the eventual
+        // <audio>'s own reported duration either — a MediaRecorder-
+        // produced WebM has no finalized Duration element in its own
+        // container header, and this project confirmed directly (a
+        // real headless-Chrome repro, not just cited documentation)
+        // that the browser can report that as Infinity for a resulting
+        // blob — reproduced here for a multi-part/timesliced
+        // recording specifically. Recording our own elapsed seconds
+        // the whole time sidesteps the question entirely: it's never
+        // wrong, because it was never derived from the container at all.
+        setRecordedDurationSeconds(elapsedSecondsRef.current)
+        onChange(new File([blob], `recording.${extension}`, { type: blob.type }))
+        stopStream()
+      }
+
+      recorder.start()
+      setState('recording')
+      setElapsedSeconds(0)
+      elapsedSecondsRef.current = 0
+      setRecordedDurationSeconds(null)
+      timerRef.current = setInterval(() => {
+        setElapsedSeconds((prev) => {
+          const next = prev + 1
+          elapsedSecondsRef.current = next
+          if (next >= MAX_AUDIO_DURATION_SECONDS) {
+            // Enforce the backend's own duration cap client-side too —
+            // stop automatically rather than let a user record past a
+            // limit the upload will just fail on anyway.
+            stopRecording()
+          }
+          return next
+        })
+      }, 1000)
+    } catch {
+      setState('permission-denied')
+    }
+  }
+
+  function stopRecording(): void {
+    stopTimer()
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    }
+    setState('recorded')
+  }
+
+  function handleRemove(): void {
+    onChange(null)
+    setState('idle')
+    setElapsedSeconds(0)
+    setRecordedDurationSeconds(null)
+    setUploadError(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  function handleFallbackFile(files: FileList | null): void {
+    const candidate = files?.[0]
+    if (!candidate) return
+    const result = validateAudioFile(candidate)
+    if (!result.valid) {
+      setUploadError(result.message ?? "That audio file can't be used.")
+      return
+    }
+    setUploadError(null)
+    onChange(candidate)
+    // No independently-tracked duration for an uploaded file — this
+    // wasn't recorded here, so there's no elapsed timer to have
+    // measured it. AudioPlayer falls back to the browser's own
+    // reported duration for this case, which is fine for an uploaded,
+    // already-finalized audio file (unlike a live MediaRecorder blob).
+    setRecordedDurationSeconds(null)
+    setState('recorded')
+  }
+
+  return (
+    <div>
+      <label className="text-subtitle text-ink">Voice memo</label>
+      <p className="mt-1 text-caption text-ink-faint">
+        Up to {Math.floor(MAX_AUDIO_DURATION_SECONDS / 60)} minutes. WAV, MP3, M4A, or WEBM.
+      </p>
+
+      <div className="mt-3 rounded-card border border-ink/10 bg-surface-muted p-4">
+        {state === 'idle' && (
+          <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-between">
+            <button
+              type="button"
+              onClick={startRecording}
+              disabled={disabled || !mediaRecorderSupported}
+              className="rounded-card bg-brand-600 px-4 py-2 text-body font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+            >
+              {mediaRecorderSupported ? 'Start recording' : 'Recording unavailable in this browser'}
+            </button>
+            <span className="text-caption text-ink-faint">or upload an audio file</span>
+          </div>
+        )}
+
+        {state === 'requesting-permission' && (
+          <p className="text-body text-ink-muted">Requesting microphone access…</p>
+        )}
+
+        {state === 'permission-denied' && (
+          <div>
+            <p className="text-body text-danger-600">
+              Microphone access was denied, so recording isn't available right now.
+            </p>
+            <p className="mt-1 text-caption text-ink-muted">
+              Allow microphone access in your browser's site settings and try again, or upload an
+              audio file instead.
+            </p>
+          </div>
+        )}
+
+        {state === 'recording' && (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-danger-500" />
+              <span className="text-body font-medium text-ink">
+                Recording… {formatElapsed(elapsedSeconds)}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={stopRecording}
+              className="rounded-card border border-ink/10 px-4 py-2 text-body font-medium text-ink hover:bg-surface"
+            >
+              Stop
+            </button>
+          </div>
+        )}
+
+        {state === 'recorded' && previewUrl && (
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <AudioPlayer src={previewUrl} durationHintSeconds={recordedDurationSeconds} />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleRemove}
+                disabled={disabled}
+                className="rounded-card border border-danger-500/30 px-3 py-1.5 text-body text-danger-600 hover:bg-danger-50 disabled:opacity-50"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        )}
+
+        {state !== 'recording' && (
+          <div className="mt-3 border-t border-ink/10 pt-3">
+            <label className="text-caption font-medium text-ink-muted">
+              Upload an audio file instead
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/wav,audio/mpeg,audio/mp4,audio/x-m4a,audio/webm"
+                disabled={disabled}
+                onChange={(event) => handleFallbackFile(event.target.files)}
+                className="mt-1 block w-full text-caption text-ink-muted file:mr-3 file:rounded-card file:border-0 file:bg-surface file:px-3 file:py-1.5 file:text-body file:text-ink"
+              />
+            </label>
+          </div>
+        )}
+
+        {uploadError && <p className="mt-2 text-caption text-danger-600">{uploadError}</p>}
+      </div>
+    </div>
+  )
+}

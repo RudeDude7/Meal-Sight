@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date as date_
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -93,6 +93,37 @@ class RepetitionCheck(BaseModel):
 
 
 MealType = Literal["breakfast", "lunch", "dinner", "snack"]
+
+
+class InteractionRecord(BaseModel):
+    """One interaction_history row: every recommendation request and its
+    outcome, regardless of whether anything was actually cooked
+    (meal_history only ever records a CONFIRMED cook — this is every
+    REQUEST, cooked or not). Text only: voice_transcript is the
+    transcript text itself, never the audio bytes; ingredients_summary
+    is a short text description of what a photo yielded, never the
+    image bytes. merged_constraints is the merged request's own
+    constraint fields as a plain dict, null when perception never ran
+    far enough to produce one at all (e.g. no usable input). recommended
+    _recipe_id/_recipe_name are both null on a run that recommended
+    nothing — a closest-candidates-not-cookable explanation, or no
+    candidates at all."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: int
+    created_at: datetime
+    trace_id: str | None
+    modalities: list[str]
+    text_input: str | None
+    voice_transcript: str | None
+    ingredients_summary: str | None
+    merged_constraints: dict[str, Any] | None
+    recommended_recipe_id: str | None
+    recommended_recipe_name: str | None
+    any_cookable: bool
+    top_match_score: float | None
+    final_response: str | None
 
 
 class ContextSignals(BaseModel):

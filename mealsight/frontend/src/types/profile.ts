@@ -63,3 +63,27 @@ export interface ContextSignals {
   complexity_suggestion: string
   context_notes: string[]
 }
+
+/**
+ * One interaction_history row, as returned by GET /api/interactions —
+ * every recommendation REQUEST and its outcome, regardless of whether
+ * anything was ever cooked (MealHistoryEntry, above, only ever exists
+ * for a confirmed cook). Text only: voice_transcript is the transcript
+ * text itself, ingredients_summary a short description of what a photo
+ * yielded — never the actual image or audio bytes.
+ */
+export interface InteractionRecord {
+  id: number
+  created_at: string
+  trace_id: string | null
+  modalities: string[]
+  text_input: string | null
+  voice_transcript: string | null
+  ingredients_summary: string | null
+  merged_constraints: Record<string, unknown> | null
+  recommended_recipe_id: string | null
+  recommended_recipe_name: string | null
+  any_cookable: boolean
+  top_match_score: number | null
+  final_response: string | null
+}

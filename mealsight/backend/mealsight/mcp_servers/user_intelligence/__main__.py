@@ -18,11 +18,29 @@ from __future__ import annotations
 
 import asyncio
 
-from mealsight.db import close_all, get_user_db
+from mealsight.db import close_all, get_user_db, init_database
 from mealsight.mcp_servers.user_intelligence.server import mcp
 from mealsight.utils.logging import get_logger
 
 logger = get_logger("mealsight.mcp_servers.user_intelligence.main")
+
+
+async def _initialize_schema() -> None:
+    """Applies user_intelligence.sql against the real database, at
+    startup, before serving any request — idempotent (CREATE TABLE IF
+    NOT EXISTS throughout), so this is exactly as safe to run on every
+    ordinary restart as it is on a completely fresh database directory
+    with no .db file at all yet. A fresh deployment (a new Docker
+    volume, a freshly cloned repo, an HF Spaces rebuild) would otherwise
+    fail on this server's very first query — there is no separate
+    "run this once before first boot" step to remember or forget."""
+    db = get_user_db()
+    result = await init_database(db, db.schema_path)
+    logger.info(
+        "user_intelligence_schema_ready",
+        created_tables=result.created_tables,
+        existing_tables=result.existing_tables,
+    )
 
 
 async def _verify_database_reachable() -> None:
@@ -41,6 +59,7 @@ async def _verify_database_reachable() -> None:
 
 
 async def _run() -> None:
+    await _initialize_schema()
     await _verify_database_reachable()
     try:
         await mcp.run_stdio_async(show_banner=False)

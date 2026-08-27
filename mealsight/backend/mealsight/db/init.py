@@ -3,11 +3,16 @@
 init_database() / init_all_databases() are idempotent — every schema file
 under mealsight/db/schema/ uses CREATE TABLE IF NOT EXISTS and CREATE
 INDEX IF NOT EXISTS throughout, so applying a schema against an
-already-initialized database is a no-op, not an error.
+already-initialized database is a no-op, not an error. This is exactly
+what makes it safe to call on every single server startup (see each MCP
+server's own __main__.py), not just once during a manual deploy step:
+a restart re-applies the identical schema, creates nothing new, and
+touches zero existing rows.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from mealsight.db.connection import Database, get_pantry_db, get_recipe_db, get_user_db
@@ -16,17 +21,45 @@ from mealsight.utils.logging import get_logger
 logger = get_logger("mealsight.db.init")
 
 
-async def init_database(db: Database, schema_path: Path) -> None:
+@dataclass(slots=True, frozen=True)
+class SchemaInitResult:
+    """Which tables init_database actually created this call versus
+    which ones were already there — the two are meaningfully different
+    events (a genuinely fresh database directory versus an ordinary
+    restart against one that already exists), and a caller logging
+    "database initialized" with no further detail can't tell them apart
+    after the fact."""
+
+    created_tables: list[str]
+    existing_tables: list[str]
+
+
+async def _table_names(db: Database) -> list[str]:
+    rows = await db.fetch_all("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+    return [row["name"] for row in rows]
+
+
+async def init_database(db: Database, schema_path: Path) -> SchemaInitResult:
+    before = set(await _table_names(db))
+
     sql = schema_path.read_text()
     await db.executescript(sql)
 
-    tables = await db.fetch_all("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
-    logger.info("database_initialized", db=db.name, tables=[row["name"] for row in tables])
+    after = await _table_names(db)
+    created = sorted(set(after) - before)
+    existing = sorted(before)
+
+    logger.info(
+        "database_initialized", db=db.name, created_tables=created, existing_tables=existing
+    )
+    return SchemaInitResult(created_tables=created, existing_tables=existing)
 
 
-async def init_all_databases() -> None:
+async def init_all_databases() -> dict[str, SchemaInitResult]:
+    results: dict[str, SchemaInitResult] = {}
     for db in (get_pantry_db(), get_recipe_db(), get_user_db()):
-        await init_database(db, db.schema_path)
+        results[db.name] = await init_database(db, db.schema_path)
+    return results
 
 
 async def reset_database(db: Database, *, confirm: bool = False) -> None:

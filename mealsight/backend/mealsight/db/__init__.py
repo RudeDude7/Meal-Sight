@@ -9,10 +9,11 @@ from mealsight.db.connection import (
     get_recipe_db,
     get_user_db,
 )
-from mealsight.db.init import init_all_databases, init_database, reset_database
+from mealsight.db.init import SchemaInitResult, init_all_databases, init_database, reset_database
 
 __all__ = [
     "Database",
+    "SchemaInitResult",
     "close_all",
     "get_pantry_db",
     "get_recipe_db",

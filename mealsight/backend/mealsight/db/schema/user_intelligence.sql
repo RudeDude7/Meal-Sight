@@ -47,3 +47,33 @@ CREATE TABLE IF NOT EXISTS cooking_patterns (
 CREATE INDEX IF NOT EXISTS idx_meal_history_date ON meal_history(date);
 CREATE INDEX IF NOT EXISTS idx_meal_history_cuisine ON meal_history(cuisine);
 CREATE INDEX IF NOT EXISTS idx_meal_history_rating ON meal_history(rating);
+
+-- Every recommendation request and its outcome, regardless of whether
+-- anything was actually cooked (meal_history only ever records a
+-- CONFIRMED cook) — text only, on purpose: modalities/text_input/
+-- voice_transcript/ingredients_summary are all plain text describing
+-- what was sent or found, never the actual image or audio bytes
+-- themselves, which keeps this table small and lets an ephemeral
+-- deployment's filesystem survive a restart without a media blob store
+-- to worry about.
+CREATE TABLE IF NOT EXISTS interaction_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    trace_id TEXT,
+    -- JSON array of strings, e.g. ["vision", "text"].
+    modalities TEXT NOT NULL,
+    text_input TEXT,
+    voice_transcript TEXT,
+    ingredients_summary TEXT,
+    -- JSON object of the merged request's own constraint fields
+    -- (dietary_restrictions, cuisine_preference, etc.) — null when
+    -- perception never ran far enough to merge anything at all.
+    merged_constraints TEXT,
+    recommended_recipe_id TEXT,
+    recommended_recipe_name TEXT,
+    any_cookable INTEGER NOT NULL DEFAULT 0,
+    top_match_score REAL,
+    final_response TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_interaction_history_created_at ON interaction_history(created_at);

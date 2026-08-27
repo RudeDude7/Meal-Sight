@@ -34,7 +34,7 @@ import argparse
 import asyncio
 import logging
 
-from mealsight.db import get_recipe_db
+from mealsight.db import get_recipe_db, init_database
 from mealsight.utils.logging import get_logger
 
 from .load_nutrition import coverage_report, load_nutrition, print_coverage_report
@@ -54,6 +54,13 @@ async def _run() -> int:
     warnings: list[str] = []
 
     db = get_recipe_db()
+    # Schema first: this command is a real, standalone deploy step that
+    # can genuinely run before recipe_engine's own MCP server has ever
+    # started once (a fresh CI job, a one-shot seeding container) — it
+    # can't assume a table to insert into already exists. Idempotent, so
+    # this is a no-op on every ordinary re-run against an already-
+    # initialized database.
+    await init_database(db, db.schema_path)
 
     print("Seeding recipes from TheMealDB...")
     recipe_count = await run_recipe_ingestion(db)

@@ -1,0 +1,400 @@
+PHASE 8.1 STUDY NOTES: THE FRONTEND SCAFFOLD — TYPES AND A CLIENT WITH
+NOTHING GUESSED
+=============================================================
+
+The first frontend phase, and a deliberately narrow one: structure,
+types, and an API client — no feature pages. The one rule that shaped
+almost every decision below: every TypeScript type had to come from
+actually reading the backend's own pydantic models and message schemas,
+not from inferring a shape off an endpoint's name or a router's
+docstring summary. That rule caught two things worth remembering before
+any of the rest of this: quantity_display on a scaled recipe is a
+formatted STRING, never a raw number (this project's own recipe_engine
+already learned that the hard way in phase 7.3's cook-confirmation
+work, and it stays true here too), and GET /health's own 503 response
+body is a real HealthReport, not this API's usual {code, message,
+trace_id} error envelope — a client that treated every non-2xx as that
+envelope would silently throw away the one thing a degraded-health
+response exists to say.
+
+Files added: the entire mealsight/frontend/ tree — package.json,
+vite.config.ts, tsconfig.{json,app.json,node.json}, tailwind.config.cjs,
+postcss.config.cjs, .eslintrc.cjs, .prettierrc.json, .env.example,
+index.html, src/{main,App,index.css,vite-env.d.ts}, src/types/
+{matching,recipe,pantry,profile,recommendation,cook,websocket,health,
+errors,index}.ts, src/api/{client,recommend,pantry,recipes,history,
+profile,grocery,cook,health,index}.ts, src/hooks/useWebSocket.ts, src/
+components/layout/{NavShell,ErrorBoundary,LoadingSpinner}.tsx, src/
+pages/{Home,Pantry,Profile}.tsx. No backend files touched this phase.
+No test suite added — out of this phase's own stated scope ("Foundation
+only — no feature pages yet"), and there is nothing here yet that has
+real behavior worth testing beyond what typecheck/lint/build already
+guarantee structurally.
+
+
+1. READ BEFORE WRITTEN: THE BACKEND FILES THAT ACTUALLY SHAPED THE TYPES
+=============================================================
+mealsight/api/messages.py, mealsight/recipe_engine/models.py, mealsight/
+matching/models.py, mealsight/pantry/models.py, mealsight/user_
+intelligence/models.py, mealsight/api/routers/{recipes,profile,grocery,
+recommend,history,cook}.py, mealsight/api/{errors,health,sessions}.py,
+mealsight/agent/state.py, mealsight/agent/nodes/{reason,present,
+match_rank}.py.
+
+Two of those last four don't have dedicated pydantic response models at
+all — state["top_recommendation"] and state["processing_trace"] are
+typed dict[str, Any] on MealSightState itself, assembled ad hoc inside
+reason.py and present.py. Rather than inventing a clean-looking type
+from nothing, src/types/recommendation.ts's TopRecommendation and
+ProcessingTraceEntry were built by reading exactly which keys reason.py
+and present.py actually put into those dicts (available, recipe_id,
+explanation, overall_summary, reasoning, invalid_model_choice,
+overrode_uncookable_choice, model_chosen_recipe_id for the former;
+node_timings, mcp_calls, llm_calls, ranking, errors, retries,
+relaxations for the latter) — an honest reflection of a genuinely
+loosely-typed backend shape, not a tidier fiction.
+
+
+2. THE SCAFFOLD create-vite GAVE US VERSUS THE ONE THIS PHASE ACTUALLY
+   NEEDED
+=============================================================
+`npm create vite@latest frontend -- --template react-ts` (current as of
+this session) scaffolds React 19, Vite 8, TypeScript "6.0.2" (a preview/
+next channel, not a released TypeScript major), and oxlint in place of
+ESLint. The task's own instructions were explicit — React 18, and
+"ESLint and Prettier configured" — so rather than adapting the task to
+whatever the scaffolding tool happened to default to today, package.json
+was rewritten outright to a conventional, stable stack: React 18.3,
+Vite 5.4, TypeScript 5.6, ESLint 8 (+ @typescript-eslint, +
+react-hooks, + react-refresh) with eslint-config-prettier, and Prettier
+3. .oxlintrc.json was deleted. This is the same judgment call as
+picking a real, working answer over a technically-more-current one that
+doesn't match what was actually asked for.
+
+
+3. TYPES: ONE FILE PER BACKEND DOMAIN, A BARREL FOR CONVENIENCE
+=============================================================
+src/types/ mirrors the backend's own module boundaries rather than its
+own router boundaries: matching.ts, recipe.ts, pantry.ts, profile.ts
+each correspond to one mealsight/*/models.py file, not one API router,
+since several routers (recipes, pantry, grocery) are themselves thin
+proxies over exactly those same underlying models with no shape change
+at the HTTP layer. recommendation.ts and cook.ts are the two files that
+don't map to a single backend models.py 1:1 — recommendation.ts spans
+recommend.py's own RecommendationAccepted plus the ad hoc
+top_recommendation/processing_trace dict shapes (section 1), and cook.ts
+spans both cook.py's CookRequest/response and history.py's
+RateMealRequest/response, since both routes share the same MealRecord-
+shaped "meal" field and it made more sense to keep the cook-confirmation
+and rating request/response pairs together than to split them across
+two files for a purely mechanical reason.
+
+websocket.ts is the one file that's a literal field-for-field mirror,
+checked directly against mealsight/api/messages.py's own eight
+subclasses rather than summarized — every field, in the same order,
+same optionality. The one deliberate difference: type is narrowed to
+each message's own string literal in every subclass, where the backend
+only declares type: str on the shared Python base (BaseWSMessage) and
+lets each subclass override it — the discriminated union is exactly
+what makes .type narrow the rest of a message's fields correctly in
+TypeScript, so the base interface in websocket.ts intentionally omits
+type entirely rather than declaring it as a wider string there too.
+
+
+4. THE API CLIENT: ONE SHARED ERROR PATH, ONE DELIBERATE EXCEPTION TO IT
+=============================================================
+src/api/client.ts's own apiRequest/apiRequestMultipart both funnel
+through one handleResponse: any non-2xx throws ApiError, built from
+mealsight/api/errors.py's own {code, message, trace_id} envelope
+(parseErrorEnvelope falls back to a genuine "unknown_error" ApiError
+only if the body genuinely isn't that shape at all — e.g. a raw network
+or proxy-level failure with an HTML body, not a JSON one). Every
+endpoint function in src/api/{pantry,recipes,history,profile,grocery,
+cook}.ts is a thin, fully-typed wrapper over this one shared path.
+
+getHealth in src/api/health.ts is the one function that does NOT use
+apiRequest, on purpose — see this phase's own intro paragraph. GET
+/health returns 503 with a real HealthReport body when degraded (per
+mealsight/api/routers/health.py's own response.status_code = 503 line),
+not the {code, message, trace_id} shape every other failure in this API
+uses. Routing it through the shared error path would throw away exactly
+the information a degraded-health check exists to surface — which
+server is down, which provider is unreachable — in favor of a generic
+"Request failed with status 503" ApiError. getHealth reads the body
+directly regardless of status code instead.
+
+A second, smaller correction caught by actually reading recipes.py:
+dietary_filters is a list[str] | None FastAPI query parameter, and
+FastAPI's own query-parsing convention for a list expects the SAME key
+REPEATED (?dietary_filters=a&dietary_filters=b), not one comma-joined
+value. buildQueryString in client.ts was written to append once per
+array element for exactly this reason, after an earlier draft that
+comma-joined the array was caught and corrected before ever being used
+anywhere.
+
+
+5. useWebSocket: WHY IT CANNOT LOSE A MESSAGE FROM A RUN THAT FINISHES
+   FAST
+=============================================================
+The task's own hard requirement — "do not lose messages on a fast
+recommendation that completes before the socket opens" — turns out to
+already be mostly satisfied by the BACKEND's own phase 7.2 design, not
+something the frontend hook has to independently re-solve: mealsight.
+api.streaming.SessionStream buffers every message for a session
+regardless of whether or when a client is connected, and WS /ws/
+{session_id} replays that entire buffer, oldest first, before switching
+a connection to live delivery — including for a session that's already
+complete or failed by the time a client connects at all (phase 7.2's
+own three-case handling: unknown session, already-done session,
+pending/running session). Given that, the hook's own job reduces to two
+things: actually open the connection promptly rather than lazily
+deferring it, and never let a DROPPED connection go unnoticed and
+un-retried, since a drop mid-buffer-replay or mid-live-stream is the one
+way this hook itself, not the backend, could actually be responsible for
+losing something.
+
+Concretely: connect() fires as soon as a sessionId is provided (inside
+the effect, not gated behind any other condition), every message is
+parsed through isWSMessage (a structural check — type and session_id
+both present and correctly typed) rather than trusted blindly, and
+onclose only triggers a reconnect (exponential backoff, 500ms base,
+capped at 5 attempts) when no terminal message (complete or error) was
+ever received on that connection — a clean close AFTER a terminal
+message is a real, expected end of the stream, not a drop to recover
+from. Because a fresh reconnect replays the FULL buffered history again
+from the very start (same backend behavior noted above), messages is
+reset to [] at the start of every individual connection attempt rather
+than accumulated across reconnects, specifically so a reconnect after a
+partial drop doesn't end up with the pre-drop messages duplicated
+alongside the full replay a fresh connection receives.
+
+Teardown: an unmountedRef guard stops every pending callback (onopen/
+onmessage/onerror/onclose, and a scheduled reconnect timer) from
+touching state after unmount, the reconnect timer is explicitly
+cleared, and the socket is explicitly closed — the standard shape for
+"this effect owns a resource with its own async callbacks and must not
+leak past cleanup," applied here to a WebSocket instance instead of a
+fetch or a subscription.
+
+
+6. ROUTING, SHELL, AND A DESIGN SYSTEM THAT LIVES IN ONE FILE
+=============================================================
+Home/Pantry/Profile are placeholder pages under one NavShell layout
+route (React Router v6's own nested-route + <Outlet /> pattern), each
+one a single paragraph naming what will actually live there and which
+already-built API module it'll eventually use — deliberately not
+empty, so a future session picking this up isn't guessing what belongs
+on each page. ErrorBoundary is a class component, not a hook — React 18
+has no hook equivalent for componentDidCatch, so this is the one place
+in this codebase that isn't a function component, for a reason that
+isn't going away with a future React version.
+
+Colors, spacing, and typography live entirely in tailwind.config.cjs
+(brand/surface/ink/danger/warning palettes, a named text-caption
+through text-display type scale, two extra spacing steps) rather than
+as scattered arbitrary-value class strings — a page reaches for
+text-title or bg-brand-600, never text-[22px] or bg-[#16a34d]. This is
+the literal reading of the task's own "as Tailwind config, not scattered
+class strings" instruction, not a looser interpretation of it.
+
+
+7. VERIFICATION
+=============================================================
+npm run typecheck (tsc -b --noEmit across both the app and node
+tsconfigs): clean, no output. npm run lint (eslint . --max-warnings 0):
+clean, no output, exit 0. npm run build (tsc -b --noEmit && vite build):
+clean —
+
+  ✓ 39 modules transformed.
+  dist/index.html                   0.46 kB │ gzip:  0.30 kB
+  dist/assets/index-*.css           8.52 kB │ gzip:  2.39 kB
+  dist/assets/index-*.js          168.57 kB │ gzip: 54.92 kB
+  ✓ built in 623ms
+
+"Building must fail on type errors" was checked directly, not assumed
+from tsc's own reputation: a deliberate `const x: number = "not a
+number"` was appended to App.tsx, npm run build exited 1 with the real
+TS2322 printed, then the line was removed and all three commands
+re-confirmed clean.
+
+Proxy check: started the real backend (uv run uvicorn mealsight.api.
+app:app, port 8000 — /health reported "healthy", 250 recipes, every MCP
+server up) and the real Vite dev server (port 5173), then hit /health
+through the FRONTEND's own origin — the same relative path src/api/
+health.ts itself calls — rather than the backend directly:
+
+  $ curl -s -w "\nHTTP_STATUS:%{http_code}\n" http://localhost:5173/health
+  {"status":"healthy","mcp_servers":{...},"providers":{...},"recipe_database":{...}}
+  HTTP_STATUS:200
+
+Identical body to hitting the backend directly, confirming the proxy is
+genuinely transparent — no CORS anywhere in this path, since the
+browser (or curl, standing in for it here) only ever talks to
+localhost:5173. Both dev servers stopped afterward.
+
+WSMessage was printed side by side with messages.py's own eight
+subclasses, field for field, for the user's own direct confirmation —
+every field matched; the only representational differences are
+datetime -> string (ISO 8601 over JSON, unavoidable at the wire) and
+dict[str, Any] -> Record<string, unknown> for CompleteMessage.result.
+
+
+8. A FOLLOW-UP: AN IDE-ONLY "Cannot find type definition file for
+   'node'" REPORT
+=============================================================
+Raised against tsconfig.node.json's own "types": ["node"] entry. Checked
+directly rather than assumed benign: node_modules/@types/node/package.
+json exists (version 20.19.43) and npm run typecheck — the same tsc -b
+invocation that covers tsconfig.node.json as one of its two project
+references — passes clean with zero output. This confirms the error is
+the EDITOR's own TypeScript language server, not the project's actual
+compiler configuration: most likely a stale TS server that started
+before npm install finished, or an editor window rooted somewhere other
+than frontend/ itself (which would break relative node_modules
+resolution for a type-only reference like this). No code change was
+made in response — restarting the TS server (or confirming the editor's
+own workspace root is frontend/) is the actual fix, and reporting "this
+isn't a real config problem, here's what it actually is" was the
+honest response rather than editing a config that already type-checks
+and builds correctly just to make an IDE symptom go away.
+
+
+9. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+Accepting create-vite's own current defaults (React 19, TS 6-preview,
+oxlint) versus rewriting to match the task's stated stack
+    Rejected keeping the defaults: the task named React 18 and ESLint
+    specifically, and a preview-channel TypeScript version is exactly
+    the kind of bleeding edge that risks incompatibility with an
+    otherwise-stable ecosystem (Tailwind's own PostCSS plugin, `
+    @typescript-eslint`) for no benefit this phase needed. Rewriting
+    package.json to a conventional, well-supported stack was more work
+    up front than accepting the scaffold as-is, but avoids building the
+    rest of this project's frontend on a foundation nobody asked for.
+
+Comma-joining dietary_filters as one query value versus repeating the
+key once per array element
+    Caught and corrected before ever being used anywhere in the app:
+    FastAPI's own query-parsing for a list[str] parameter expects the
+    key repeated, not a single delimited string it would then have to
+    parse back apart itself (and doesn't). Fixed at the shared
+    buildQueryString level, not per-caller, so every current and future
+    array-valued query parameter gets the correct behavior automatically.
+
+Routing GET /health through the same apiRequest/ApiError path as every
+other endpoint versus a dedicated, simpler function
+    Rejected the shared path once mealsight/api/health.py's own
+    response.status_code = 503 line was read directly: a degraded
+    health check's real value is entirely in its body, which isn't the
+    {code, message, trace_id} shape ApiError expects, and treating 503
+    as a generic thrown error would discard the one thing this
+    endpoint exists to report — which check actually failed.
+
+Reconstructing top_recommendation/processing_trace as clean, invented
+interfaces versus reading reason.py/present.py to type them as they
+actually are
+    Rejected the tidier-looking option: MealSightState itself types
+    both fields as dict[str, Any], and reason.py builds several
+    genuinely different shapes into top_recommendation depending on
+    which branch fired (a model's own choice, a fallback override, a
+    no-candidates explanation). Typing these as an honest optional-
+    field interface, built by reading every branch, was more work than
+    guessing a single clean shape, but doesn't silently claim a
+    guarantee the backend doesn't actually provide.
+
+
+10. GLOSSARY
+=============================================================
+apiRequest / apiRequestMultipart
+    The two shared request helpers in src/api/client.ts every typed
+    endpoint function (except getHealth) is built on — JSON and
+    multipart/form-data respectively, both funneling through the same
+    handleResponse/ApiError translation.
+
+ApiError
+    Thrown for any non-2xx response from the shared request path —
+    carries status, code, and traceId straight from mealsight/api/
+    errors.py's own error envelope.
+
+isWSMessage
+    The structural runtime check useWebSocket applies to every parsed
+    JSON payload before trusting it as a WSMessage — confirms type and
+    session_id are both present and correctly typed, since a raw
+    JSON.parse result is never implicitly safe to cast.
+
+WSMessage
+    The eight-member discriminated union in src/types/websocket.ts,
+    checked field-for-field against mealsight/api/messages.py's own
+    eight pydantic subclasses.
+
+TopRecommendation / ProcessingTraceEntry
+    The two types in src/types/recommendation.ts built by reading
+    reason.py/present.py directly rather than from a dedicated pydantic
+    model, since MealSightState itself only types these fields as
+    dict[str, Any] on the backend.
+
+
+11. INTERVIEW TALKING POINTS
+=============================================================
+Q: Your useWebSocket hook resets its messages array on every reconnect.
+Doesn't that mean a client could briefly show fewer messages than it
+had a moment before the drop?
+
+    Briefly, yes, between the drop and the new connection's own replay
+    finishing — but that's the correct trade-off given how the backend
+    actually behaves, not an oversight. mealsight.api.streaming.
+    SessionStream replays its ENTIRE buffered history to every new
+    subscriber, from the start, every single time — so a reconnected
+    client is about to receive everything it already had plus whatever
+    it missed, all over again. Appending instead of resetting would
+    leave stale duplicates of every pre-drop message sitting in state
+    permanently. A brief, correct gap during reconnection is a better
+    failure mode than permanent, silent duplication.
+
+Q: Why does getHealth bypass your shared apiRequest/ApiError machinery
+specifically, instead of just special-casing 503 inside apiRequest
+itself?
+
+    Because the special case isn't really about the status code 503 —
+    it's about this ONE endpoint's response body meaning something
+    different from every other endpoint's error body. Teaching the
+    shared apiRequest to special-case 503 would either hard-code
+    knowledge of one specific route's own response shape into a
+    function every other endpoint also depends on, or require a new
+    per-call opt-out flag threaded through every caller just for this
+    one case. A dedicated function that reads the body directly,
+    regardless of status, keeps that knowledge scoped to exactly the
+    one place that needs it.
+
+Q: You rewrote create-vite's own scaffolded package.json instead of
+using what it gave you. How do you know the replacement versions are
+actually compatible with each other, rather than just individually
+plausible?
+
+    By actually running the full verification loop against the
+    rewritten set, not by trusting that pinning "reasonably recent"
+    versions of each package would just work together: npm install
+    completed cleanly, npm run typecheck/lint/build all passed with
+    zero errors on the real, non-trivial source tree this phase wrote
+    (types, api client, the WebSocket hook, routing), and the build
+    output is a real, working bundle — not just a version-resolution
+    success. That's the same standard this project applies to every
+    other "here's what should work" claim: run it for real before
+    reporting it as done.
+
+Q: The task asked you to derive types from reading pydantic models
+directly. What would you have gotten wrong if you'd skipped that and
+just inferred shapes from endpoint names instead?
+
+    At least two concrete things, both caught specifically by reading
+    rather than guessing. First, ScaledIngredient.quantity_display
+    looks like it should be a number from its name alone, but it's
+    documented and enforced as a formatted display STRING with no raw
+    numeric field anywhere on ScaledRecipe — a guessed `quantity:
+    number` field would have been simply wrong, not just imprecise.
+    Second, top_recommendation and processing_trace have no pydantic
+    model backing them at all — they're plain dicts assembled ad hoc
+    across several conditional branches in reason.py — so inferring a
+    single clean interface from the field name alone would have
+    silently promised a shape the backend doesn't actually guarantee in
+    every case.

@@ -1,0 +1,535 @@
+PHASE 7.3 STUDY NOTES: THE COOK-CONFIRMATION FLOW, THEN A BLANK-SECRET
+BLIND SPOT IN SETTINGS LOADING
+=============================================================
+
+This phase has two parts, done back to back but not causally linked the
+way phase 7.2's two parts were. Part one is the main deliverable: POST
+/api/cook, the one path in this whole API that actually mutates meal
+history and deducts from the pantry, plus POST /api/history/{meal_id}/
+rate for rating a meal after the fact. Part two is a much smaller,
+separately-scoped fix the user asked for after opening mealsight/.env in
+their editor: mealsight.config.settings' own .env-loading behavior
+silently accepts a PRESENT-BUT-BLANK required secret as valid, which is
+a real gap even though (as this phase's own investigation found) the
+.env PATH resolution itself was never actually CWD-dependent to begin
+with — the initial bug report's diagnosis and the actual defect turned
+out to be two different things.
+
+Files added: mealsight/api/idempotency.py, mealsight/api/routers/
+cook.py, backend/tests/test_api/test_cook.py. Files edited: mealsight/
+mcp_servers/user_intelligence/server.py, mealsight/agent/mcp_client.py,
+mealsight/agent/state.py, mealsight/agent/nodes/generate_output.py,
+mealsight/api/routers/{recommend,history}.py, mealsight/api/
+{dependencies,app}.py, mealsight/config/settings.py, backend/tests/
+test_mcp_servers/test_user_intelligence/test_tool_schemas.py, backend/
+tests/test_api/test_app.py, backend/tests/test_settings.py. Test count:
+476 (end of phase 7.2) -> 490.
+
+
+1. A FINDING BEFORE ANY CODE: rate_meal ALREADY EXISTED, JUST NEVER
+   WIRED IN
+=============================================================
+mealsight.user_intelligence.meal_history.rate_meal(meal_id, rating,
+user_db=None, recipe_db=None) -> MealRecord was already a complete,
+independently-tested function — validates rating 1-5, raises ValueError
+naming the problem for a bad rating or an unknown meal_id, updates the
+row, calls recompute_preference_scores. It had simply never been
+exposed as an MCP tool on the user_intelligence server. Reading every
+existing signature before writing anything (this project's own standing
+habit since phase 6.1) turned up this gap directly rather than assuming
+a rating endpoint would need new scoring logic written from scratch.
+Fixed by adding a thin @mcp.tool wrapper in mealsight/mcp_servers/
+user_intelligence/server.py that catches ValueError and routes it to
+not_found_error or validation_error depending on the message, exactly
+the same translation shape every other tool on this server already
+uses. user_intelligence went from six tools to seven; EXPECTED_TOOLS in
+mealsight.agent.mcp_client (the health-check gate) and both fixture
+files that hardcoded the old six-tool inventory needed updating to
+match.
+
+
+2. THE QUANTITY PROBLEM: scale_recipe's OWN OUTPUT CANNOT FEED
+   remove_items
+=============================================================
+The obvious-looking design — call scale_recipe, read its ingredients,
+hand the quantities straight to remove_items — doesn't work, and reading
+mealsight/recipe_engine/models.py directly is what caught it before any
+code was written: ScaledIngredient.quantity_display is always a
+formatted, human-readable STRING ("1/4", "2"), never a raw float.
+There's no numeric field anywhere on ScaledRecipe to fall back to. The
+actual numeric source is get_recipe's own BASE recipe — ingredients[].
+quantity, a float or None on the unscaled recipe — scaled manually by
+servings_made / servings_base inside cook.py's own _deduct_pantry,
+rather than by ever touching scale_recipe for this endpoint at all.
+recipe.get("servings_base") or body.servings_made covers the case where
+a recipe genuinely has no servings_base set.
+
+
+3. INGREDIENT DERIVATION: TWO INDEPENDENT GATES BEFORE ANYTHING REACHES
+   remove_items
+=============================================================
+When the caller doesn't supply ingredients_used, cook.py derives
+candidates itself, fresh, at cook time — a real get_pantry call plus a
+real match_ingredients call against the CURRENT pantry, never against
+whatever a possibly-stale earlier /api/recommend response said. Every
+candidate name, however it was sourced, passes through two independent
+checks before it's allowed anywhere near remove_items:
+
+  not_in_recipe  — normalize_ingredient(name) isn't a key in the
+                   recipe's own ingredient index at all. Satisfies
+                   "never deduct something the recipe did not use."
+  not_in_pantry  — present in the recipe but not in the current
+                   pantry's own normalized name set. Satisfies "never
+                   deduct an item the pantry does not have."
+  quantity_unknown — present in both, but the recipe's own raw
+                   quantity field is None (nothing to scale).
+
+Each skip is reported by name and reason in the response's own
+"skipped" list rather than silently dropped or raised as an error — the
+task's own explicit requirement ("skipped, not erroring"). Only
+survivors of all three checks become {"name", "quantity_used"} entries
+passed to remove_items.
+
+before/after per deducted item are computed directly from remove_items'
+own per-item response, not re-derived: before = round(quantity_
+remaining + quantity_removed, 4), after = quantity_remaining. This is
+mathematically exact even for a clamped removal (remove_items itself
+already guarantees quantity_removed never exceeds what was really
+there, and a deleted row's own quantity_remaining is 0) — cook.py never
+needs its own separate "did this exceed the pantry" check, because the
+invariant it's required to preserve is already enforced one layer down,
+and reading the real numbers back out of that layer's own response is
+strictly more reliable than recomputing them independently.
+
+
+4. ORDERING AND PARTIAL FAILURE: log_meal FIRST, remove_items SECOND,
+   ONE STATED ACCEPTABLE INCONSISTENCY
+=============================================================
+There is no shared transaction across user_intelligence and
+pantry_manager — two separate SQLite databases behind two separate MCP
+subprocesses — so this endpoint has to have an actual opinion about
+what happens if the second call fails after the first one succeeds, not
+paper over it.
+
+Decision: log_meal runs first. Reasoning: meal_history feeds cuisine_
+preferences, protein_preference, and check_repetition — every one of
+those shapes FUTURE recommendations, and there is no way to
+retroactively notice "a log_meal call silently never happened" and
+repair it later; the gap just persists forever, quietly. A stale pantry
+is the opposite kind of problem: small, visible, and self-correcting —
+it overstates what's on hand until the next photo update, a manual
+pantry correction, or this endpoint's own next call on a fresh
+idempotency window.
+
+The inconsistency this accepts, stated plainly: if remove_items (or the
+get_pantry/match_ingredients calls that feed it) fails AFTER log_meal
+has already succeeded, the endpoint still returns 200 — the meal WAS
+genuinely cooked and IS genuinely logged — with pantry_deduction_error
+set to the real failure message and deducted left empty or partial. If
+log_meal itself fails, the whole request raises a real HTTP error and
+nothing is recorded at all — safe to retry, since nothing was mutated
+anywhere yet. _deduct_pantry is the one function in this file with a
+try/except around real work; nowhere else in _perform_cook catches
+anything, on purpose.
+
+
+5. IDEMPOTENCY: A DERIVED KEY FOR THE COMMON CASE, A PER-KEY LOCK FOR
+   CORRECTNESS UNDER CONCURRENCY
+=============================================================
+Chosen approach: an OPTIONAL client-supplied idempotency_key; when
+absent, derive one from recipe_id plus a coarse 30-second time window
+(derive_idempotency_key, mealsight/api/idempotency.py). A double-
+clicked confirm button is the case this exists to guard for free,
+without making every frontend caller generate and track its own UUID
+for it. The window is deliberately coarse rather than fine-grained: it
+has to absorb a slow double-tap or a client retry, but stay short
+enough that two genuinely separate cook confirmations of the same
+recipe, minutes apart, still both get recorded rather than one silently
+eating the other. A caller needing a stronger guarantee than a 30-second
+window (an offline-first client resubmitting well after a real
+reconnect) should always supply its own idempotency_key instead of
+relying on the derived one.
+
+IdempotencyStore.run_once(key, compute) takes a per-key asyncio.Lock
+before checking the cache — the same "check, then maybe run, then
+cache, all under one lock" shape mealsight.providers.rate_limiter.
+RateLimiter already uses per model id, applied here per idempotency key
+instead. This is what makes two requests racing in with the identical
+key correct under real concurrency, not just correct when called
+sequentially in a test: one runs compute() and caches the result, the
+other finds the cache already populated by the time it gets the lock
+and returns that instead.
+
+Whatever compute() returns — a full success OR a partial failure with
+pantry_deduction_error set — is cached as-is and never re-run for that
+key. Deliberate, not an oversight: retrying a partially-failed cook
+confirmation under the same key could double-deduct whatever partially
+succeeded the first time, since remove_items isn't naturally idempotent
+for the same items. A genuinely failed confirmation needs a fresh key
+(or to wait out the window) to retry — this store gives no automatic
+retry-until-success semantics.
+
+In-process, swept periodically (1-hour TTL, mealsight.api.app's own
+sweep loop extended to also call idempotency_store.sweep_expired())
+rather than backed by Redis or any external store — the identical
+single-process, single-long-lived-MCPClientManager trade-off phase 7.1's
+SessionStore and phase 7.1's SubmissionRateLimiter already made for the
+same reason.
+
+
+6. WIRING THE FRONTEND'S OWN INPUTS TO /api/cook: matched_ingredients
+   AND A FLATTENED recipe_id
+=============================================================
+The task's own item 5 needed the recommendation response to carry
+exactly what a client calling /api/cook next actually needs: recipe_id,
+and a matched ingredient list with quantities. Two additions, both on
+the cookable path only:
+
+  - MealSightState gained matched_ingredients: NotRequired[list[dict]],
+    set only inside generate_output (node 9) via a new _build_
+    matched_ingredients helper — the SCALED recipe's own ingredients
+    (name, quantity_display, unit) cross-referenced by normalized name
+    against match_rank's own matched_items, since matched_items holds
+    match_rank's own CANONICAL names (post normalize+synonym) while
+    scaled_recipe holds the recipe's own raw ingredient names ("Udon
+    Noodles", not "udon noodle"). Returns [] whenever either input is
+    missing, rather than guessing.
+  - mealsight.api.routers.recommend's own _serialize_result flattens
+    top_recommendation["recipe_id"] onto the top level of the response
+    when available is true, specifically so cook.py (and a frontend
+    calling it) has one obvious, stable field to read recipe_id from,
+    the same reasoning that put matched_ingredients at the top level
+    rather than nested inside scaled_recipe.
+
+Node 9 itself still never calls remove_items — see its own module
+docstring, unchanged this phase — this is display data for a
+not-yet-confirmed cook, not a deduction.
+
+
+7. POST /api/history/{meal_id}/rate: THE SECOND, SEPARATE CALLER OF
+   rate_meal
+=============================================================
+A thin proxy: RateMealRequest declares rating: int = Field(ge=1, le=5)
+(FastAPI's own 422 for anything outside 1-5, rather than a second,
+hand-rolled range check duplicating what pydantic already does for
+free), calls user_intelligence's new rate_meal tool, then calls
+get_user_profile once more and returns {"meal", "cuisine_preferences",
+"protein_preference"} so the caller sees the recomputed scores in the
+same response, without a second round trip. unwrap_mcp_result already
+turns rate_meal's own not_found_error into a 404 — no extra error
+handling needed in this router at all for "rate an unknown meal id
+errors cleanly."
+
+
+8. THE TESTS (COOK AND RATE)
+=============================================================
+10 tests in test_cook.py, same FakeManager/running_client convention
+test_app.py already established (real FastAPI app, real ASGI transport,
+fake MCPClientManager) — extended this phase so _lifespan_with also
+sets app.state.idempotency_store, since cook.py is the first router
+that needs it.
+
+Covers: a full cook call logging the meal and deducting every matched
+ingredient with correct before/after; a repeat call under the same
+client-supplied idempotency_key producing idempotent_replay: true and
+exactly one remove_items call total, not two; an ingredient present in
+the recipe but absent from the test pantry being skipped with reason
+not_in_pantry rather than erroring; an ingredient present in the recipe
+with an unknown (None) quantity being skipped with reason quantity_
+unknown; a rating flowing straight into log_meal's own rating argument
+and both preferences_before/preferences_after being populated only when
+a rating was actually supplied; a clamped removal (remove_items itself
+reporting quantity_removed capped below what was requested) still
+producing an after value that's never negative and a quantity_removed
+that never exceeds before; the rating endpoint returning updated
+cuisine_preferences; rating an unknown meal id returning 404; and a
+rating outside 1-5 being rejected by FastAPI's own validation (422)
+before ever reaching an MCP call at all.
+
+One test data bug caught by ruff/mypy-adjacent test failures during
+writing, not a code bug: two ingredient-derivation tests initially both
+targeted "Mystery Spice"/"Sriracha" without accounting for cook.py's own
+CHECK ORDER (recipe-membership checked before pantry-membership) — an
+ingredient absent from BOTH the recipe and the pantry always reports
+not_in_recipe first, never not_in_pantry, which is the correct behavior
+per section 3's own ordering. Fixed by giving each test a fixture
+ingredient that isolates the ONE gate it's meant to exercise (Chili Oil:
+in the recipe, not in the pantry; Mystery Spice: in both, quantity
+unknown) rather than changing cook.py's own check order to fit sloppier
+test data.
+
+
+9. VERIFICATION (COOK FLOW) — INCLUDING WHAT COULDN'T BE RUN
+=============================================================
+ruff check: all checks passed. mypy --strict mealsight: no issues found
+in 117 source files. Full pytest: 486 passed, 3 deselected (476 -> 486).
+
+Live verification ran against the REAL app — real MCPClientManager,
+real recipe_engine/pantry_manager/user_intelligence subprocesses, real
+SQLite databases seeded from TheMealDB this same session — but
+deliberately did NOT go through POST /api/recommend, since that path
+needs real Mistral/Groq calls and, at the time this check ran, mealsight
+/.env still had both keys blank (see part two, section 10, for how that
+was later found to no longer be the actual state of the file). Seeded a
+real pantry with the four ingredients "Chicken Enchilada Casserole"
+(recipe_id 52765, servings_base 4) needs, then POSTed /api/cook with
+servings_made=4, rating=5: logged meal id 2, deducted all four
+ingredients with real before/after quantities read back from the real
+pantry database (e.g. Enchilada sauce 42.0 -> 28.0), and Mexican cuisine
+preference moved 0.625 -> 0.7 in the real user_intelligence database.
+Repeating the identical request produced idempotent_replay: true and an
+unchanged pantry — deducted exactly once, confirmed by re-reading
+GET /api/pantry before and after the repeat call, not merely trusting
+the response body's own claim.
+
+
+10. PART TWO: THE .env BUG REPORT'S OWN DIAGNOSIS DIDN'T SURVIVE
+    READING THE CODE
+=============================================================
+The user's framing: settings loads .env relative to process CWD, so a
+script run from outside backend/ silently gets blank keys. Reading
+mealsight/config/settings.py directly (this project's own "verify
+before trusting a description" habit, unchanged since phase 6.1) showed
+that diagnosis doesn't match what the code actually does: REPO_ROOT =
+Path(__file__).resolve().parents[3] and DEFAULT_ENV_FILE = REPO_ROOT /
+".env" were ALREADY anchored to the settings module's own file
+location, not the CWD, and already absolute. This was reported directly
+rather than silently implementing a "fix" for a bug that, as diagnosed,
+wasn't actually there.
+
+What WAS actually there, found by re-tracing why a live verification
+script had reported blank keys earlier this same phase: a required
+secret that's PRESENT in .env but BLANK (MISTRAL_API_KEY= with nothing
+after the equals sign) satisfies pydantic's own "this field was set"
+check completely — SecretStr accepts an empty string as a valid value
+— so load_settings' own existing missing-variable RuntimeError, which
+only triggers on pydantic's "missing" error type, never fires for a
+blank value. A blank key was silently reaching the settings singleton
+with no error anywhere. (Separately, and unrelated to this bug: the
+actual live blank-key episode earlier this phase turned out to be
+because mealsight/.env genuinely had blank values in it at the time,
+not because of any path-resolution defect — confirmed directly by
+reading the file's byte length before and after, without ever printing
+the real secret values into a transcript.)
+
+
+11. THE FIX: A SECOND CHECK, COMPUTED FROM THE MODEL ITSELF
+=============================================================
+_REQUIRED_SECRET_FIELDS is computed once from Settings.model_fields —
+every field that's both required (no default) and typed exactly
+SecretStr — rather than hand-maintained as a literal ["mistral_api_key",
+"groq_api_key"] list, so a future required secret gets the same check
+automatically without anyone needing to remember to add it here.
+load_settings, after successfully building a Settings instance, checks
+every one of those fields for get_secret_value() == "" and raises
+RuntimeError naming every blank one (uppercased, matching the existing
+missing-variable message's own convention) plus the exact env_file path
+that was searched. The existing missing-variable branch was extended
+the same way — it already named the variable, now it also names the
+searched path, so both failure modes report the same two facts: WHAT
+was empty/absent, and WHERE this process looked for it.
+
+Real environment variables still take precedence over the .env file —
+unchanged behavior, since it's pydantic-settings' own default source
+order (init args > env vars > dotenv file > defaults), not something
+this fix needed to add — but this was verified directly rather than
+assumed still true after this phase's changes, and is now locked in by
+a dedicated test (section 12).
+
+
+12. THE TESTS (SETTINGS)
+=============================================================
+4 new tests in test_settings.py, alongside the 4 already there.
+test_default_env_file_is_absolute_and_cwd_independent asserts
+DEFAULT_ENV_FILE.is_absolute() and, after chdir'ing to "/", that
+importlib.import_module("mealsight.config.settings").DEFAULT_ENV_FILE
+is still the identical object — importlib.import_module, not `from
+mealsight.config import settings`, specifically because mealsight.
+config's own __init__.py re-exports the settings INSTANCE under the
+same name ("settings"), which shadows the real submodule as a package
+attribute; the plain import form would silently hand back a Settings
+instance with no DEFAULT_ENV_FILE attribute at all rather than the
+module. test_settings_loads_correctly_from_a_cwd_outside_backend writes
+a real temp .env, chdir's to an unrelated tmp_path subdirectory, and
+confirms load_settings(env_file=<absolute temp path>) still resolves
+both keys correctly. test_real_env_var_overrides_dotenv_file writes a
+file value for both keys, monkeypatches only MISTRAL_API_KEY as a real
+env var, and confirms mistral comes from the env var while groq (never
+overridden) still comes from the file — proving selective precedence,
+not just "some value came from somewhere." test_blank_required_secret_
+raises_naming_variable_and_searched_path writes MISTRAL_API_KEY= blank
+in a temp file, groq populated, and confirms the RuntimeError names
+MISTRAL_API_KEY, does NOT name GROQ_API_KEY (proving the check is
+per-field, not "any secret looks wrong, fail generically"), and
+contains the exact temp .env path.
+
+
+13. VERIFICATION (SETTINGS FIX)
+=============================================================
+ruff check: all checks passed. mypy --strict mealsight: no issues found
+in 117 source files. Full pytest: 490 passed, 3 deselected (486 -> 490).
+
+Loaded settings from three different real process working directories
+via a standalone script spawning `uv run python -c ...` as a subprocess
+with PYTHONPATH explicitly set to backend/ (isolating the actual
+question — does .env PATH RESOLUTION depend on CWD — from a separate,
+unrelated fact about this environment: mealsight is a source-layout
+package, not pip-installed into the venv, so plain `import mealsight`
+itself only succeeds when CWD happens to be backend/, for reasons that
+have nothing to do with settings.py). All three runs (backend/, the
+repo root, and /tmp) printed the identical resolved absolute .env path
+and both keys as set — cwd genuinely varied every time
+(os.getcwd() printed a different real directory in each of the three
+subprocess runs), and the resolved path never moved.
+
+
+14. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+Sourcing deduction quantities from scale_recipe versus get_recipe's own
+base ingredients
+    Rejected once ScaledIngredient.quantity_display was confirmed to be
+    a display string with no numeric backing field anywhere on
+    ScaledRecipe. Scaling get_recipe's own raw quantity by servings_
+    made/servings_base manually, inside cook.py itself, was the only
+    option that actually had a real number to work with.
+
+log_meal first versus remove_items first
+    Covered in section 4. The alternative (deduct first, log second)
+    would make a failed log_meal after a successful deduction the
+    accepted inconsistency instead — silently losing the one fact
+    every downstream preference/repetition signal depends on, in
+    exchange for protecting a pantry number that's already understood
+    to drift and self-correct. The chosen ordering protects the harder
+    -to-recover fact at the cost of the easier-to-recover one.
+
+A client-supplied idempotency_key only, versus always deriving one
+    Requiring every caller to generate and track its own key would be
+    simpler code but real friction for the single most common case
+    this exists to guard (a double-clicked button) — a caller with a
+    genuinely tighter need can still always supply its own key, which
+    is why the parameter still accepts one.
+
+Caching partial failures under the idempotency key versus only caching
+full successes
+    Rejected: never caching a failed compute() would let a caller retry
+    a partially-failed cook confirmation under the identical key, and
+    remove_items isn't safe to call twice for the same items — retrying
+    could double-deduct whatever partially succeeded the first attempt.
+    Caching the failure too, and requiring a fresh key to really retry,
+    was the only option that didn't reintroduce the exact double-
+    deduction risk idempotency exists to prevent.
+
+Fixing the .env-loading bug report by "fixing" CWD-relative path
+resolution, versus reporting that the diagnosis didn't match the code
+    Considered and rejected: rewriting an already-correct, already-
+    anchored path resolution to "fix" a defect that reading the code
+    showed wasn't actually there would have manufactured busywork and
+    obscured the REAL gap (blank-but-present secrets passing validation
+    silently). Reporting the mismatch directly, then fixing the actual
+    gap, is the same standard this project has applied to every prior
+    "the task's own framing doesn't survive reading the code" moment
+    (phase 6.1's AgentContext finding, phase 7.2's docs/KNOWN_ISSUES.md
+    finding).
+
+
+15. GLOSSARY
+=============================================================
+IdempotencyStore
+    In-process, per-key-locked cache of a POST /api/cook result
+    (mealsight.api.idempotency) — run_once ensures compute() (log_meal
+    + remove_items) fires at most once per key, ever, until swept;
+    caches success and partial failure alike.
+
+derive_idempotency_key
+    f"{recipe_id}:{int(time.time() // 30)}" — the fallback identity for
+    a cook confirmation that didn't supply its own idempotency_key; a
+    coarse, recipe-scoped 30-second window.
+
+pantry_deduction_error
+    The one field on a /api/cook response that can be non-null even on
+    a 200 — set when remove_items (or the get_pantry/match_ingredients
+    calls feeding it) failed AFTER log_meal already succeeded; the
+    meal itself is still genuinely recorded.
+
+matched_ingredients
+    A MealSightState field, set only by generate_output on the cookable
+    path — the scaled recipe's own ingredients cross-referenced against
+    match_rank's own matched_items by normalized name, so a frontend has
+    a real "what's needed, and how much, for what's on hand" list before
+    a user ever confirms cooking.
+
+_REQUIRED_SECRET_FIELDS
+    Every Settings field that's both required and typed SecretStr,
+    computed once from Settings.model_fields — the set load_settings
+    checks for a blank (not just absent) value after a successful load.
+
+
+16. INTERVIEW TALKING POINTS
+=============================================================
+Q: Why does log_meal run before remove_items instead of the other way
+around, or instead of trying to make both calls atomic somehow?
+
+    There's no real way to make them atomic — they're two separate
+    SQLite databases behind two separate MCP subprocesses, with no
+    shared transaction coordinator between them, so "make it atomic"
+    isn't actually on the table without a much bigger architectural
+    change than this endpoint warrants. Given that, the real choice is
+    which of the two possible partial-failure states to accept, and
+    they're not symmetric: a lost log_meal call is permanently
+    unrecoverable and quietly corrupts every future preference and
+    repetition signal, while a stale pantry is visible and self-
+    correcting. Running log_meal first means a failure in the second
+    call leaves you with the recoverable problem, never the
+    unrecoverable one.
+
+Q: Your idempotency store caches partial failures, not just successes.
+Doesn't that mean a real, recoverable pantry-deduction failure just...
+stays failed forever under that key?
+
+    Under that exact key, yes — and that's deliberate, not an
+    oversight. The alternative, letting a repeat call under the same
+    key retry the deduction, is unsafe in a different way: remove_items
+    isn't idempotent for the same items, so a retry after a partial
+    deduction could deduct twice for whatever already succeeded. A
+    caller that wants to genuinely retry after a partial pantry failure
+    has two safe paths — wait out the 30-second window so a fresh key
+    derives naturally, or supply an explicit new idempotency_key. Both
+    of those are real retries with a real fresh attempt, not a silent
+    replay of a half-finished one.
+
+Q: You said the .env path resolution "was already correct" before this
+phase. If it was already correct, what did this phase actually fix?
+
+    Two different things were true at once. The path resolution really
+    was already anchored to the settings module's own __file__, already
+    absolute, already CWD-independent — verified by reading the code,
+    not assumed, and confirmed again this phase by literally running
+    settings-loading code from three different working directories and
+    watching the resolved path never move. What wasn't already correct
+    is that a required secret can be PRESENT in .env with an EMPTY
+    value, and pydantic's own validation treats "present" as sufficient
+    regardless of whether the value itself is a non-empty string — so a
+    blank key sailed through with zero error anywhere, all the way to a
+    real provider call. That's a validation gap, not a path-resolution
+    bug, and it's the thing this phase actually added a check for.
+
+Q: How do you know your test for "importlib.import_module, not `from
+mealsight.config import settings`" actually matters — couldn't you have
+just used the plain import form?
+
+    No — I checked this directly rather than assuming it would work
+    either way. mealsight/config/__init__.py does `from .settings
+    import settings`, which binds the NAME "settings" inside the config
+    package's own namespace to the Settings INSTANCE. Python's import
+    machinery for `import a.b.c as x` resolves x via attribute access
+    down through the already-imported packages, not via a direct
+    sys.modules lookup — so `from mealsight.config import settings as
+    settings_module` would hand back that same Settings instance, which
+    has no DEFAULT_ENV_FILE attribute at all and would raise
+    AttributeError through pydantic's own __getattr__ the moment the
+    test tried to read it. I hit exactly this failure mode once, while
+    writing a throwaway diagnostic script earlier this phase, before
+    writing the real test — which is why the real test uses
+    importlib.import_module("mealsight.config.settings") instead, the
+    same pattern this project's own test files already use elsewhere
+    for the identical reason.

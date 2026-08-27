@@ -14,12 +14,17 @@ import httpx
 from fastapi import Depends, Request, WebSocket
 
 from mealsight.agent.mcp_client import MCPClientManager
+from mealsight.api.idempotency import IdempotencyStore
 from mealsight.api.rate_limit import SubmissionRateLimiter
 from mealsight.api.sessions import SessionStore
 
 
 def get_mcp_manager(request: Request) -> MCPClientManager:
     return request.app.state.mcp_manager  # type: ignore[no-any-return]
+
+
+def get_idempotency_store(request: Request) -> IdempotencyStore:
+    return request.app.state.idempotency_store  # type: ignore[no-any-return]
 
 
 def get_sessions(request: Request) -> SessionStore:
@@ -53,6 +58,7 @@ def get_sessions_ws(websocket: WebSocket) -> SessionStore:
 # own Depends() pattern — the alias moves the call out of a default
 # value entirely rather than suppressing the rule project-wide.
 MCPManagerDep = Annotated[MCPClientManager, Depends(get_mcp_manager)]
+IdempotencyDep = Annotated[IdempotencyStore, Depends(get_idempotency_store)]
 SessionsDep = Annotated[SessionStore, Depends(get_sessions)]
 RateLimiterDep = Annotated[SubmissionRateLimiter, Depends(get_rate_limiter)]
 HealthHttpClientDep = Annotated[httpx.AsyncClient, Depends(get_health_http_client)]

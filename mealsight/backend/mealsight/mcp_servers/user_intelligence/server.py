@@ -34,6 +34,7 @@ from mealsight.user_intelligence import get_context_signals as _get_context_sign
 from mealsight.user_intelligence import get_meal_history as _get_meal_history
 from mealsight.user_intelligence import get_user_profile as _get_user_profile
 from mealsight.user_intelligence import log_meal as _log_meal
+from mealsight.user_intelligence import rate_meal as _rate_meal
 from mealsight.user_intelligence import update_preferences as _update_preferences
 from mealsight.utils.logging import get_logger
 
@@ -146,6 +147,44 @@ async def log_meal(
         return validation_error("rating", str(exc))
     except Exception:
         logger.error("log_meal_failed", exc_info=True, recipe_name=recipe_name)
+        return internal_error()
+
+
+@mcp.tool
+async def rate_meal(meal_id: int, rating: int | None) -> dict[str, Any]:
+    """Rates (or re-rates, or — passing rating=null — clears the rating
+    of) an already-logged meal, then recomputes cuisine/protein
+    preference scores from every currently-rated meal in meal_history.
+
+    THE ONE TOOL THAT LETS A RATING REACH A MEAL AFTER log_meal ITSELF
+    ALREADY RAN: log_meal's own rating parameter only ever applies at
+    the moment a meal is first logged; this is the separate call for
+    "I cooked this a while ago, and I'm rating it now" (or "let me
+    change the 3 I gave this to a 5").
+
+    Returns the full updated meal record — the same shape log_meal
+    returns — {"id", "recipe_id", "recipe_name", "cuisine", "meal_type",
+    "date", "rating", "servings_made", "ingredients_used", "notes",
+    "cooked_at"}. Call get_user_profile afterward to see the recomputed
+    cuisine_preferences/protein_preference scores this triggers — this
+    tool returns the meal record, not the profile.
+
+    Returns a structured {"error": "not_found", ...} result if meal_id
+    doesn't match any logged meal, or {"error": "validation_error", ...}
+    naming "rating" if it's given and isn't an integer from 1 to 5 (or
+    null).
+    """
+    try:
+        db = get_user_db()
+        result = await _rate_meal(meal_id, rating, user_db=db)
+        return meal_record_to_dict(result)
+    except ValueError as exc:
+        message = str(exc)
+        if "No meal found" in message:
+            return not_found_error("meal", str(meal_id))
+        return validation_error("rating", message)
+    except Exception:
+        logger.error("rate_meal_failed", exc_info=True, meal_id=meal_id)
         return internal_error()
 
 

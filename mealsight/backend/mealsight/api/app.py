@@ -43,8 +43,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from mealsight.agent.mcp_client import MCPClientManager
 from mealsight.api.errors import register_error_handlers
+from mealsight.api.idempotency import IdempotencyStore
 from mealsight.api.rate_limit import SubmissionRateLimiter
-from mealsight.api.routers import grocery, health, history, pantry, profile, recipes, recommend, ws
+from mealsight.api.routers import cook, grocery, health, history, pantry, profile, recipes, recommend, ws
 from mealsight.api.sessions import SessionStore
 from mealsight.config.settings import settings
 from mealsight.utils.logging import bind_trace_id, current_trace_id, get_logger
@@ -62,12 +63,15 @@ SESSION_TTL_SECONDS = 3600.0
 SESSION_SWEEP_INTERVAL_SECONDS = 60.0
 
 
-async def _sweep_sessions_periodically(sessions: SessionStore) -> None:
+async def _sweep_sessions_periodically(sessions: SessionStore, idempotency: IdempotencyStore) -> None:
     while True:
         await asyncio.sleep(SESSION_SWEEP_INTERVAL_SECONDS)
         removed = sessions.sweep_expired(SESSION_TTL_SECONDS)
         if removed:
             logger.info("sessions_swept", removed=removed)
+        removed_keys = idempotency.sweep_expired()
+        if removed_keys:
+            logger.info("idempotency_keys_swept", removed=removed_keys)
 
 
 @asynccontextmanager
@@ -78,7 +82,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.sessions = SessionStore()
     app.state.rate_limiter = SubmissionRateLimiter()
     app.state.health_http_client = httpx.AsyncClient()
-    sweep_task = asyncio.create_task(_sweep_sessions_periodically(app.state.sessions))
+    app.state.idempotency_store = IdempotencyStore()
+    sweep_task = asyncio.create_task(
+        _sweep_sessions_periodically(app.state.sessions, app.state.idempotency_store)
+    )
     logger.info("api_started")
     try:
         yield
@@ -126,6 +133,7 @@ def create_app(
 
     app.include_router(health.router)
     app.include_router(recommend.router)
+    app.include_router(cook.router)
     app.include_router(pantry.router)
     app.include_router(recipes.router)
     app.include_router(history.router)

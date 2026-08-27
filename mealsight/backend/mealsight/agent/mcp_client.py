@@ -4,7 +4,7 @@ subprocesses and holds their sessions open for the lifetime of one
 recommendation.
 
 call_tool(server, tool_name, arguments) is the single entry point every
-agent node uses to reach any of the eighteen tools across the three
+agent node uses to reach any of the nineteen tools across the three
 servers — it never raises for a transport-level failure (one retry,
 then a structured ToolCallResult with success=False), so a node can
 reason about a failed tool call as ordinary data instead of wrapping
@@ -44,10 +44,12 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 ServerName = Literal["recipe_engine", "pantry_manager", "user_intelligence"]
 
-# The six tools each server is documented to expose (phase 2.4, 3.3,
-# 4.3's own MCP server sessions) — the health check below fails loudly
-# if a server doesn't advertise every one of these, rather than letting
-# a partially-broken server silently join the pool.
+# The tools each server is documented to expose (recipe_engine and
+# pantry_manager: six each, phase 2.4/3.3; user_intelligence: seven,
+# phase 4.3 plus rate_meal added in the cook-confirmation phase) — the
+# health check below fails loudly if a server doesn't advertise every
+# one of these, rather than letting a partially-broken server silently
+# join the pool.
 EXPECTED_TOOLS: dict[ServerName, frozenset[str]] = {
     "recipe_engine": frozenset(
         {
@@ -74,6 +76,7 @@ EXPECTED_TOOLS: dict[ServerName, frozenset[str]] = {
             "get_user_profile",
             "update_preferences",
             "log_meal",
+            "rate_meal",
             "get_meal_history",
             "check_repetition",
             "get_context_signals",

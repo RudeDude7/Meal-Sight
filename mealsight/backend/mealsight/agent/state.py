@@ -43,6 +43,17 @@ class MealSightState(TypedDict):
     recipe_candidates: NotRequired[list[dict[str, Any]]]
     matched_recipes: NotRequired[list[dict[str, Any]]]
 
+    # Set by generate_output (node 9) ONLY on the cookable path: the
+    # chosen recipe's own matched_items (from match_rank), cross-
+    # referenced against scaled_recipe's own ingredients for a
+    # quantity_display/unit — the "what's needed, and how much, for
+    # what you already have" list the cook-confirmation flow
+    # (mealsight.api.routers.cook) needs the frontend to be able to
+    # show BEFORE a user ever confirms cooking. Node 9 itself never
+    # deducts anything from the pantry (see its own module docstring);
+    # this is display data only.
+    matched_ingredients: NotRequired[list[dict[str, Any]]]
+
     # Set by search_recipes: total_matched is recipe_engine's own count
     # (which can exceed len(recipe_candidates) once max_results caps the
     # list), and search_exhausted is True only when every relaxation

@@ -161,18 +161,35 @@ class Settings(BaseSettings):
     __str__ = __repr__
 
 
+# Required SecretStr fields with no default — computed once from the
+# model itself (rather than hand-maintained as a literal list) so a new
+# required secret field automatically gets the same blank-value check
+# below without anyone needing to remember to add it here.
+_REQUIRED_SECRET_FIELDS = tuple(
+    name
+    for name, field in Settings.model_fields.items()
+    if field.is_required() and field.annotation is SecretStr
+)
+
+
 def load_settings(env_file: str | Path | None = DEFAULT_ENV_FILE) -> Settings:
-    """Builds a `Settings` instance, translating a missing-secret
-    `ValidationError` into a `RuntimeError` that names the exact
-    environment variable(s) that need to be set.
+    """Builds a `Settings` instance, translating a missing-or-blank-secret
+    problem into a `RuntimeError` that names the exact environment
+    variable(s) that need to be set and which `.env` file (if any) was
+    searched for them.
 
     `env_file` is exposed as a parameter (rather than always reading the
     module-level default) so tests can point it at `None` to isolate
     environment-variable behavior from whatever `.env` happens to be on
     disk.
+
+    Real environment variables always take precedence over the `.env`
+    file — pydantic-settings' own default source order (init args > env
+    vars > dotenv file > defaults) — so Docker/CI can inject secrets
+    without a `.env` file present at all.
     """
     try:
-        return Settings(_env_file=env_file)  # type: ignore[call-arg]
+        instance = Settings(_env_file=env_file)  # type: ignore[call-arg]
     except ValidationError as exc:
         missing = sorted(
             {str(error["loc"][0]).upper() for error in exc.errors() if error["type"] == "missing"}
@@ -180,9 +197,25 @@ def load_settings(env_file: str | Path | None = DEFAULT_ENV_FILE) -> Settings:
         if missing:
             raise RuntimeError(
                 f"Missing required environment variable(s): {', '.join(missing)}. "
-                "Set them in your shell or in .env."
+                f"Searched .env file: {env_file}. Set them in your shell or in .env."
             ) from exc
         raise
+
+    # A required secret PRESENT but blank (e.g. "MISTRAL_API_KEY=" in
+    # .env) satisfies pydantic's own "field is set" check and so never
+    # raises as "missing" above — checked separately here so a blank key
+    # is caught at import time instead of silently reaching a real
+    # provider call as an empty string.
+    blank = sorted(
+        name.upper() for name in _REQUIRED_SECRET_FIELDS if not getattr(instance, name).get_secret_value()
+    )
+    if blank:
+        raise RuntimeError(
+            f"Required environment variable(s) resolved empty: {', '.join(blank)}. "
+            f"Searched .env file: {env_file}. Set them in your shell or in .env."
+        )
+
+    return instance
 
 
 settings = load_settings()

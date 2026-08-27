@@ -61,6 +61,7 @@ _RESULT_FIELDS = (
     "nutrition_info",
     "processing_trace",
     "stream_messages",
+    "matched_ingredients",
 )
 
 
@@ -82,7 +83,16 @@ def _reject_oversized(request: Request) -> None:
 
 
 def _serialize_result(final_state: MealSightState) -> dict[str, object]:
-    return {field: final_state[field] for field in _RESULT_FIELDS if field in final_state}  # type: ignore[literal-required]
+    result = {field: final_state[field] for field in _RESULT_FIELDS if field in final_state}  # type: ignore[literal-required]
+    top_recommendation = final_state.get("top_recommendation")
+    if top_recommendation is not None and top_recommendation.get("available"):
+        # Flattened here (rather than making the frontend reach into
+        # top_recommendation itself) specifically so mealsight.api.
+        # routers.cook has one obvious, stable field to read recipe_id
+        # from — the same reason matched_ingredients (above) is its own
+        # top-level field rather than nested inside scaled_recipe.
+        result["recipe_id"] = top_recommendation.get("recipe_id")
+    return result
 
 
 async def _run_in_background(

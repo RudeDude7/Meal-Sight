@@ -40,6 +40,7 @@ from langgraph.runtime import Runtime
 
 from mealsight.agent.context import AgentContext
 from mealsight.agent.state import MealSightState
+from mealsight.matching.normalize import normalize_ingredient
 from mealsight.utils.logging import get_logger
 
 logger = get_logger("mealsight.agent.nodes.generate_output")
@@ -66,6 +67,40 @@ def _find_matched_entry(matched_recipes: list[dict[str, Any]], recipe_id: str) -
         if entry.get("recipe_id") == recipe_id:
             return entry
     return None
+
+
+def _build_matched_ingredients(
+    matched_entry: dict[str, Any] | None, scaled: dict[str, Any] | None
+) -> list[dict[str, Any]]:
+    """The subset of the SCALED recipe's own ingredients (name,
+    quantity_display, unit) that match_rank's own match_ingredients call
+    already confirmed are actually on hand — cross-referenced by
+    normalized name, since matched_items holds match_rank's own
+    CANONICAL names (post normalize+synonym) while scaled_recipe holds
+    the recipe's own raw ingredient names ("Udon Noodles", not "udon
+    noodle"). Returns [] whenever either input is missing — a caller
+    that can't build this list gets nothing to show, not a guess."""
+    matched_items = (matched_entry or {}).get("matched_items") or []
+    matched_names = {
+        normalize_ingredient(item["name"])
+        for item in matched_items
+        if isinstance(item, dict) and item.get("name")
+    }
+    if not matched_names:
+        return []
+
+    result: list[dict[str, Any]] = []
+    for ingredient in (scaled or {}).get("ingredients") or []:
+        name = ingredient.get("name")
+        if name and normalize_ingredient(name) in matched_names:
+            result.append(
+                {
+                    "name": name,
+                    "quantity_display": ingredient.get("quantity_display"),
+                    "unit": ingredient.get("unit"),
+                }
+            )
+    return result
 
 
 async def _fetch_get_recipe(runtime: Runtime[AgentContext], recipe_id: str) -> dict[str, Any] | None:
@@ -346,6 +381,7 @@ async def _build_available_response(
         logger.error("generate_output_create_grocery_list_unexpected_failure", exc_info=True)
 
     nutrition_info = (matched_entry or {}).get("nutrition_info")
+    matched_ingredients = _build_matched_ingredients(matched_entry, scaled)
 
     final_response = _format_available_response(
         detail=detail,
@@ -366,6 +402,8 @@ async def _build_available_response(
         update["grocery_list"] = grocery_list
     if nutrition_info:
         update["nutrition_info"] = nutrition_info
+    if matched_ingredients:
+        update["matched_ingredients"] = matched_ingredients
     return update
 
 

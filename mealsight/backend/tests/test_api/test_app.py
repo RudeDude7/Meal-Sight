@@ -26,6 +26,7 @@ from PIL import Image
 from mealsight.agent.mcp_client import ToolCallResult
 from mealsight.api.app import create_app
 from mealsight.api.health import reset_provider_cache
+from mealsight.api.idempotency import IdempotencyStore
 from mealsight.api.rate_limit import SubmissionRateLimiter
 from mealsight.api.sessions import SessionStore
 
@@ -69,6 +70,7 @@ DEFAULT_INVENTORY: dict[str, list[str]] = {
         "get_user_profile",
         "update_preferences",
         "log_meal",
+        "rate_meal",
         "get_meal_history",
         "check_repetition",
         "get_context_signals",
@@ -121,6 +123,7 @@ def _lifespan_with(
         app.state.sessions = SessionStore()
         app.state.rate_limiter = SubmissionRateLimiter(limit=rate_limit)
         app.state.health_http_client = FakeHealthHttpClient(status_code=http_status)
+        app.state.idempotency_store = IdempotencyStore()
         yield
 
     return lifespan

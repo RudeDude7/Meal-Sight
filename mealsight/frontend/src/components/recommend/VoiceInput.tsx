@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { AudioPlayer } from '@/components/recommend/AudioPlayer'
+import { Button } from '@/components/primitives/Button'
+import { Well } from '@/components/primitives/Well'
 import { MAX_AUDIO_DURATION_SECONDS, validateAudioFile } from '@/lib/inputLimits'
 
 interface VoiceInputProps {
@@ -25,10 +27,11 @@ const mediaRecorderSupported =
  * Records via MediaRecorder when available; always offers a plain file
  * upload as a fallback, both for browsers with no MediaRecorder support
  * at all and for a user who'd rather upload an existing voice memo than
- * record a new one. A denied microphone permission gets its own
- * explanatory state, never a silent no-op — the recording button simply
- * not working, with nothing said about why, is exactly the failure mode
- * this is written to avoid.
+ * record a new one. A denied microphone permission gets the system's
+ * own BLOCKED state pattern (plain-language reason, no Stamp — nothing
+ * has "happened" to stamp, an action is simply unavailable) — never a
+ * silent no-op where the recording button just doesn't work with
+ * nothing said about why.
  */
 export function VoiceInput({ file, onChange, disabled = false }: VoiceInputProps) {
   const [state, setState] = useState<RecorderState>('idle')
@@ -178,36 +181,35 @@ export function VoiceInput({ file, onChange, disabled = false }: VoiceInputProps
 
   return (
     <div>
-      <label className="text-subtitle text-ink">Voice memo</label>
-      <p className="mt-1 text-caption text-ink-faint">
+      <label className="text-heading text-ink-900">Voice memo</label>
+      <p className="mt-1 text-label text-steel-400">
         Up to {Math.floor(MAX_AUDIO_DURATION_SECONDS / 60)} minutes. WAV, MP3, M4A, or WEBM.
       </p>
 
-      <div className="mt-3 rounded-card border border-ink/10 bg-surface-muted p-4">
+      <Well className="mt-3 p-4">
         {state === 'idle' && (
           <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-between">
-            <button
-              type="button"
+            <Button
+              variant="primary"
               onClick={startRecording}
               disabled={disabled || !mediaRecorderSupported}
-              className="rounded-card bg-brand-600 px-4 py-2 text-body font-medium text-white hover:bg-brand-700 disabled:opacity-50"
             >
               {mediaRecorderSupported ? 'Start recording' : 'Recording unavailable in this browser'}
-            </button>
-            <span className="text-caption text-ink-faint">or upload an audio file</span>
+            </Button>
+            <span className="text-label text-steel-400">or upload an audio file</span>
           </div>
         )}
 
         {state === 'requesting-permission' && (
-          <p className="text-body text-ink-muted">Requesting microphone access…</p>
+          <p className="text-body-lg text-ink-600">Requesting microphone access…</p>
         )}
 
         {state === 'permission-denied' && (
           <div>
-            <p className="text-body text-danger-600">
+            <p className="text-body-lg text-signal-negative">
               Microphone access was denied, so recording isn't available right now.
             </p>
-            <p className="mt-1 text-caption text-ink-muted">
+            <p className="mt-1 text-label text-ink-600">
               Allow microphone access in your browser's site settings and try again, or upload an
               audio file instead.
             </p>
@@ -217,18 +219,14 @@ export function VoiceInput({ file, onChange, disabled = false }: VoiceInputProps
         {state === 'recording' && (
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-danger-500" />
-              <span className="text-body font-medium text-ink">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-signal-negative" />
+              <span className="text-body-lg font-medium text-ink-900">
                 Recording… {formatElapsed(elapsedSeconds)}
               </span>
             </div>
-            <button
-              type="button"
-              onClick={stopRecording}
-              className="rounded-card border border-ink/10 px-4 py-2 text-body font-medium text-ink hover:bg-surface"
-            >
+            <Button variant="secondary" onClick={stopRecording}>
               Stop
-            </button>
+            </Button>
           </div>
         )}
 
@@ -236,36 +234,42 @@ export function VoiceInput({ file, onChange, disabled = false }: VoiceInputProps
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <AudioPlayer src={previewUrl} durationHintSeconds={recordedDurationSeconds} />
             <div className="flex gap-2">
-              <button
-                type="button"
+              <Button
+                variant="ghost"
                 onClick={handleRemove}
                 disabled={disabled}
-                className="rounded-card border border-danger-500/30 px-3 py-1.5 text-body text-danger-600 hover:bg-danger-50 disabled:opacity-50"
+                className="text-signal-negative hover:text-signal-negative"
               >
                 Remove
-              </button>
+              </Button>
             </div>
           </div>
         )}
 
         {state !== 'recording' && (
-          <div className="mt-3 border-t border-ink/10 pt-3">
-            <label className="text-caption font-medium text-ink-muted">
-              Upload an audio file instead
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="audio/wav,audio/mpeg,audio/mp4,audio/x-m4a,audio/webm"
-                disabled={disabled}
-                onChange={(event) => handleFallbackFile(event.target.files)}
-                className="mt-1 block w-full text-caption text-ink-muted file:mr-3 file:rounded-card file:border-0 file:bg-surface file:px-3 file:py-1.5 file:text-body file:text-ink"
-              />
-            </label>
+          <div className="mt-3 border-t border-ink-900/10 pt-3">
+            <p className="text-label font-medium text-ink-600">Upload an audio file instead</p>
+            <Button
+              variant="secondary"
+              className="mt-2"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={disabled}
+            >
+              Choose a file
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="audio/wav,audio/mpeg,audio/mp4,audio/x-m4a,audio/webm"
+              disabled={disabled}
+              onChange={(event) => handleFallbackFile(event.target.files)}
+              className="sr-only"
+            />
           </div>
         )}
 
-        {uploadError && <p className="mt-2 text-caption text-danger-600">{uploadError}</p>}
-      </div>
+        {uploadError && <p className="mt-2 text-label text-signal-negative">{uploadError}</p>}
+      </Well>
     </div>
   )
 }

@@ -1,3 +1,4 @@
+import { Strip } from '@/components/primitives/Strip'
 import type { WSMessage } from '@/types/websocket'
 
 // mealsight/agent/graph.py's own NODE_ORDER, in order — the eleven
@@ -16,7 +17,7 @@ const PIPELINE_STEPS: { node: string; label: string }[] = [
   { node: 'present', label: 'Finishing up' },
 ]
 
-type StepStatus = 'pending' | 'active' | 'done'
+type StepStatus = 'active' | 'done'
 
 interface StepState {
   status: StepStatus
@@ -35,66 +36,52 @@ function deriveStepStates(messages: WSMessage[]): Map<string, StepState> {
   return states
 }
 
+function formatDuration(durationMs: number): string {
+  if (durationMs < 1000) {
+    return `${durationMs < 10 ? durationMs.toFixed(2) : Math.round(durationMs)}ms`
+  }
+  return `${(durationMs / 1000).toFixed(1)}s`
+}
+
 interface PipelineProgressProps {
   messages: WSMessage[]
 }
 
 /**
- * node_start/node_complete drive an eleven-step progress view — the
+ * node_start/node_complete drive an eleven-step Strip sequence — the
  * agent graph's own real, sequential node order (mealsight/agent/
- * graph.py's NODE_ORDER), not an invented generic "step 1 of N".
- * Completed steps show their real duration straight from the
- * backend's own per-node timing wrapper, not an estimate.
+ * graph.py's NODE_ORDER), not an invented generic "step 1 of N". A step
+ * that hasn't started yet isn't rendered at all — the literal ticket-
+ * rail metaphor: a printer doesn't pre-print a line it doesn't have yet,
+ * it prints one as each step genuinely begins (Strip's own print-in
+ * animation). Completed steps show their real duration straight from
+ * the backend's own per-node timing wrapper, in mono, right where the
+ * old bounce-dots used to be — that data is genuine and worth keeping,
+ * the animated dots were not.
  */
 export function PipelineProgress({ messages }: PipelineProgressProps) {
   const stepStates = deriveStepStates(messages)
+  const started = PIPELINE_STEPS.filter(({ node }) => stepStates.has(node))
+
+  if (started.length === 0) return null
 
   return (
-    <ol className="flex flex-col gap-1">
-      {PIPELINE_STEPS.map(({ node, label }) => {
-        const state = stepStates.get(node) ?? { status: 'pending' as const, durationMs: null }
+    <div className="flex flex-col">
+      {started.map(({ node, label }) => {
+        const state = stepStates.get(node)
+        if (!state) return null
         return (
-          <li key={node} className="flex items-center gap-3 rounded-card px-2 py-1.5">
-            <span
-              className={[
-                'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold',
-                state.status === 'done' && 'bg-brand-600 text-white',
-                state.status === 'active' && 'bg-brand-100 text-brand-700',
-                state.status === 'pending' && 'bg-surface-muted text-ink-faint',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              aria-hidden="true"
-            >
-              {state.status === 'done' ? '✓' : ''}
-            </span>
-            <span
-              className={[
-                'text-body',
-                state.status === 'done' && 'text-ink-muted',
-                state.status === 'active' && 'font-medium text-ink',
-                state.status === 'pending' && 'text-ink-faint',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-            >
-              {label}
-              {state.status === 'active' && (
-                <span className="ml-2 inline-flex gap-0.5 align-middle" aria-hidden="true">
-                  <span className="h-1 w-1 animate-bounce rounded-full bg-brand-500 [animation-delay:-0.2s]" />
-                  <span className="h-1 w-1 animate-bounce rounded-full bg-brand-500 [animation-delay:-0.1s]" />
-                  <span className="h-1 w-1 animate-bounce rounded-full bg-brand-500" />
-                </span>
-              )}
-            </span>
-            {state.status === 'done' && state.durationMs !== null && (
-              <span className="ml-auto text-caption text-ink-faint">
-                {(state.durationMs / 1000).toFixed(1)}s
-              </span>
-            )}
-          </li>
+          <Strip
+            key={node}
+            timestamp={
+              state.status === 'done' && state.durationMs !== null
+                ? formatDuration(state.durationMs)
+                : '…'
+            }
+            message={label}
+          />
         )
       })}
-    </ol>
+    </div>
   )
 }

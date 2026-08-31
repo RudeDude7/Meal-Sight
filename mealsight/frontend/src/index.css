@@ -1,9 +1,31 @@
+@import './assets/fonts/fonts.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   body {
-    @apply bg-surface-subtle text-ink font-sans text-body antialiased;
+    @apply bg-paper-0 text-ink-900 font-sans text-body-lg antialiased;
+  }
+}
+
+@layer utilities {
+  /* The paper metaphor's own paper: a tiny (350 byte) tiled SVG grain —
+     feTurbulence tinted ink-900 at ~5% alpha. This is attached to the
+     bg-paper-0 UTILITY itself, not just body: every page's own root
+     element (NavShell's own min-h-screen wrapper, Preview's own root
+     div) sets bg-paper-0 too, and its opaque background-color paints
+     directly over body — a real bug caught by screenshot, where the
+     grain was invisible everywhere in the actual app despite being
+     "applied" to body. Attaching it here means it travels with the
+     color itself, wherever it's used. Tickets (paper-raised)
+     deliberately get NO grain at all, so a Ticket still reads as a
+     distinct, cleaner sheet laid on top of the fibrous base surface,
+     not just a different flat color. Kept subtle enough to read as
+     texture, never as a repeating pattern. */
+  .bg-paper-0 {
+    background-image: url('./assets/textures/paper-grain.svg');
+    background-repeat: repeat;
   }
 }

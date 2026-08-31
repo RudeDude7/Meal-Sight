@@ -1,5 +1,6 @@
 import { useId } from 'react'
 
+import { Well } from '@/components/primitives/Well'
 import { MAX_TEXT_LENGTH } from '@/lib/inputLimits'
 
 interface TextInputProps {
@@ -15,20 +16,22 @@ export function TextInput({ value, onChange, disabled = false }: TextInputProps)
 
   return (
     <div>
-      <label htmlFor={textareaId} className="text-subtitle text-ink">
+      <label htmlFor={textareaId} className="text-heading text-ink-900">
         Or just describe it
       </label>
-      <textarea
-        id={textareaId}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={disabled}
-        placeholder="e.g. I have chicken thighs, rice, and some vegetables, want something quick"
-        rows={3}
-        maxLength={MAX_TEXT_LENGTH + 200}
-        className="mt-3 w-full rounded-card border border-ink/10 bg-surface p-3 text-body text-ink placeholder:text-ink-faint focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
-      />
-      <p className={`mt-1 text-caption ${overLimit ? 'text-danger-600' : 'text-ink-faint'}`}>
+      <Well className="mt-3">
+        <textarea
+          id={textareaId}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
+          placeholder="e.g. I have chicken thighs, rice, and some vegetables, want something quick"
+          rows={3}
+          maxLength={MAX_TEXT_LENGTH + 200}
+          className="w-full bg-transparent p-3 text-body-lg text-ink-900 placeholder:text-steel-400 focus:outline-none disabled:opacity-50"
+        />
+      </Well>
+      <p className={`mt-1 text-label ${overLimit ? 'text-signal-negative' : 'text-steel-400'}`}>
         {overLimit
           ? `${Math.abs(remaining)} characters over the ${MAX_TEXT_LENGTH} limit`
           : `${value.length} / ${MAX_TEXT_LENGTH}`}

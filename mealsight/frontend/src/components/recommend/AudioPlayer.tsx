@@ -100,7 +100,7 @@ export function AudioPlayer({ src, durationHintSeconds }: AudioPlayerProps) {
       <button
         type="button"
         onClick={togglePlay}
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white hover:bg-brand-700"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink-900 text-paper-0 hover:bg-ink-600"
         aria-label={isPlaying ? 'Pause' : 'Play'}
       >
         {isPlaying ? '❚❚' : '▶'}
@@ -113,10 +113,22 @@ export function AudioPlayer({ src, durationHintSeconds }: AudioPlayerProps) {
         value={Math.min(currentTime, knownDuration ?? currentTime)}
         onChange={handleSeek}
         disabled={knownDuration === null}
-        className="h-1.5 flex-1 accent-brand-600"
+        className="h-1 flex-1 accent-ink-900"
         aria-label="Seek"
       />
-      <span className="w-20 shrink-0 text-caption tabular-nums text-ink-faint">
+      {/* 80px, not the scale's own 64px neighbor: "0:00 / 12:34" in mono
+          at this size measurably clips/wraps at 64px — this is the
+          layout-degradation case the spacing migration itself asks to
+          flag rather than force. */}
+      <span
+        className={[
+          'w-20 shrink-0 font-mono text-label tabular-nums',
+          // INFO pattern: a genuinely unknown value is shown plainly in
+          // signal-info, not guessed and not just deprioritized to
+          // steel-400 as if it were merely secondary-but-known data.
+          knownDuration === null ? 'text-signal-info' : 'text-steel-400',
+        ].join(' ')}
+      >
         {formatTime(currentTime)} / {knownDuration !== null ? formatTime(knownDuration) : '—:—'}
       </span>
     </div>

@@ -1,0 +1,33 @@
+Icons in this directory are sourced from Google's Noto Emoji project
+(https://github.com/googlefonts/noto-emoji), commit `main` as of this
+download, from the repository's own `svg/` directory, then optimized
+with svgo (structure/attribute cleanup only — no artwork changes).
+
+Files used (Unicode codepoint -> local name):
+  U+1F414 (chicken)      -> hen.svg
+  U+1F404 (cow)          -> cow.svg
+  U+1F416 (pig)          -> pig.svg
+  U+1F411 (ewe/sheep)    -> sheep.svg
+  U+1F41F (fish)         -> fish.svg
+  U+1F95A (egg)          -> egg.svg
+  U+1F41D (honeybee)     -> bee.svg
+  U+1FAD8 (beans)        -> legume.svg
+  U+1F96C (leafy greens) -> leaf.svg
+  U+1F372 (pot of food)  -> cooking.svg (the neutral loading-state icon)
+
+LICENSE, VERIFIED DIRECTLY (do not assume from secondhand descriptions):
+The repository's own root LICENSE file (the one this directory's SVGs
+were downloaded from, https://github.com/googlefonts/noto-emoji/blob/
+main/LICENSE) contains the full SIL Open Font License, Version 1.1 text
+verbatim. The repository's own README.md separately states "Tools and
+most image resources are under the Apache license, version 2.0
+(./LICENSE)" — pointing at that exact same file path, which does NOT
+contain Apache 2.0 text. This is a real, unresolved inconsistency in
+the upstream project's own documentation, not a claim resolved cleanly
+one way — reported here rather than picking whichever answer was more
+convenient. Both SIL OFL 1.1 and Apache 2.0 permit exactly what this
+project does with them (bundling/embedding/modifying within an
+application, self-hosted, not resold as a standalone font product), so
+this ambiguity does not block using these icons here — but "Apache
+2.0" should not be repeated as settled fact on the strength of this
+directory alone.

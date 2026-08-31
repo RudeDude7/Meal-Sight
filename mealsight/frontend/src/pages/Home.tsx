@@ -2,12 +2,15 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { postRecommend } from '@/api/recommend'
 import { ApiError } from '@/api/client'
+import { Button } from '@/components/primitives/Button'
+import { Stamp } from '@/components/primitives/Stamp'
 import { LiveFeed } from '@/components/recommend/LiveFeed'
 import { PhotoInput } from '@/components/recommend/PhotoInput'
 import { PipelineProgress } from '@/components/recommend/PipelineProgress'
 import { TextInput } from '@/components/recommend/TextInput'
 import { VoiceInput } from '@/components/recommend/VoiceInput'
 import { useWebSocket } from '@/hooks/useWebSocket'
+import { useActiveSession } from '@/lib/activeSessionContext'
 import { MAX_TEXT_LENGTH } from '@/lib/inputLimits'
 
 type AppState = 'idle' | 'submitting' | 'streaming' | 'complete' | 'error'
@@ -33,6 +36,17 @@ export function Home() {
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   const ws = useWebSocket(appState === 'idle' ? null : sessionId)
+  const { setTraceId } = useActiveSession()
+
+  // The masthead's own ticket number (NavShell) shows this real
+  // session_id — the same id the backend uses as the agent run's own
+  // trace_id — for exactly as long as a run is actually in flight,
+  // and reverts to its idle placeholder the moment it isn't (complete,
+  // errored, or a fresh "start new").
+  useEffect(() => {
+    setTraceId(appState === 'streaming' ? sessionId : null)
+    return () => setTraceId(null)
+  }, [appState, sessionId, setTraceId])
 
   const blockedReason = useMemo(() => disabledReason(photo, audio, text), [photo, audio, text])
   const isBusy = appState === 'submitting' || appState === 'streaming'
@@ -77,13 +91,23 @@ export function Home() {
 
   const showInputs = appState === 'idle' || appState === 'submitting'
   const showStream = appState === 'streaming' || appState === 'complete' || appState === 'error'
+  // top_recommendation.available is the backend's own real signal for
+  // "considered everything, nothing was cookable" (reason.py) — never
+  // inferred from final_response being empty or absent.
+  const recommendationAvailable = ws.result?.top_recommendation?.available
 
+  // showInputs and showStream are mutually exclusive by construction
+  // (idle/submitting vs. streaming/complete/error never overlap) — a
+  // two-column grid here always rendered exactly one child, permanently
+  // leaving the second column empty and full-height on anything wider
+  // than a phone, unlike every other page's single full-width section
+  // in the shared 960px column. A plain stack matches them.
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+    <div className="flex flex-col gap-6">
       {showInputs && (
-        <section className="rounded-card bg-surface p-6 shadow-card">
-          <h1 className="text-display text-ink">What's for dinner?</h1>
-          <p className="mt-2 text-body text-ink-muted">
+        <section className="rounded-sm bg-paper-raised p-6">
+          <h1 className="text-title text-ink-900">What's for dinner?</h1>
+          <p className="mt-2 text-body-lg text-ink-600">
             Upload a photo of your pantry, record a voice memo, or describe what you're craving.
           </p>
 
@@ -94,34 +118,34 @@ export function Home() {
           </div>
 
           <div className="mt-6 flex flex-col gap-2">
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={!canSubmit}
-              className="rounded-card bg-brand-600 px-5 py-3 text-body font-semibold text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-ink/15 disabled:text-ink-faint"
-            >
+            <Button variant="primary" onClick={handleSubmit} disabled={!canSubmit}>
               {appState === 'submitting' ? 'Starting…' : 'Get a recommendation'}
-            </button>
+            </Button>
+            {/* BLOCKED state pattern: a plain-language reason, no Stamp —
+                nothing has happened yet to stamp, an action is simply
+                unavailable until the reason is addressed. */}
             {blockedReason && appState === 'idle' && (
-              <p className="text-caption text-ink-faint">{blockedReason}</p>
+              <p className="text-label text-steel-400">{blockedReason}</p>
             )}
-            {submitError && <p className="text-caption text-danger-600">{submitError}</p>}
+            {submitError && <p className="text-label text-signal-negative">{submitError}</p>}
           </div>
         </section>
       )}
 
       {showStream && (
-        <section className="rounded-card bg-surface p-6 shadow-card">
+        <section className="rounded-sm bg-paper-raised p-6">
           <div className="flex items-center justify-between">
-            <h2 className="text-subtitle text-ink">
+            <h2 className="text-heading text-ink-900">
               {appState === 'complete'
-                ? 'Recommendation ready'
+                ? recommendationAvailable === false
+                  ? 'No match this time'
+                  : 'Recommendation ready'
                 : appState === 'error'
                   ? 'Something went wrong'
                   : 'Working on it…'}
             </h2>
             {ws.status === 'connecting' && appState === 'streaming' && (
-              <span className="text-caption text-warning-600">Reconnecting…</span>
+              <span className="text-label text-signal-active">Reconnecting…</span>
             )}
           </div>
 
@@ -134,26 +158,41 @@ export function Home() {
           </div>
 
           {appState === 'error' && ws.error && (
-            <div className="mt-4 rounded-card border border-danger-500/20 bg-danger-50 px-3 py-2 text-body text-danger-600">
+            <div className="mt-4 rounded-sm border border-signal-negative/20 bg-signal-negative/10 px-3 py-2 text-body-lg text-signal-negative">
               {ws.error}
             </div>
           )}
 
-          {appState === 'complete' && (
-            <div className="mt-4 rounded-card border border-brand-500/20 bg-brand-50 px-3 py-3 text-body text-ink">
+          {appState === 'complete' && recommendationAvailable !== false && (
+            <div className="mt-4 rounded-sm border border-signal-positive/20 bg-signal-positive/10 px-3 py-3 text-body-lg text-ink-900">
               {ws.result?.final_response ??
                 'Done — the recommendation card lands in the next session.'}
             </div>
           )}
 
+          {/* NEGATIVE state pattern, considered rather than failed: a
+              signal-negative Stamp, the agent's own real explanation
+              (reason.py's top_recommendation.explanation — never an
+              invented "sorry, no results" line), and a concrete next
+              action below rather than a dead end. */}
+          {appState === 'complete' && recommendationAvailable === false && (
+            <div className="mt-4 rounded-sm border border-signal-negative/20 bg-signal-negative/10 p-4">
+              <Stamp signal="negative">no cookable match</Stamp>
+              <p className="mt-2 text-body-lg text-ink-900">
+                {ws.result?.top_recommendation?.explanation ??
+                  'Nothing in your pantry matched well enough this time.'}
+              </p>
+              <p className="mt-2 text-label text-ink-600">
+                Try adding a few more ingredients to your pantry, or describe what you have in more
+                detail, and start a new recommendation.
+              </p>
+            </div>
+          )}
+
           {(appState === 'complete' || appState === 'error') && (
-            <button
-              type="button"
-              onClick={handleStartNew}
-              className="mt-6 rounded-card border border-ink/10 px-4 py-2 text-body font-medium text-ink hover:bg-surface-muted"
-            >
+            <Button variant="secondary" onClick={handleStartNew} className="mt-6">
               Start a new recommendation
-            </button>
+            </Button>
           )}
         </section>
       )}

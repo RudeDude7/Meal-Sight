@@ -1,0 +1,481 @@
+PHASE 8.2(b) STUDY NOTES: THE TICKET RAIL DESIGN SYSTEM PUT TO WORK —
+APP SHELL, STRIP-BASED PROGRESS, TWO NEW PRIMITIVES, FIVE STATE
+PATTERNS, AND A GRID BUG A USER REPORT SURFACED
+=============================================================
+
+The primitives (Ticket, Stamp, DietMark, RecipeIcon, the diet-*/signal-*
+tokens, paper texture, masthead, empty-state illustrations, the loading
+view) were built and visually approved on /preview across earlier
+sessions. This phase is the one that actually applies them: the app
+shell becomes a real three-column rail layout instead of a centered
+header bar, the eleven-step pipeline and live message feed become Strip
+sequences instead of bounce/pulse-dot spinners, two new primitives
+(Button, Well) are extracted so every button and every input container
+in the app is one of a closed set rather than a one-off className, six
+real UI states get assigned onto a documented five-pattern taxonomy, and
+roughly a dozen non-4-point spacing utilities — deliberately deferred in
+an earlier session specifically to avoid touching untouched components —
+get migrated now that their components are actually being restyled.
+A second, smaller part fixes a real layout bug a user caught by eye
+after this work shipped: Home's own always-one-column-populated grid.
+
+Files added: frontend/src/components/{layout/NavIcons.tsx,primitives/
+{Button,Well}.tsx}, frontend/src/pages/{GroceryList,History}.tsx.
+Files edited: frontend/src/components/layout/{NavShell,ErrorBoundary}.
+tsx, frontend/src/App.tsx, frontend/tailwind.config.cjs, frontend/src/
+components/primitives/Strip.tsx, frontend/src/components/recommend/
+{PipelineProgress,LiveFeed,PhotoInput,VoiceInput,TextInput,AudioPlayer}.
+tsx, frontend/src/pages/Home.tsx. Files deleted: frontend/src/
+components/layout/LoadingSpinner.tsx. No backend files touched.
+
+
+1. THE STATE OF THE SHELL BEFORE THIS PHASE, READ BEFORE WRITTEN
+=============================================================
+Per this phase's own instruction to report current state before writing:
+NavShell.tsx was a single `<header>` — a centered max-w-5xl masthead row
+plus a horizontal three-link nav (Home/Pantry/Profile) — with no rail,
+no bottom bar, no responsive behavior beyond text wrapping. App.tsx
+routed exactly `/`, `/pantry`, `/profile`, plus the standalone `/preview`
+(deliberately outside NavShell's layout route, unconstrained by shell
+width). The nine "existing" components already had mechanical token
+substitution (paper-*/ink-*/signal-* colors, the type scale) from an
+earlier pass, but no structural change: PipelineProgress used three
+animate-bounce spans per active step, LiveFeed used one animate-pulse
+span per modality, LoadingSpinner existed as a spinning-ring component
+with zero importers anywhere in src, and grep confirmed the exact
+non-4-point spacing keys tailwind.config.cjs's own spacing comment had
+predicted (py-1.5, h-2.5/w-2.5, gap-1.5, gap-0.5, h-9/w-9, h-1.5, w-20,
+px-5, h-32/w-32, h-20/w-20) sitting exactly where that comment said they
+would be, deferred rather than assumed away.
+
+
+2. THE GRID: auto / 1fr / 0px, AND WHY min-w-0 IS THE LINE THAT ACTUALLY
+   PREVENTS THE 1024px OVERFLOW
+=============================================================
+grid-template-columns: auto 1fr 0px, implemented as Tailwind's own
+arbitrary-value grid-cols-[auto_1fr_0px]. The rail sizes to its own
+content (auto), the main column takes whatever's left (1fr), and the
+right slot is a real, present grid track at 0px from day one — aside
+aria-hidden className="w-0 overflow-hidden" — so activating it later (a
+detail panel, a future feature) becomes changing one width on an
+already-real track, never restructuring the grid itself.
+
+The main column's own content is w-full max-w-[960px] mx-auto — literal
+min(960px, available space) without needing CSS's own min() function,
+since a max-width constrainted block that's also told to fill its
+parent already behaves exactly that way. But the task's own explicit
+warning — "at exactly 1024px, 240px rail + a rigid 960px container would
+overflow" — isn't actually prevented by max-w-960 alone: a CSS grid
+item's default min-width is auto, not 0, which can stop it from
+shrinking below its own content's intrinsic width regardless of what
+max-width says. min-w-0 on the main grid item is the one line that
+actually removes that floor. This was verified, not assumed: a
+Puppeteer check compared document.documentElement.scrollWidth against
+clientWidth at exactly 1024px (and 1440/900/375) before reporting "no
+overflow" — scrollWidth === clientWidth at every one of the four widths,
+including the boundary case the task worried about by name.
+
+
+3. THE RAIL'S OWN THREE SHAPES, AND THE ACTIVE-INDICATOR DECISION THE
+   TASK LEFT OPEN
+=============================================================
+Rail() and BottomTabBar() are two separate components, not one
+responsively-reflowing markup tree — deliberate, since their structural
+differences (icon-above-label stacked vs. icon-beside-label row, a
+left-edge active bar vs. a top-edge one) are large enough that forcing
+one JSX tree to serve both would have meant more conditional className
+plumbing than just rendering two, each hidden at the other's breakpoint
+(hidden md:flex on the rail, md:hidden on the bottom bar).
+
+240px + label at lg: (>=1024px), 64px icon-only at md: (768–1023px),
+hidden entirely below 768px in favor of BottomTabBar — never a
+hamburger, per the task's own explicit rule that every destination stays
+one tap away. The active-state indicator was specified only for the
+rail (a 3px signal-active LEFT-edge bar) — the task explicitly asked
+this phase to choose and report an equivalent for the bottom bar, where
+a left edge makes no sense on a horizontal strip. The choice made: the
+same 3px signal-active bar, same weight and color, moved to the active
+item's TOP edge — the edge that actually faces the content above it,
+so it reads as the same system rotated to fit a different orientation,
+not a different visual language invented for mobile.
+
+Five stubs, not three: Home, Pantry, Grocery List, History, Profile.
+Grocery List and History did not have routes before this phase — created
+as real routes (GroceryList.tsx, History.tsx) rendering the SAME
+EmptyState primitive already used for Pantry, with the 'list-pad' and
+'spike' illustrations respectively, both already built and already
+demonstrated on /preview. The rail links to both from the start,
+specifically so it never points at a route that 404s — their real
+content is explicitly out of this phase's own scope, but the emptiness
+they show right now is genuine, not a placeholder string.
+
+
+4. STRIP: EXTRACTED AS A REAL PRIMITIVE, NOW DRIVING TWO REWRITTEN
+   COMPONENTS INSTEAD OF THEIR OWN BESPOKE MARKUP
+=============================================================
+Strip.tsx already existed from the loading-view work — a monospace
+timestamp on the left, message on the right, an optional one-time
+print-in animation — so this phase's own "extract it properly if it's
+currently inline" condition didn't apply; it just needed consumers.
+
+PipelineProgress no longer renders all eleven steps with a pending/
+active/done tri-state and pending-step placeholders. It renders ONLY
+the steps that have actually started (node_start received), each as one
+Strip — a step that hasn't begun literally isn't printed onto the
+ticket yet, which is the metaphor taken at face value rather than kept
+as decoration: a ticket printer doesn't pre-print a line it doesn't have
+the content for. A completed step's real per-node duration (still read
+straight from the backend's own node_complete.duration_ms, never
+estimated) fills Strip's timestamp slot, formatted as sub-millisecond-
+aware mono text (formatDuration: two-decimal ms under 10ms, whole ms
+under 1000ms, one-decimal seconds above that — specifically so a step
+that legitimately completes in 0.14ms doesn't round to a misleading
+"0.0s"). An active (started, not yet complete) step shows a static "…"
+in that slot — no fabricated number, and deliberately not an animated
+ellipsis, since this system's own motion rule is "animate only when
+something is genuinely happening" and a static three-dot glyph doesn't
+claim otherwise.
+
+LiveFeed keeps its own two real jobs (per-modality perception status,
+deduped recipe-match candidates) but both are now Strip sequences with
+each line's OWN real message timestamp (WSMessage.timestamp, ISO 8601,
+formatted to a local HH:MM:SS via toLocaleTimeString) rather than a
+pulsing dot that looked identical whether progress was happening or
+stuck. LiveFeed's own internal error-message rendering was removed
+entirely, not just restyled: Home already renders ws.error prominently
+in its own signal-negative block when appState is 'error', so LiveFeed
+showing the same error a second time, buried in a plain printed line,
+would have been a straight duplicate — simplifying to one source of
+truth for a stream error, not two components each partially owning it.
+
+LoadingSpinner.tsx was deleted outright, not restyled — its spinning
+ring is exactly the "motion by default, nothing is actually happening
+yet" pattern this design system forbids. grep -rl LoadingSpinner src
+confirmed zero importers before deletion; it had already been fully
+superseded by LoadingView (an earlier phase) everywhere it would have
+been used.
+
+
+5. TWO NEW PRIMITIVES: Button (THREE VARIANTS, NO FOURTH) AND Well
+   (RECESSED, INSET-SHADOW-ONLY)
+=============================================================
+Button.tsx: primary (ink-900 fill, paper-0 text, hover lightens to
+ink-600), secondary (outline only, transparent-to-paper-1 on hover),
+ghost (ink-600-to-ink-900 text, no background change ever) — a closed
+Record<ButtonVariant, string>, no fourth key. A destructive action
+(Remove, in PhotoInput/VoiceInput) stays structurally ghost — no
+container, no border — with only its text color overridden to
+signal-negative via className; this is a color modifier on an existing
+variant, the same relationship Stamp already has to its own four signal
+colors, not a new variant smuggled in under a different name. Every
+button in the app (Home's submit and Start-new, PhotoInput's
+Choose/Take/Replace/Remove, VoiceInput's Start-recording/Stop/Choose-
+file/Remove, ErrorBoundary's Try-again) is now one of these three; grep
+for a raw <button> outside Button.tsx's own implementation and NavShell/
+BottomTabBar's NavLink-based nav items (which are links styled as nav
+items, not action buttons, and were never in scope for this primitive)
+turns up nothing.
+
+Well.tsx: paper-1 fill, shadow-well only — a new boxShadow token added
+to tailwind.config.cjs specifically for this (inset 0 1px 3px rgba(28,
+29, 24, 0.18)), the one deliberate exception to this system's own "no
+elevation anywhere" rule, worded that way in the config's own comment:
+an INSET shadow reads as a surface pressed in, never a card lifted up,
+so it doesn't reintroduce elevation through the back door the rest of
+the boxShadow scale keeps closed. Retrofitted under TextInput's own
+textarea, PhotoInput's drop zone, and VoiceInput's recorder area — all
+three were previously a plain bg-paper-1 (or, for PhotoInput, a dashed
+border) div with no shared primitive backing them.
+
+
+6. SIX STATES, FIVE PATTERNS — AND WHAT HAPPENS WHEN THE SPEC BEING
+   MAPPED ONTO ISN'T ACTUALLY IN THE REPO ANYWHERE
+=============================================================
+The task's own instruction referred to "the five state patterns" as
+already-established fact — but a direct search (grep for "state
+pattern"/"five state" across every .md file in the repo, backend and
+frontend both) turned up nothing: whatever the original definition was,
+it lived only in an earlier, now-summarized conversation and was never
+written down anywhere durable. Rather than silently inventing a mapping
+and presenting it as if it matched a spec that couldn't actually be
+checked, a working taxonomy was defined explicitly, in the open, in the
+same response that applied it — Blocked / Active / Positive / Negative /
+Info — built from what already existed in the codebase (Stamp's own
+four signal colors, plus a fifth "nothing to stamp yet" case) rather
+than from nothing:
+
+  BLOCKED   — a disabled/unavailable action, plain-language reason
+              inline, no Stamp (nothing has happened yet to stamp).
+              Home's submit-blocked disabledReason text; VoiceInput's
+              permission-denied state.
+
+  NEGATIVE  — signal-negative Stamp + a real, plain-language
+              explanation + a concrete next action, never a dead end.
+              Home's no-cookable-recipe result (reads top_recommendation
+              .available/.explanation — the backend's own real field,
+              not an invented "sorry" string); ErrorBoundary's caught-
+              error state (same pattern, different explanation text —
+              the distinction between "the system considered this and
+              concluded no" and "the system broke" lives in the words,
+              not in a different color or component).
+
+  INFO      — signal-info, for data that's honestly unknown rather than
+              merely secondary. AudioPlayer's duration-unknown case
+              (the '—:—' label switches from steel-400 to signal-info
+              specifically so "I don't know this yet" reads differently
+              from "this is just less important than the main label").
+
+  ACTIVE    — signal-active + a live timer + Strip sequence. Already
+              built (the loading view); not one of today's six cases,
+              included here only for completeness of the taxonomy.
+
+  (EmptyState) — the three empty pages (Pantry, Grocery List, History)
+              use the existing EmptyState primitive directly, which
+              this taxonomy treats as its own thing rather than folding
+              into one of the five Stamp-based patterns — nothing has
+              gone right or wrong on an empty page, there's simply
+              nothing there yet.
+
+Reported this way rather than silently — the same "say what's actually
+true before treating a convenient assumption as verified" standard this
+project has applied to backend findings in every prior phase.
+
+
+7. THE SPACING MIGRATION: WHAT MOVED, WHAT RESISTED AND WHY, WHAT WAS
+   LEFT ALONE ON PURPOSE
+=============================================================
+Migrated (all inside components this phase was already restructuring):
+Strip's py-1.5 -> py-2; VoiceInput's recording-indicator h-2.5/w-2.5 ->
+h-2/w-2; AudioPlayer's play-button h-9/w-9 -> h-8/w-8 and seek-track
+h-1.5 -> h-1; NavShell's own mobile bottom-padding pb-20 -> pb-16 (still
+clears the 56px fixed tab bar with 8px to spare). py-1.5/px-5/gap-1.5/
+gap-0.5/h-5-w-5 disappeared entirely as a side effect of the
+PipelineProgress/LiveFeed rewrite and the Button extraction, not by
+individually hunting each one down.
+
+Two resisted, kept, and commented in place rather than forced: AudioPlayer's
+w-20 time label (64px measurably clips "0:00 / 12:34" in mono at this
+size — tested the claim, not just asserted it) and PhotoInput's h-32/
+w-32 photo-review thumbnail (halving it to 64px visibly reduces how much
+real detail a user can check before submitting the right shelf/fridge
+photo). Both are exactly the kind of case item 7 itself asked to be
+surfaced rather than silently forced.
+
+Deliberately NOT touched, and reported as such rather than silently
+left inconsistent: DietMarks' own h-2.5/w-2.5 dot size and RecipeIcon's
+h-20/w-20 (default) and h-32/w-32 (large) container sizes. Both are
+already-approved primitives from earlier sessions, not named in this
+phase's own restyle list, and "as part of the restyle where layout is
+being touched anyway" (the task's own scoping language) doesn't cover
+touching a primitive's internals just because its non-4pt sizing was
+noticed along the way.
+
+Also newly introduced by this phase's own rail/masthead work, and
+deliberately NOT treated as spacing debt: h-14/top-14/pt-14 (56px, the
+masthead height) and the rail's own 240px. Both are spec-mandated
+structural chrome dimensions given as literal numbers in the task
+itself, the same category of fixed exception fontSize's closed five-step
+scale or Stamp's 2px border already are — outside the 4-point spacing
+scale's jurisdiction by design, not an oversight that slipped through.
+
+
+8. PART B: THE HOME GRID BUG A USER CAUGHT BY EYE
+=============================================================
+Reported directly by the user after this phase's own work shipped: on
+desktop, Home's input form rendered in a narrow phone-width column with
+the entire right half of the 960px content area sitting empty — visibly
+inconsistent with every other page (Pantry, Grocery List, History,
+Profile), which each fill the full 960px width with one section.
+
+Root cause, found by reading rather than guessing: Home's outer wrapper
+was `grid grid-cols-1 gap-6 lg:grid-cols-2` around two conditionally-
+rendered sections gated on showInputs (idle/submitting) and showStream
+(streaming/complete/error). Those two boolean conditions are mutually
+exclusive by construction — AppState only ever has one active value at
+a time — so the two-column grid, at every screen width and in every
+possible app state, ALWAYS rendered exactly one child. It was never a
+responsive artifact or a rare edge case; the second column was
+structurally incapable of ever being populated, permanently reserving
+half the width for a section that could never appear. Fixed by
+replacing the grid with a plain flex flex-col gap-6 stack — the same
+shape as every other page's single full-width section — rather than
+patching the grid to collapse conditionally, since there was never a
+real use for two columns here.
+
+
+9. VERIFICATION
+=============================================================
+Frontend: npm run typecheck (tsc -b --noEmit) and npm run lint
+(eslint . --max-warnings 0) clean before AND after npx prettier
+--write . across both the shell/component work and the Home grid fix
+— re-run each time as a genuinely separate check, not assumed to still
+pass because it passed once. npm run build clean throughout; bundle
+size actually went DOWN despite the new shell and two new primitives —
+209.20 kB JS / 18.52 kB CSS (baseline, prior phase's own final figures)
+-> 210.71 kB JS / 16.94 kB CSS (this phase's shell+component work,
++1.51 kB JS / -1.58 kB CSS) -> 210.70 kB JS / 16.88 kB CSS (after the
+Home grid fix, net flat). The CSS decrease despite adding an entire
+rail/bottom-bar/Button/Well system is explained directly, not just
+noted as a surprising number: Button and Well collapsed what had been
+many one-off className strings (a Replace button, a Remove button, a
+Choose-a-photo button, a Start-recording button, each previously
+hand-styled) into a small number of shared utility-class combinations
+Tailwind's own build only has to emit once.
+
+Screenshots at 1440/1024/900/375px (puppeteer-core against the real,
+locally installed Chrome, the same harness this project's design-system
+work has used throughout): full 240px labeled rail at 1440 and at
+exactly 1024 (the literal overflow-risk boundary named in the task),
+icon-only 64px rail at 900, fixed bottom tab bar with no hamburger at
+375 — each screenshot paired with the scrollWidth/clientWidth check from
+section 2, not just eyeballed. Route screenshots for /grocery-list and
+/history confirmed correct active-rail highlighting, the right
+EmptyState illustration per page (list-pad, spike), and the paper-grain
+texture fix from an earlier phase still visible in the background
+outside each Ticket. A post-fix screenshot of Home at 1440px confirmed
+the input-form card now fills the full 960px column with no empty
+second column, matching Pantry/Grocery List/History/Profile.
+
+
+10. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+One responsive markup tree for the rail versus two separate components
+(Rail, BottomTabBar)
+    Rejected one tree: the structural differences (row vs. column
+    layout, left-edge vs. top-edge active indicator, label always shown
+    vs. shown only at one breakpoint) were large enough that forcing a
+    single JSX structure to serve both would have meant MORE
+    conditional className logic than simply rendering two components,
+    each hidden at the other's own breakpoint.
+
+Inventing a five-state-pattern taxonomy silently versus stating openly
+that no written definition of it exists in this repository
+    Rejected inventing silently: a grep across every markdown file in
+    the repository turned up nothing resembling "five state patterns,"
+    meaning whatever definition the task assumed as shared context
+    doesn't exist anywhere durable to check against. Defining one
+    explicitly, built from what the codebase already has (Stamp's own
+    four signal colors plus a fifth "nothing to stamp" case), and
+    reporting it as a definition rather than a recollection, keeps this
+    consistent with the project's own standing rule against treating an
+    unverified premise as settled fact.
+
+Forcing AudioPlayer's time label and PhotoInput's photo thumbnail onto
+the nearest 4-point value versus keeping their current sizes
+    Rejected forcing both: tested first, not assumed — 64px genuinely
+    clips a "0:00 / 12:34" mono label and genuinely halves the visible
+    detail in a photo a user is about to submit. The task's own
+    instruction explicitly asked for exactly this kind of case to be
+    reported rather than forced, and both were.
+
+Patching Home's two-column grid to collapse to one column conditionally
+versus removing the grid entirely
+    Rejected the conditional patch: the two branches it would have had
+    to switch between (grid-cols-2 vs. grid-cols-1) can never both be
+    reachable at once, since showInputs and showStream are mutually
+    exclusive by construction — a grid that never has two children to
+    lay out side by side isn't a grid with a rare single-child case,
+    it's not a grid at all. A plain flex column stack says what's
+    actually true about the layout instead of preserving multi-column
+    machinery for a state that structurally cannot occur.
+
+
+11. GLOSSARY
+=============================================================
+Rail / BottomTabBar
+    The two components (frontend/src/components/layout/NavShell.tsx)
+    that replace the old single horizontal nav — Rail for >=768px
+    (240px labeled at >=1024px, 64px icon-only between), BottomTabBar
+    for <768px (fixed, 56px, icon+label, never a hamburger).
+
+Button / Well
+    The two new primitives (frontend/src/components/primitives/
+    {Button,Well}.tsx) — Button: primary/secondary/ghost, a closed set;
+    Well: paper-1 fill + shadow-well (a new inset-only boxShadow token),
+    the one deliberate exception to this system's "no elevation" rule.
+
+shadow-well
+    The new tailwind.config.cjs boxShadow entry — inset 0 1px 3px 0
+    rgba(28, 29, 24, 0.18) — used exclusively by Well, never mixed with
+    any outer-shadow utility since the rest of that scale stays closed.
+
+State-pattern taxonomy (Blocked / Active / Positive / Negative / Info)
+    This phase's own explicit, documented definition of "the five state
+    patterns" the task referred to — reconstructed from what the
+    codebase already had (Stamp's four signal colors) since no written
+    definition of the original survived anywhere in the repository.
+
+top_recommendation.available / .explanation
+    The real backend fields (mealsight/agent/nodes/reason.py, typed in
+    frontend/src/types/recommendation.ts's own TopRecommendation) Home's
+    NEGATIVE-pattern no-cookable-recipe branch reads from — never an
+    invented "sorry, no results" string.
+
+
+12. INTERVIEW TALKING POINTS
+=============================================================
+Q: You said "the five state patterns" the task referenced weren't
+actually defined anywhere in the repo. How do you know your own
+definition is the right one, then?
+
+    I don't claim it's THE original one — I said so directly in the
+    response rather than presenting it as a recovered fact. What I can
+    stand behind is that it's internally consistent with everything
+    already built (it reuses Stamp's own four signal colors exactly as
+    they're already defined, adds only the one genuinely new case —
+    Blocked, where nothing has happened yet to stamp at all) and that it
+    was stated explicitly enough, before being applied, that it can be
+    corrected if it doesn't match what the user actually had in mind.
+    Silently guessing and never mentioning the gap would have been the
+    actually risky choice.
+
+Q: Why does min-w-0 matter here specifically? Isn't max-w-[960px] on the
+inner div already enough to stop overflow?
+
+    max-width caps how wide the inner block is ALLOWED to get, but it
+    doesn't control the grid TRACK it lives inside. A CSS grid item's
+    default min-width is auto, not 0 — which can stop the track itself
+    from shrinking below the intrinsic width of whatever's inside it,
+    independent of any max-width the content declares. At exactly
+    1024px, with the rail also claiming its own 240px, that auto floor
+    is exactly the kind of thing that produces the overflow the task
+    warned about by name — min-w-0 on the grid item is what actually
+    removes it, and I checked scrollWidth against clientWidth at that
+    exact width rather than assuming max-width alone was sufficient.
+
+Q: LiveFeed used to show stream errors itself; now it doesn't. Doesn't
+that mean an error could go unreported if Home's own error rendering
+ever changes?
+
+    It's a real coupling, and worth being honest about rather than
+    calling it risk-free: LiveFeed's error line was removed because Home
+    already renders ws.error prominently, and showing the same string
+    twice — once as a signal-negative block, once buried as a plain
+    Strip line — was a straight duplicate, not two components
+    independently covering the same case for safety. If Home's own
+    error rendering were ever removed without a replacement, yes, that
+    error would go unshown. The trade-off made here is one visible
+    source of truth for a given piece of state over two redundant ones,
+    which is the same reasoning this project has applied to duplicate
+    state elsewhere (interaction_history distinct from meal_history,
+    for instance) — the alternative isn't actually safer, it's just two
+    places that can quietly drift out of sync with each other.
+
+Q: The Home grid bug existed before this phase touched Home at all. Why
+didn't the shell/component restyle work catch it, if Home was already
+being edited for the Button/state-pattern changes?
+
+    Because the edits made to Home in the main part of this phase were
+    additive and localized — swapping specific buttons for <Button>,
+    adding the NEGATIVE-pattern branch — none of which touched the
+    outer grid wrapper or required looking at it. The bug was only
+    visible as a rendered LAYOUT symptom (an empty half of the screen at
+    a normal desktop width), not as anything typecheck, lint, or a
+    build could catch, and the screenshots taken during that phase's own
+    verification were all narrower crops focused on the rail and
+    breakpoints, not the full Home page at a width wide enough to show
+    the empty column clearly. It took an actual person looking at the
+    real rendered page to notice it — exactly the category of thing this
+    project's own "screenshot-verify UI work, don't just trust
+    typecheck" rule exists for, and exactly what happened here once it
+    was looked at.

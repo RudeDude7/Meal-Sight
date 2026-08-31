@@ -1,6 +1,9 @@
 import { Component } from 'react'
 import type { ErrorInfo, ReactNode } from 'react'
 
+import { Button } from '@/components/primitives/Button'
+import { Stamp } from '@/components/primitives/Stamp'
+
 interface ErrorBoundaryProps {
   children: ReactNode
 }
@@ -33,17 +36,19 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   override render(): ReactNode {
     if (this.state.error) {
+      // NEGATIVE state pattern: a signal-negative Stamp, a plain-
+      // language explanation, and always a concrete next action — the
+      // same vocabulary as a considered "no cookable recipe" result,
+      // because both are real negative outcomes; what differs is only
+      // the explanation text, not the pattern itself.
       return (
-        <div className="mx-auto max-w-lg rounded-card border border-danger-500/20 bg-danger-50 p-6 text-center">
-          <p className="text-subtitle text-danger-600">Something went wrong.</p>
-          <p className="mt-2 text-body text-ink-muted">{this.state.error.message}</p>
-          <button
-            type="button"
-            onClick={this.handleReset}
-            className="mt-4 rounded-card bg-brand-600 px-4 py-2 text-body font-medium text-white hover:bg-brand-700"
-          >
+        <div className="mx-auto max-w-lg rounded-sm border border-signal-negative/20 bg-signal-negative/10 p-6 text-center">
+          <Stamp signal="negative">error</Stamp>
+          <p className="mt-2 text-heading text-signal-negative">Something went wrong.</p>
+          <p className="mt-2 text-body-lg text-ink-600">{this.state.error.message}</p>
+          <Button variant="primary" onClick={this.handleReset} className="mt-4">
             Try again
-          </button>
+          </Button>
         </div>
       )
     }

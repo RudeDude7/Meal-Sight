@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 
+import { Button } from '@/components/primitives/Button'
+import { Well } from '@/components/primitives/Well'
 import { validateImageFile } from '@/lib/inputLimits'
 
 interface PhotoInputProps {
@@ -61,78 +63,83 @@ export function PhotoInput({ file, onChange, disabled = false }: PhotoInputProps
 
   return (
     <div>
-      <label htmlFor={inputId} className="text-subtitle text-ink">
+      <label htmlFor={inputId} className="text-heading text-ink-900">
         Photo
       </label>
-      <p className="mt-1 text-caption text-ink-faint">JPEG, PNG, or WEBP, up to 10MB.</p>
+      <p className="mt-1 text-label text-steel-400">JPEG, PNG, or WEBP, up to 10MB.</p>
 
       {previewUrl ? (
         <div className="mt-3 flex items-start gap-4">
+          {/* 128px, not the 4-point scale's own 64px neighbor: a photo
+              review thumbnail has to show enough real detail for the
+              user to confirm it's the right shelf/fridge shot — halving
+              it to 64px visibly degrades that, so this one stays. */}
           <img
             src={previewUrl}
             alt="Selected pantry or fridge photo"
-            className="h-32 w-32 rounded-card border border-ink/10 object-cover"
+            className="h-32 w-32 rounded-sm border border-ink-900/10 object-cover"
           />
           <div className="flex flex-col gap-2">
-            <span className="text-caption text-ink-muted">{file?.name}</span>
+            <span className="text-label text-ink-600">{file?.name}</span>
             <div className="flex gap-2">
-              <button
-                type="button"
+              <Button
+                variant="secondary"
                 onClick={() => pickerInputRef.current?.click()}
                 disabled={disabled}
-                className="rounded-card border border-ink/10 px-3 py-1.5 text-body text-ink hover:bg-surface-muted disabled:opacity-50"
               >
                 Replace
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="ghost"
                 onClick={handleRemove}
                 disabled={disabled}
-                className="rounded-card border border-danger-500/30 px-3 py-1.5 text-body text-danger-600 hover:bg-danger-50 disabled:opacity-50"
+                className="text-signal-negative hover:text-signal-negative"
               >
                 Remove
-              </button>
+              </Button>
             </div>
           </div>
         </div>
       ) : (
-        <div
-          onDragOver={(event) => {
-            event.preventDefault()
-            setIsDraggingOver(true)
-          }}
-          onDragLeave={() => setIsDraggingOver(false)}
-          onDrop={(event) => {
-            event.preventDefault()
-            setIsDraggingOver(false)
-            handleFileList(event.dataTransfer.files)
-          }}
+        <Well
           className={[
-            'mt-3 flex flex-col items-center justify-center gap-3 rounded-card border-2 border-dashed p-6 text-center transition-colors',
-            isDraggingOver ? 'border-brand-500 bg-brand-50' : 'border-ink/15 bg-surface-muted',
+            'mt-3 flex flex-col items-center justify-center gap-3 p-6 text-center transition-colors',
+            isDraggingOver ? 'bg-signal-active/10' : '',
           ].join(' ')}
         >
-          <p className="text-body text-ink-muted">Drag a photo here, or</p>
-          <div className="flex flex-wrap justify-center gap-2">
-            <button
-              type="button"
-              id={inputId}
-              onClick={() => pickerInputRef.current?.click()}
-              disabled={disabled}
-              className="rounded-card bg-brand-600 px-4 py-2 text-body font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-            >
-              Choose a photo
-            </button>
-            <button
-              type="button"
-              onClick={() => cameraInputRef.current?.click()}
-              disabled={disabled}
-              className="rounded-card border border-ink/10 px-4 py-2 text-body font-medium text-ink hover:bg-surface disabled:opacity-50"
-            >
-              Take a photo
-            </button>
+          <div
+            onDragOver={(event) => {
+              event.preventDefault()
+              setIsDraggingOver(true)
+            }}
+            onDragLeave={() => setIsDraggingOver(false)}
+            onDrop={(event) => {
+              event.preventDefault()
+              setIsDraggingOver(false)
+              handleFileList(event.dataTransfer.files)
+            }}
+            className="flex flex-col items-center gap-3"
+          >
+            <p className="text-body-lg text-ink-600">Drag a photo here, or</p>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button
+                id={inputId}
+                variant="primary"
+                onClick={() => pickerInputRef.current?.click()}
+                disabled={disabled}
+              >
+                Choose a photo
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => cameraInputRef.current?.click()}
+                disabled={disabled}
+              >
+                Take a photo
+              </Button>
+            </div>
           </div>
-        </div>
+        </Well>
       )}
 
       {/* General picker — photo library on mobile, file browser on desktop. */}
@@ -153,7 +160,7 @@ export function PhotoInput({ file, onChange, disabled = false }: PhotoInputProps
         onChange={(event) => handleFileList(event.target.files)}
       />
 
-      {error && <p className="mt-2 text-caption text-danger-600">{error}</p>}
+      {error && <p className="mt-2 text-label text-signal-negative">{error}</p>}
     </div>
   )
 }

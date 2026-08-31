@@ -62,6 +62,7 @@ _RESULT_FIELDS = (
     "processing_trace",
     "stream_messages",
     "matched_ingredients",
+    "substitutions",
 )
 
 

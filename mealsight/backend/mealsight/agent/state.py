@@ -69,6 +69,18 @@ class MealSightState(TypedDict):
     grocery_list: NotRequired[dict[str, Any]]
     nutrition_info: NotRequired[dict[str, Any]]
 
+    # Set by generate_output (node 9) ONLY on the cookable path, and
+    # only when at least one still-missing ingredient had a real
+    # find_substitutions lookup succeed: each entry is one recipe_
+    # engine.models.SubstitutionResult (ingredient, reason, suggestions
+    # — each with substitute/ratio/flavor_impact/notes — excluded_count).
+    # Flattened here the same way matched_ingredients already is (see
+    # that field's own comment above) specifically so the frontend has
+    # one obvious, stable, STRUCTURED place to read ratio/flavor_impact
+    # from — this data previously existed only baked into final_
+    # response's own prose, with no JSON representation at all.
+    substitutions: NotRequired[list[dict[str, Any]]]
+
     # --- output ---
     final_response: NotRequired[str]
     processing_trace: NotRequired[list[dict[str, Any]]]

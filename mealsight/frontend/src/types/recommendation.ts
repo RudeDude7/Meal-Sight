@@ -8,7 +8,7 @@
 // directly rather than from a schema — anything not read explicitly
 // falls under the trailing index signature.
 
-import type { ScaledRecipe } from '@/types/recipe'
+import type { ScaledRecipe, SubstitutionResult } from '@/types/recipe'
 import type { GroceryList } from '@/types/pantry'
 import type { NutritionResult } from '@/types/recipe'
 
@@ -102,6 +102,14 @@ export interface RecommendationResult {
   processing_trace?: ProcessingTraceEntry[]
   stream_messages?: string[]
   matched_ingredients?: MatchedIngredient[]
+  /**
+   * One entry per still-missing ingredient that had a real
+   * find_substitutions lookup succeed — only present on the cookable
+   * path, and only when at least one lookup actually returned
+   * suggestions. See generate_output.py's own SUBSTITUTION_LOOKUP_LIMIT
+   * (5) for why this can be a strict subset of every missing ingredient.
+   */
+  substitutions?: SubstitutionResult[]
   /** Flattened from top_recommendation.recipe_id when available. */
   recipe_id?: string
 }

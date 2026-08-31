@@ -404,6 +404,8 @@ async def _build_available_response(
         update["nutrition_info"] = nutrition_info
     if matched_ingredients:
         update["matched_ingredients"] = matched_ingredients
+    if substitutions:
+        update["substitutions"] = substitutions
     return update
 
 

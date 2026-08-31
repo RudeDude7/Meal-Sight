@@ -3,10 +3,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { postRecommend } from '@/api/recommend'
 import { ApiError } from '@/api/client'
 import { Button } from '@/components/primitives/Button'
-import { Stamp } from '@/components/primitives/Stamp'
 import { LiveFeed } from '@/components/recommend/LiveFeed'
 import { PhotoInput } from '@/components/recommend/PhotoInput'
 import { PipelineProgress } from '@/components/recommend/PipelineProgress'
+import { RecommendationResultView } from '@/components/recommend/result/RecommendationResultView'
 import { TextInput } from '@/components/recommend/TextInput'
 import { VoiceInput } from '@/components/recommend/VoiceInput'
 import { useWebSocket } from '@/hooks/useWebSocket'
@@ -163,29 +163,9 @@ export function Home() {
             </div>
           )}
 
-          {appState === 'complete' && recommendationAvailable !== false && (
-            <div className="mt-4 rounded-sm border border-signal-positive/20 bg-signal-positive/10 px-3 py-3 text-body-lg text-ink-900">
-              {ws.result?.final_response ??
-                'Done — the recommendation card lands in the next session.'}
-            </div>
-          )}
-
-          {/* NEGATIVE state pattern, considered rather than failed: a
-              signal-negative Stamp, the agent's own real explanation
-              (reason.py's top_recommendation.explanation — never an
-              invented "sorry, no results" line), and a concrete next
-              action below rather than a dead end. */}
-          {appState === 'complete' && recommendationAvailable === false && (
-            <div className="mt-4 rounded-sm border border-signal-negative/20 bg-signal-negative/10 p-4">
-              <Stamp signal="negative">no cookable match</Stamp>
-              <p className="mt-2 text-body-lg text-ink-900">
-                {ws.result?.top_recommendation?.explanation ??
-                  'Nothing in your pantry matched well enough this time.'}
-              </p>
-              <p className="mt-2 text-label text-ink-600">
-                Try adding a few more ingredients to your pantry, or describe what you have in more
-                detail, and start a new recommendation.
-              </p>
+          {appState === 'complete' && ws.result && (
+            <div className="mt-4">
+              <RecommendationResultView result={ws.result} />
             </div>
           )}
 

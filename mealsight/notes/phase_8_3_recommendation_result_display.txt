@@ -1,0 +1,488 @@
+PHASE 8.3 STUDY NOTES: THE RECOMMENDATION RESULT VIEW — A REAL WIRE-
+SHAPE GAP FOUND BEFORE WRITING ANY UI, SIX COMPONENTS, AND TWO REAL
+BACKEND QUIRKS FOUND DURING LIVE VERIFICATION
+=============================================================
+
+The Ticket Rail shell and primitives were already applied everywhere
+else (phase 8.2(b)). This phase replaces the one piece that was still
+raw text: Home.tsx's own `{ws.result?.final_response}` block, shown
+after a run completes. The task's own explicit instruction — read the
+exact backend shape before writing, never guess a field name — caught a
+real, material gap between what the task asked for and what the backend
+actually serializes, before a single component was written.
+
+Files added: frontend/src/components/recommend/result/
+{RecommendationResultView,CookableResult,NoCookableResult,NutritionPanel,
+ReasoningPanel,MissingAndSubstitutions,CookThis}.tsx. Files edited:
+backend/mealsight/agent/state.py, backend/mealsight/agent/nodes/
+generate_output.py, backend/mealsight/api/routers/recommend.py,
+frontend/src/{types/recommendation.ts,pages/Home.tsx}. No backend files
+touched beyond the one additive field described in section 1 — the
+backend stays otherwise frozen.
+
+
+1. THE GAP: SUBSTITUTION DATA EXISTED IN MEMORY AND NOWHERE ELSE
+=============================================================
+Reading generate_output.py, reason.py, match_rank.py's own models.py,
+cook.py, and the recommend router's _serialize_result/_RESULT_FIELDS
+directly (not the frontend's already-existing types, which turned out
+to already be correct against every OTHER shape) turned up one real
+discrepancy: generate_output._build_available_response calls
+find_substitutions for whatever's still missing and gets back real
+SubstitutionResult objects (ingredient, reason, suggestions — each with
+substitute/ratio/flavor_impact/notes — excluded_count) — but the
+function's own returned `update` dict never included them. They were
+computed ONLY to be woven into final_response's own prose ("If you're
+missing something, try: X for Y (Z flavor impact)"), then discarded.
+_RESULT_FIELDS never listed a "substitutions" key because there was
+never a state key for it to read. No REST endpoint anywhere in this API
+returns match/substitution data independently either — GET /api/recipes
+/{id} returns RecipeDetail (no matching info at all), and there's no
+"match this recipe against my pantry" endpoint exposed at the HTTP
+layer. The result: everything else the task asked for (missing items
+WITH importance, in particular) already had a real, structured path —
+grocery_list's own items already carry importance/is_staple/verify_note,
+built directly from missing_items — but ratio/flavor_impact had no wire
+representation at all.
+
+Presented this finding to the user directly rather than picking
+silently among the three real options (add a backend field / parse
+prose out of final_response / drop the display entirely) — this is
+exactly the kind of decision only the user can make when a "frozen"
+backend needs the frozen boundary tested. The user chose the additive
+field, matching the precedent matched_ingredients itself already set
+(that field's own comment: flattened to top-level "so a client has one
+obvious, stable field to read... from").
+
+
+2. THE FIX: substitutions, ADDED THE SAME WAY matched_ingredients WAS
+=============================================================
+Three files, one new key, propagated end to end: MealSightState gained
+`substitutions: NotRequired[list[dict[str, Any]]]`, with a comment
+naming exactly why (previously prose-only, no JSON representation).
+generate_output._build_available_response's own update dict gained
+`if substitutions: update["substitutions"] = substitutions` — the same
+conditional-inclusion pattern every other optional field in that
+function already uses. _RESULT_FIELDS in the recommend router gained
+"substitutions" as its ninth entry. frontend/src/types/recommendation.ts
+'s RecommendationResult gained a typed `substitutions?: SubstitutionResult
+[]` field, importing the SubstitutionResult type that already existed in
+recipe.ts (built correctly in an earlier phase, never wired to anything
+that populated it until now).
+
+Verified narrowly then broadly: ruff/mypy/the six generate_output-
+specific tests first, then the full backend suite (106 passed at that
+point) before moving on to the frontend — the same "verify the small
+change in isolation before trusting the whole system" discipline this
+project has followed since its very first backend phase.
+
+
+3. WHY CookableResult MAKES A SECOND, SEPARATE FETCH — get_recipe, NOT
+   JUST scaled_recipe
+=============================================================
+scaled_recipe (ScaledRecipe, from scale_recipe) carries name, cook_time,
+target_servings, and scaled ingredients — but the pydantic model itself
+has NO cuisine field, no dietary_tags field, and critically no steps
+field at all. Those three only exist on RecipeDetail (get_recipe's own
+return shape), which generate_output DOES fetch internally but never
+adds to the state update dict either (unlike scaled_recipe/grocery_list/
+nutrition_info/matched_ingredients, `detail` itself never left the
+node). Rather than treating this as a second gap needing a second
+backend field, CookableResult calls the ALREADY-EXISTING GET /api/
+recipes/{id} (src/api/recipes.ts's own getRecipe, built and typed
+correctly in an earlier phase, previously used only by recipe-browsing
+pages that don't exist yet) — keyed on result.recipe_id, which
+_serialize_result already flattens onto the top-level result
+specifically, per its own comment, so a client has one obvious place to
+read it from. This is real data through a real, already-shipped
+endpoint, not a guess and not a new backend surface.
+
+The fetch is genuinely optional to the view's own correctness: cuisine,
+dietary marks, and steps degrade to "unknown"/"loading" text rather than
+blocking anything else on the page from rendering, and a failed fetch
+shows a plain "Couldn't load the steps" line rather than a blank space
+or a thrown error.
+
+
+4. HAVE VS. MISSING: A NAME-SET DIFF BETWEEN TWO FIELDS THAT ALREADY
+   EXIST FOR EXACTLY THIS PURPOSE
+=============================================================
+matched_ingredients' own doc comment (state.py) already says what it's
+for: "the chosen recipe's own matched_items... cross-referenced against
+scaled_recipe's own ingredients for a quantity_display/unit — the
+'what's needed, and how much, for what you already have' list." Reading
+that literally: an ingredient in scaled_recipe.ingredients whose
+(lowercased) name appears in matched_ingredients is "have"; every other
+scaled ingredient is "missing" — no new data needed, no separate call,
+just the diff this pairing was already built to support. Each scaled
+ingredient already carries its own importance field too, so "missing
+with importance level" (task item 4) reads directly off scaled_recipe,
+without needing to cross-reference grocery_list for that specific piece
+at all — grocery_list is used instead, and separately, for its own
+distinct purpose (the store-section-grouped shopping list with staple
+flags).
+
+
+5. THE FIVE STATE PATTERNS, RESTATED THIS TIME BUT STILL APPLIED
+   CAREFULLY WHERE THE MAPPING WASN'T OBVIOUS
+=============================================================
+Task text restated all five explicitly this time (Loading/active, Empty,
+Negative/blocked, Partial/caveat, Success) — no repeat of phase 8.2(b)'s
+"reconstruct a lost definition" problem. Two placements were still
+judgment calls worth recording:
+
+Cook This success WITH a pantry_deduction_error present. cook.py's own
+docstring is explicit that log_meal running before remove_items means a
+partial failure there still means the meal WAS genuinely cooked and
+logged — a real 200, not an error. This phase renders that case as the
+SUCCESS pattern's own Well, with the deduction error surfaced as a
+signal-info line inside it (not a separate Negative block, not hidden)
+— the same "partial/caveat" instinct as the nutrition coverage note,
+applied to a different field, inside a container the task didn't
+explicitly name for this but where "signal-info, never styled as an
+error" was clearly still the right vocabulary.
+
+An idempotent replay (idempotent_replay: true) renders as the IDENTICAL
+success view, with one small addition — "(already logged earlier)" in
+steel-400 text — never a different pattern, never an error. The task
+was explicit about this ("Handle the idempotent replay response as a
+normal success, not an error"), and the real API response this phase
+actually received during verification (section 8 below) had
+idempotent_replay: false on the one live call made, so this path is
+implemented per the documented contract but not itself exercised by a
+literal second identical call this session.
+
+
+6. REASONING: SIX ROWS, ALWAYS, EVEN WHEN THREE SAY "NOT A FACTOR"
+=============================================================
+reason.py's own SYSTEM_PROMPT requires the model to set applies: false
+and explain why, for any dimension the supplied data doesn't speak to,
+rather than inventing a rationale — ReasoningPanel takes that literally:
+every one of the six *_reasoning keys renders as its own row,
+unconditionally, styled by its own applies flag (ink-900/steel-400 for
+the label, ink-900/ink-600 for the body) rather than filtered down to
+only the ones that fired. The one real branch this had to account for:
+top_recommendation.reasoning is genuinely ABSENT on both fallback paths
+(reason.py's own _fallback_decision, invalid id or unexpected exception)
+— those show only overall_summary, never a six-row breakdown fabricated
+for a decision that never actually went through per-dimension reasoning
+at all. Confirmed live (section 8): the one real run captured DID carry
+a full reasoning object, so both branches are implemented against the
+real type's own optionality but only the "present" branch was actually
+exercised this session.
+
+
+7. VERIFICATION, PART ONE: THE STATIC CHECKS
+=============================================================
+Frontend: npm run typecheck (one real type error caught and fixed —
+RankingEntry.match_score is number | null, and the first draft called
+Math.round/matchQualifier on it unguarded; split into two conditional
+render branches, one for a null score with no numeric line at all),
+lint, and build all clean, before and after npx prettier --write .
+Bundle: 210.70 kB JS / 16.88 kB CSS (phase 8.2(b)'s own final figures)
+-> 222.76 kB JS / 16.93 kB CSS — +12.06 kB JS for six new, genuinely new
+components and zero new CSS bytes of consequence, since every visual
+element reuses existing Tailwind utility combinations already emitted
+elsewhere in the bundle.
+
+Backend (three files touched): ruff check clean, mypy --strict clean
+(119 source files), and the full suite — 510 passed, 3 deselected —
+run twice: once narrowly (the six generate_output-specific tests, plus
+the full test_agent/test_api directories) immediately after the state.py
+/generate_output.py/recommend.py edits, then once more, whole-suite,
+at the very end of the phase after all live-verification pantry writes
+had already happened — confirming the real mutations made to the
+running database during verification (section 8) didn't leave the test
+suite's own separate, isolated fixtures in any different state.
+
+
+8. VERIFICATION, PART TWO: A REAL PANTRY, A REAL BACKEND, AND WHY THE
+   FIRST THREE RUNS ALL CAME BACK "NO MATCH"
+=============================================================
+Started the real backend (uvicorn, port 8000) against the real,
+already-populated SQLite databases left over from earlier sessions'
+live verification (24 real pantry items: chicken breast, chicken thigh,
+corn tortilla, cream cheese, enchilada sauce, monterey jack cheese, and
+others — the literal ingredients the "Chicken Enchilada Casserole"
+example has been built around throughout this whole project) and the
+real Vite dev server, then drove actual recommendation runs through the
+real rendered UI via puppeteer-core, not by fabricating a result object
+to render against.
+
+The first three real runs — plain text mentioning chicken and
+tortillas, then an explicit "Mexican dinner... 45 minutes or less"
+request — all came back "No match this time," and NOT because the
+frontend or the new substitutions field were broken: direct inspection
+of the real processing_trace.relaxations and a direct GET /api/recipes/
+search?cuisine=Mexican call (which DID return five real Mexican recipes,
+including Chicken Enchilada Casserole itself, id 52765) confirmed two
+real, pre-existing BACKEND behaviors, reported here rather than quietly
+worked around:
+
+  (a) mealsight.agent.nodes.search_recipes relaxes cuisine FIRST, cook-
+      time SECOND, meal-type LAST (grep-confirmed against the actual
+      relaxation messages, not assumed from the docstring). get_context's
+      own inferred meal_type is one of breakfast/lunch/dinner/snack; the
+      real recipe corpus's own meal_type field is a completely different
+      vocabulary (main/dessert/side/etc., inherited from TheMealDB's own
+      categories) that never intersects with it at all. The practical
+      effect: the meal-type filter excludes literally everything on
+      essentially every real request, but because cuisine relaxes away
+      BEFORE meal-type does, a stated cuisine preference is discarded
+      before it ever gets the chance to matter — the search that
+      finally succeeds has neither constraint left, and returns
+      whatever's alphabetically first in an unrelated, unfiltered
+      results page.
+
+  (b) Once every constraint is relaxed away, search_recipes' own default
+      ordering is NOT related to the free-text description's own
+      mentioned ingredients at all (there is no "contains these
+      ingredients" filter anywhere in this API) — match_rank only scores
+      whatever candidate set search_recipes happens to hand it, so a
+      request explicitly naming chicken and tortillas can genuinely
+      surface Bubble & Squeak and Apple Frangipan Tart as its top
+      candidates, with the real, correct pantry (which has never seen
+      those ingredients) correctly scoring both at match_score 0.0-0.03.
+
+Neither of these is a frontend bug, and neither was touched — both are
+pre-existing backend search/context behavior, out of this phase's own
+scope (a frozen backend, minus the one field this phase was explicitly
+authorized to add), reported plainly rather than silently worked around
+or quietly attributed to "flaky data."
+
+
+9. GETTING TO A REAL COOKABLE RESULT: A REAL PANTRY WRITE, NOT A
+   FABRICATED RESPONSE
+=============================================================
+Given (8), the reliable path to a genuine can_cook: true result was to
+make one of the recipes search_recipes' own unfiltered default ordering
+was ALREADY surfacing (Banana Pancakes, id 52855, real match_score
+0.2857 against the real pantry — 2 of 7 ingredients already on hand:
+banana, egg) fully cookable, by adding its five remaining real
+ingredients through a real PATCH /api/pantry call (baking powder,
+vanilla extract, oil, pecan nuts, raspberries — the recipe's own exact
+ingredient names, confirmed by reading GET /api/recipes/52855 first,
+not guessed). This is a real mutation to the real, persistent pantry
+database, done specifically to exercise a real code path end to end —
+not a mocked or hand-built RecommendationResult object standing in for
+one. The subsequent run genuinely, independently re-computed a 100%
+match_score, can_cook: true, and a full reasoning breakdown from the
+real reasoning model.
+
+Real, live-verified renders, screenshot-backed:
+  - COOKABLE (task item 2): egg RecipeIcon (correctly derived — egg
+    matched before any other protein term in the recipe's own
+    ingredient order), 3 real DietMarks (vegetarian/dairy-free/gluten-
+    free, matching Banana Pancakes' actual dietary_tags), 100% "excellent
+    match" + cookable Stamp, all 7 ingredients correctly checked as
+    "have" (a 100%-match recipe has zero missing ingredients by
+    definition — confirmed this is the reason no Missing/Substitutions/
+    grocery-list panel rendered at all for this run, not a bug), both
+    real recipe steps, and all six reasoning rows (three applicable:
+    Ingredients/Freshness/Context; three correctly "not a factor this
+    time": Nutrition/Variety/Taste).
+  - PARTIAL NUTRITION (task item 5): the same run's own real nutrition
+    coverage was 71.4% (5 of 7 ingredients) — below recipe_engine's own
+    80% MIN_COVERAGE_PCT_FOR_TAGS threshold. Rendered exactly as
+    specified: a small signal-info Stamp reading "partial nutrition
+    data," the backend's own real coverage_note text at full body size,
+    never small print, never colored as a warning.
+  - NO COOKABLE (task item 3): the three earlier "No match" runs
+    (genuinely, independently produced by the search/context behavior in
+    section 8, not staged) rendered the Negative pattern correctly: a
+    negative Stamp, the backend's own real explanation naming the
+    closest candidate and its match score, and a full store-section-
+    grouped grocery list with real staple verify_note text.
+  - COOK THIS (task item 6): clicking the real "Cook This" button
+    produced a real 200 from POST /api/cook — meal logged (Banana
+    Pancakes, 1 serving, 2026-08-31), 5 ingredients deducted with real
+    before/after quantities, 2 skipped (baking powder/vanilla extract,
+    both quantity_unknown — the recipe lists them with no numeric
+    quantity at all, so remove_items correctly declines to guess one),
+    idempotent_replay: false, pantry_deduction_error: null. Rendered as
+    the Success pattern: a positive "cooked" Stamp, upright, the real
+    logged summary, and the real pantry before -> after list.
+  - 375px (task item 6's own mobile check): captured by resizing an
+    already-completed run's viewport rather than submitting fresh at
+    375px (see section 10) — ingredients/steps correctly collapse from
+    two columns to one, the nutrition grid stacks 2-up, and document.
+    documentElement.scrollWidth === clientWidth confirmed no horizontal
+    overflow on both the idle Home page and the fully rendered result.
+
+
+10. A SECOND FINDING, ALSO REPORTED RATHER THAN SILENTLY WORKED AROUND:
+    A FIXED BOTTOM TAB BAR CAN STEAL A CLICK AT NARROW WIDTHS
+=============================================================
+The first attempt at the 375px screenshot submitted the recommendation
+form directly at 375px width and never completed — the captured
+screenshot showed the app had navigated to /grocery-list instead,
+despite the script explicitly clicking the "Get a recommendation"
+button by its own text content. Diagnosed rather than dismissed as
+flakiness: NavShell's own BottomTabBar is `fixed inset-x-0 bottom-0
+z-20`, and at 375px width the input form's own submit button can end up
+positioned, after the page scrolls to bring it into view, at a screen
+coordinate the fixed tab bar physically occupies — Puppeteer's own
+.click() dispatches to whatever element is actually topmost at that
+coordinate, which was the tab bar's own "Grocery List" link in this
+case, not the button underneath it. Worked around for THIS phase's own
+verification by submitting at desktop width and resizing to 375px only
+after the result had already rendered (a real, correct screenshot of a
+genuinely narrow layout, just reached by a different sequencing) — but
+the underlying overlap is a real layout issue in the shell built during
+phase 8.2(b), out of this phase's own scope to fix, reported here so a
+future session doesn't have to rediscover it from scratch.
+
+
+11. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+Parsing substitution ratio/flavor_impact out of final_response's own
+prose versus adding a small, additive backend field
+    Presented to the user rather than picked silently, since it meant
+    touching a backend explicitly described as frozen. The user chose
+    the additive field. Text-parsing was rejected as the fallback this
+    project has rejected in every prior similar moment: it would have
+    meant re-deriving structured data from a string whose ONLY contract
+    is being readable prose, with no guarantee its exact wording (a
+    format string in _format_available_response) stays stable — fragile
+    by construction, and against this whole project's own "don't
+    guess/fake structured data" discipline.
+
+Fetching RecipeDetail via a new, dedicated endpoint versus reusing the
+already-existing GET /api/recipes/{id}
+    Rejected adding anything: getRecipe already existed, already
+    correctly typed, already unused by any shipped page. Cuisine,
+    dietary_tags, and steps were sitting behind an endpoint this project
+    had already built and verified in an earlier phase; reaching for it
+    was the same "real data through a real, already-shipped path" choice
+    this project makes whenever the option exists, rather than treating
+    "the frontend has no steps" as a second backend gap requiring a
+    second field.
+
+Deriving have-vs-missing ingredients from grocery_list versus diffing
+scaled_recipe against matched_ingredients directly
+    Rejected reading it off grocery_list: that field is generate_output's
+    OWN missing-ingredients list turned into a shopping list, but it's
+    absent entirely on a 100%-match recipe (nothing to build a list
+    from) and doesn't carry the full scaled ingredient set (quantity_
+    display, unit) needed to render the "have" side at all. matched_
+    ingredients' own doc comment already states its purpose is exactly
+    this cross-reference; using it directly needed no new data and
+    matches what it was already built for.
+
+Screenshotting the 375px case by submitting fresh at that width versus
+resizing after a desktop-width run completed
+    Rejected repeatedly forcing the narrow-width submission once the
+    fixed-tab-bar click interception was diagnosed (section 10): forcing
+    it would have meant either fighting a real, separate layout bug
+    that belongs to a different phase, or picking an artificial click
+    coordinate that doesn't reflect how a real user would actually tap
+    the button on a real phone. Resizing after completion still produces
+    a genuine, unstaged 375px render of the real result — the ONLY thing
+    that changed was avoiding a known-broken click path irrelevant to
+    what this screenshot needed to prove.
+
+
+12. GLOSSARY
+=============================================================
+RecommendationResultView
+    The dispatcher (frontend/src/components/recommend/result/
+    RecommendationResultView.tsx) — branches on top_recommendation.
+    available, nothing else, to choose CookableResult vs. NoCookableResult.
+
+CookableResult
+    Renders the RecipeTicket header (RecipeIcon, DietMarks, match score,
+    cookable Stamp), the ingredients have/missing split, steps, and
+    composes NutritionPanel/ReasoningPanel/MissingAndSubstitutions/
+    CookThis underneath. The one component that makes the supplementary
+    GET /api/recipes/{id} call described in section 3.
+
+NutritionPanel
+    The Partial/caveat pattern's own home — signal-info Stamp plus the
+    backend's real coverage_note, triggered at coverage_pct <=
+    MIN_COVERAGE_PCT_FOR_TAGS (80.0, matched exactly against recipe_
+    engine/nutrition.py's own constant, not re-derived independently).
+
+ReasoningPanel
+    Renders all six *_reasoning dimensions unconditionally, dimming
+    (not hiding) any the model marked not-applicable; falls back to
+    overall_summary alone when reasoning itself is absent (the two
+    fallback-decision paths in reason.py).
+
+MissingAndSubstitutions
+    Missing ingredients (name + importance, diffed from scaled_recipe
+    against matched_ingredients), this phase's own new substitutions
+    field (ratio/flavor_impact), and the grocery_list grouped by real
+    store section with staple verify_note text — three independent
+    optional sections, each rendering only when its own data exists.
+
+CookThis
+    The Cook-confirmation form and its own Success-pattern result view;
+    treats idempotent_replay and a non-null pantry_deduction_error as
+    variations WITHIN the success view, never as a different pattern.
+
+substitutions (RecommendationResult field)
+    This phase's own new, additive wire field — one SubstitutionResult
+    per still-missing ingredient that had a real find_substitutions
+    lookup succeed. Absent on the no-cookable path, and absent on the
+    cookable path whenever every substitution lookup came back empty.
+
+
+13. INTERVIEW TALKING POINTS
+=============================================================
+Q: You found that a stated cuisine preference basically never survives
+to matter in the real system. Why not just fix the relaxation order
+while you were already in there?
+
+    Because it wasn't what was asked, and it isn't a small, additive,
+    precedent-matching change the way substitutions was. Reordering
+    relaxation (or reconciling the meal_type vocabularies) touches
+    search_recipes' own behavior for every single recommendation this
+    system will ever produce, changes the SHAPE of when a run succeeds
+    or fails, and has its own test surface this phase never audited. The
+    substitutions field, by contrast, was additive, provably backward-
+    compatible (every existing test still passed unmodified), and
+    directly authorized by the user after being presented as a real
+    gap. Reporting the meal_type finding clearly, rather than either
+    silently ignoring it or silently fixing it, is what keeps the "the
+    backend is frozen except for what's explicitly agreed" boundary
+    meaningful.
+
+Q: How do you know the "No match this time" result you screenshotted
+was a real system behavior and not, say, the new RecommendationResultView
+component failing to parse a result it didn't expect?
+
+    Because I checked the raw JSON directly, not just the rendered page:
+    curl against GET /api/recommend/{id} showed the exact same
+    top_recommendation.explanation and grocery_list.sections the UI
+    rendered, and processing_trace.relaxations showed the real messages
+    search_recipes actually streamed ("Dropping the Mexican cuisine
+    preference...", "dropping the lunch meal-type filter..."). If the
+    component had been silently swallowing or misreading the result, the
+    rendered explanation text wouldn't have matched the raw JSON's own
+    explanation field character-for-character, which it did.
+
+Q: The Cook This flow you verified didn't include a rating. Why not
+just click a rating button too, to prove the preference-change text
+renders?
+
+    I could have, and chose not to invent a rating just to force that
+    one text line to appear during this pass — the honest state of this
+    verification is that preferenceChangeText's own logic (comparing
+    preferences_before/after cuisine_preferences for the recipe's own
+    cuisine) is implemented and typed against the real UserProfile
+    shape, but only the no-rating branch was actually exercised live
+    this session. I said that directly rather than either skipping the
+    distinction or overstating what was actually confirmed.
+
+Q: Why does CookableResult treat a failed getRecipe fetch as "show
+'Couldn't load the steps'" rather than falling back to some default
+step text or hiding the whole Steps section?
+
+    Because there's no honest default step text to fall back to — this
+    system's own established rule (RecipeIcon, DietMarks, the empty-
+    state illustrations, all from earlier phases) is "don't guess, don't
+    fake it" whenever real data isn't available. Hiding the section
+    entirely would silently under-deliver without saying why; inventing
+    placeholder steps would be actively dishonest. A plain, visible
+    "couldn't load" message is the same pattern this whole project
+    already uses everywhere else data might be genuinely unavailable.

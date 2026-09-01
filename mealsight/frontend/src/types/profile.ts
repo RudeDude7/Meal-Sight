@@ -16,6 +16,12 @@ export type PreferenceType =
  * The full user profile, as returned by GET /api/profile.
  * cuisine_preferences is a {cuisine: score} map, 0.0-1.0, learned from
  * rated meals — empty until at least one meal has been rated.
+ * cuisine_preference_data_points is the real ratings-count behind each
+ * of those scores (mealsight/user_intelligence/scoring.py's own
+ * preference_scores.data_points) — never inflated by that module's own
+ * smoothing prior, so a score near 0.5 from one rating and a score near
+ * 0.5 from ten stay distinguishable by data_points even though their
+ * scores alone would look nearly identical.
  */
 export interface UserProfile {
   dietary_restrictions: string[]
@@ -26,6 +32,7 @@ export interface UserProfile {
   cooking_skill: CookingSkill
   budget_sensitivity: BudgetSensitivity
   cuisine_preferences: Record<string, number>
+  cuisine_preference_data_points: Record<string, number>
 }
 
 /**

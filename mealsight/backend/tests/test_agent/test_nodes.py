@@ -119,6 +119,7 @@ def _profile_response() -> ToolCallResult:
             "cooking_skill": "intermediate",
             "budget_sensitivity": "moderate",
             "cuisine_preferences": {},
+            "cuisine_preference_data_points": {},
         },
     )
 

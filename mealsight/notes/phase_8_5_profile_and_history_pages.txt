@@ -1,0 +1,425 @@
+PHASE 8.5 STUDY NOTES: THE PROFILE AND HISTORY PAGES — A TOOL THAT
+EXISTED BUT WAS NEVER WIRED IN, A SCORE WITH NO CONFIDENCE ATTACHED,
+AND A REAL DATA-LOSS INCIDENT FROM THE VERIFICATION PROCESS ITSELF
+=============================================================
+
+The last two pages that still had placeholder or EmptyState-only
+content. Profile becomes a real editor over dietary_restrictions/
+disliked_ingredients/scalar preferences plus a read-only, confidence-
+labeled cuisine-score display; History becomes a two-tab view over meal
+history (rateable) and interaction history (every request, cooked or
+not). Two real backend gaps were found and fixed before any component
+was written, both approved the same way phase 8.3/8.4's own gaps were.
+The live-verification pass also produced a real, disclosed data-loss
+incident — recorded here in full because it's a genuine lesson about
+this project's own backup technique, not something to gloss over.
+
+Files added: frontend/src/lib/useRecipeIconCategory.ts, frontend/src/
+components/{profile/{PreferenceListEditor,CuisinePreferenceBars}.tsx,
+history/{MealHistoryTicket,InteractionTicket}.tsx}. Files edited:
+backend/mealsight/{user_intelligence/{models,profile}.py,mcp_servers/
+user_intelligence/server.py,agent/mcp_client.py,api/routers/profile.py},
+backend/tests/{test_perception/test_fusion.py,test_agent/test_nodes.py,
+test_api/test_app.py,test_mcp_servers/test_user_intelligence/
+test_tool_schemas.py}, frontend/src/{types/profile.ts,api/profile.ts,
+pages/{Profile,History}.tsx}.
+
+
+1. GAP ONE: remove_preference EXISTED AT THE DOMAIN LAYER SINCE PHASE
+   4.3, BUT WAS NEVER REGISTERED AS AN MCP TOOL
+=============================================================
+Reading mealsight/user_intelligence/preferences.py directly (not the
+router, not the MCP server file first) found a complete, already-
+exported, already-documented remove_preference function — canonicalizes
+its own value the same way update_preferences does, treats "value not
+present" as a no-op rather than an error. But grepping every @mcp.tool
+in mcp_servers/user_intelligence/server.py found exactly nine
+registered tools, and remove_preference wasn't one of them — a real
+function with real behavior, sitting completely unreachable from
+anything outside the Python package itself.
+
+Presented to the user the same way phase 8.3's substitutions gap and
+phase 8.4's suggested_action gap both were — the user chose to close it
+properly rather than work around it. The fix: register remove_
+preference as user_intelligence's TENTH tool (server.py), mirroring
+update_preferences' own error-handling shape exactly (ValueError ->
+validation_error, anything else -> internal_error, logged first), then
+add DELETE /api/profile as a thin proxy in the router, identical in
+style to every other endpoint pantry.py/profile.py already has. mcp_
+client.py's own EXPECTED_TOOLS health-check set — which fails the whole
+server's health check loudly if a real tool goes missing from what a
+server advertises — needed the new name added and its own count comment
+corrected from nine to ten, with the reason spelled out (existed at the
+domain layer since phase 4.3, wired in only now).
+
+FOUR TEST FIXTURES BROKE FROM THIS, AND WERE FIXED RATHER THAN WORKED
+AROUND: adding a required-by-shape field or a new tool to an existing
+inventory is the kind of change that ripples into fixtures built before
+it existed, and running the full suite immediately (rather than trusting
+the isolated new-code check alone) is what caught all four:
+test_tool_schemas.py's own EXPECTED_TOOLS dict (missing the new tool
+name and its parameter schema), test_app.py's own FakeManager DEFAULT_
+INVENTORY (the health check's own mock tool list), and two UserProfile-
+shape fixtures (below, section 2) that construct the pydantic model
+directly rather than through a real server round-trip.
+
+
+2. GAP TWO: cuisine_preferences HAD NO CONFIDENCE DATA ATTACHED AT ALL
+=============================================================
+mealsight/user_intelligence/scoring.py's own preference_scores table
+stores score AND data_points side by side, and the module's own
+_shrink_toward_neutral function is explicit about why data_points
+matters: a score alone can't distinguish "one 5-star rating, heavily
+pulled toward the 0.5 prior" from "ten 5-star ratings, close to the raw
+1.0 mean" — but UserProfile.cuisine_preferences was typed dict[str,
+float], and profile.py's own _read_cuisine_preferences SELECTed only
+value and score, never data_points. The real count existed one query
+away and was simply never carried through.
+
+Presented to the user the same way as gap one; chosen fix: a SIBLING
+field, cuisine_preference_data_points: dict[str, int], added to
+UserProfile and populated in the same _read_cuisine_preferences query
+(now returning a tuple of both dicts) — deliberately NOT changing the
+shape of cuisine_preferences itself, specifically so nothing that
+already reads it as a plain {cuisine: score} mapping (reason.py's own
+prompt-building code, most notably) needs to change at all. Two more
+test fixtures broke and were fixed: test_fusion.py's own direct
+UserProfile(...) construction, and test_nodes.py's own _profile_
+response() mock (which turned out to matter for a REAL reason, not just
+test hygiene — see section 3).
+
+
+3. A REAL CONSUMER SURFACED BY THE SCHEMA CHANGE: merge.py PARSES
+   UserProfile BACK OUT OF THE WIRE, NOT JUST INTO IT
+=============================================================
+The failing test (test_merge_passes_the_profile_through_to_merge_
+perceptions) wasn't a fixture-hygiene issue — its traceback showed
+mealsight/agent/nodes/merge.py's own _fetch_user_profile calling
+UserProfile.model_validate(result.data) on whatever get_user_profile's
+own MCP tool actually returned, to read household_size back out for
+filling in an unspecified servings count. Adding a REQUIRED field to
+UserProfile without a default meant any caller round-tripping through
+model_validate on stale or hand-built data would break — a real,
+load-bearing consumer this specific pydantic model has beyond just
+being profile.py's own return type. The fix stayed the same (update the
+test's own mock response to include the new field, matching what a real
+get_user_profile call would actually return going forward) — but
+finding this consumer by reading the actual failure rather than just
+re-running the test suite blind is what confirms the new field is
+additive-safe for every real code path, not just the ones directly
+under test.
+
+
+4. TABS, NOT A MERGED TIMELINE — THE DECISION THE TASK ASKED TO BE
+   REPORTED
+=============================================================
+Meal history (confirmed cooks, rateable) and interaction history
+(every request, cooked or not, text-only) went into two separate tabs
+rather than one interleaved-by-date scroll or two stacked sections.
+Reasoning, stated directly in History.tsx's own top comment: the two
+records support genuinely different actions (a meal can be rated, an
+interaction never can — there's nothing to rate about a request that
+never led to a cook) and carry very different information density (a
+meal is a handful of fields; an interaction can carry a full transcript
+plus a full final_response paragraph). Interleaving both into one
+scroll by date would force a reader to context-switch between "what did
+I cook" and "what did I ask for" on every card, and would have meant
+inventing a shared display shape for two records that don't actually
+share one. Two tabs let each list read on its own terms, each still
+most recent first within itself.
+
+
+5. RecipeIcon ON A HISTORY ENTRY NEEDS A RECIPE'S REAL INGREDIENTS,
+   WHICH NEITHER LIST ENDPOINT RETURNS
+=============================================================
+get_meal_history and get_interaction_history both return recipe_id/
+recipe_name only — never ingredients, so deriveIconCategory (which
+needs real ingredient names) has nothing to work from directly. Rather
+than guessing a category from the recipe NAME string, or skipping
+RecipeIcon on History entirely, useRecipeIconCategory.ts fetches the
+same already-existing GET /api/recipes/{id} the recommendation result
+view already uses for the identical reason (phase 8.3's own
+CookableResult), with a module-level Map<string, IconCategory> cache
+shared across every Ticket on the page — a History list can show the
+same recipe_id more than once (a favorite cooked twice, or recommended
+more than once without being cooked), and there's no reason to re-fetch
+and re-derive the same category twice. A failed fetch simply leaves no
+icon rather than guessing one, the same "don't fake it" rule RecipeIcon
+itself has followed since it was first built.
+
+
+6. STATE PATTERNS ON PAST, ALREADY-SETTLED RECORDS: KEPT THE VOCABULARY,
+   DROPPED THE FORWARD-LOOKING PART
+=============================================================
+A no-cookable interaction gets the identical Stamp-plus-plain-
+explanation vocabulary the live recommendation result view uses
+(signal-negative, "no match", the backend's own real explanation text)
+— but deliberately WITHOUT that view's own "concrete next action" (a
+Start-a-new-recommendation button), since a History entry is a
+historical record, not a live moment with something to retry. This is a
+real, judged departure from the result view's own pattern definition,
+recorded rather than silently applied: the task's own instruction was
+"consistent with how the result view treats them," read as "same
+honesty and same visual vocabulary," not "identical interactive
+affordances" for a fundamentally non-interactive log entry.
+
+
+7. PATCH-STYLE SCALAR EDITS: WHY THESE FIVE FIELDS DON'T NEED THE
+   DELTA TRICK PHASE 8.4's PANTRY EDIT NEEDED
+=============================================================
+household_size, preferred_cook_time_minutes, cooking_skill, budget_
+sensitivity, and protein_preference all REPLACE on write (preferences.
+py's own _validate_scalar path, confirmed by reading it directly rather
+than assuming every PATCH /api/profile field behaves like PATCH /api/
+pantry's own add-only quantity field did last phase) — only dietary_
+restrictions and disliked_ingredients are additive. Profile.tsx's own
+scalar-field Save buttons send the new value directly, with no delta
+computation needed; PreferenceListEditor's own add/remove calls map
+onto update_preferences (additive) and the new remove_preference
+(subtractive) respectively. Checking this distinction explicitly,
+rather than assuming every PATCH endpoint in this API behaves like the
+one already reverse-engineered last phase, is what kept the scalar-
+field editors simple instead of over-engineering a delta path they
+never needed.
+
+
+8. VERIFICATION: A REAL CUISINE-CONFIDENCE DEMONSTRATION, BUILT FROM A
+   REAL RATING, NOT STAGED NUMBERS
+=============================================================
+Static checks clean throughout (typecheck/lint/build before and after
+prettier; backend ruff/mypy/full suite, 510 passed — unchanged count,
+since the four fixture updates replaced existing assertions rather than
+adding new ones). Live verification started from the real profile
+(Mexican: 0.700, 2 ratings, already below the low-confidence threshold)
+and rated the real, still-unrated "Banana Pancakes" meal 5 stars through
+the actual UI — producing a SECOND real cuisine score, United States:
+0.625 from 1 rating, landing exactly on the task's own literal example
+numbers (0.625 from one 5-star rating) without being staged to hit them
+— they came out of the real _shrink_toward_neutral math run against
+real data. Both bars render with explicit score/count text and a
+lightened bar for the lower-confidence one; screenshot-confirmed
+distinguishable by three independent signals (the text, the bar width,
+the bar opacity), not just one.
+
+The dietary-restriction/disliked-ingredient add-and-synonym test used
+"scallions" specifically (this project's own recurring canonicalization
+example, confirmed against the real synonym table since phase 5.3) —
+typed "scallions," rendered back as "Green Onion" immediately, confirmed
+identical after a hard page reload and a direct GET /api/profile. The
+new DELETE /api/profile removal path was also exercised end to end
+(click the × on a real chip, confirmed removed both in the DOM and via
+a direct API check) — not just implemented and assumed to work because
+it typechecked.
+
+History showed 3 real Tickets on the meals tab (one with the live
+rating control) and 9 real interactions on the requests tab, including
+five genuine "no cookable recipe" runs from earlier phases' own live
+verification work — rendering the Negative pattern correctly on real,
+pre-existing data, not a constructed example. Rating Banana Pancakes
+produced the real Success-pattern render: a positive "rated" Stamp plus
+the actual live response text, "United States preference updated:
+0.625" — read directly from POST /api/history/{id}/rate's own real
+response, not a canned success message.
+
+Both empty states (Profile's cuisine section, both History tabs) were
+screenshot-verified by temporarily clearing the real preference_scores/
+meal_history/interaction_history tables — WITH EXPLICIT USER APPROVAL,
+since the permission classifier blocked the direct DELETE this time in
+a way it hadn't for phase 8.4's pantry/grocery_lists tables (a stricter,
+reasonable line drawn around these three tables specifically). 375px:
+no horizontal overflow on either page.
+
+
+9. THE INCIDENT: A WAL-MODE BACKUP THAT MISSED ITS OWN RECENT WRITES,
+   AND A REAL, UNRECOVERABLE LOSS
+=============================================================
+The backup taken before clearing the three tables (cp user_intelligence
+.db to /tmp, backend still running) turned out to have been taken from
+a STALE checkpoint — SQLite's WAL mode means a live server's own recent
+writes can sit in the -wal file, uncommitted to the main .db file, for
+an indeterminate time. A plain file-level cp of the main file alone,
+while the server is still live, can miss them — the exact same class of
+bug phase 8.4 already found and thought it had worked around by
+stopping the server before restoring. This time it bit the BACKUP side
+instead: the backup itself, taken while still running, was older than
+believed.
+
+Consequence, found and reported rather than discovered late or hidden:
+after restore, the live database was missing "Home-made Mandazi" — a
+real meal_history row (and its matching interaction_history row) that
+existed before this phase touched anything, was never created by this
+session's own actions, and could not be regenerated with a matching id/
+timestamp (recreating it would need a real photo/voice/text run through
+the full agent graph plus a real cook confirmation, an entirely
+different real record even if the recipe matched). Diagnosed properly
+this time, not just patched: comparing MD5 checksums of the backup file
+against the live file after restore showed they didn't match even
+though the restore command had "succeeded," and lsof against the
+running MCP subprocess PIDs (not the top-level uvicorn process, which
+holds none of the actual database file handles — the three MCP servers
+run as separate stdio subprocesses, each with its own real SQLite
+connection) confirmed a slow-dying prior process's own subprocess was
+still holding a WAL-mode connection open at backup time, capable of
+flushing its own (pre-edit) state onto the file after the naive kill +
+sleep 2 this project had been using was assumed sufficient.
+
+REPORTED TO THE USER DIRECTLY, NOT SILENTLY WORKED AROUND: stated
+plainly what was lost, why it couldn't be recovered, and what could be
+(this session's own edits — the Banana Pancakes rating and the two
+profile additions were redone through the real UI, since those were
+this session's own actions to begin with, unlike the pre-existing meal
+record). The user chose to continue rather than halt, and the loss is
+recorded here rather than treated as a footnote.
+
+THE ACTUAL FIX, CONFIRMED BEFORE TRUSTING IT: pkill -9 against BOTH the
+uvicorn process pattern AND the mealsight.mcp_servers pattern (not just
+the port-8000 listener), followed by re-checking `ps aux` showed zero
+matching processes, THEN the file copy, THEN an MD5 checksum comparison
+between the backup and the live file BEFORE restarting anything and
+BEFORE trusting the restore had worked. This is the discipline phase
+8.4's own "diagnose properly, verify the fix, don't just retry and
+hope" standard should have already produced — the difference this time
+was verifying the restore's own correctness with a checksum instead of
+just a row count, which is exactly what caught that the first "fixed"
+attempt (kill + sleep 2, no subprocess-level kill, no checksum check)
+hadn't actually worked.
+
+
+10. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+Reimplementing remove_preference's canonicalization logic in a new,
+frontend-callable form versus registering the real function as an MCP
+tool
+    Rejected reimplementing: the real function already existed, fully
+    built and already covered by domain-layer tests since phase 4.3 —
+    the only genuinely missing piece was a transport path to reach it.
+    Registering it as a tenth tool, mirroring update_preferences' own
+    error-handling shape exactly, was strictly less work and carries
+    zero duplication risk compared to writing a second, frontend-side
+    canonicalization path.
+
+Folding data_points into cuisine_preferences' own value shape (e.g.
+{score, data_points} per cuisine) versus a separate sibling dict
+    Rejected reshaping the existing field: cuisine_preferences already
+    has at least one other real consumer (reason.py's own prompt
+    builder, which reads it as a plain {cuisine: score} mapping) that
+    would have needed updating for no functional reason if its shape
+    changed. A sibling field is strictly additive — every existing
+    reader keeps working unmodified, and only new code that specifically
+    wants the confidence count needs to reach for the new key.
+
+Interleaving meal history and interaction history into one merged,
+date-sorted timeline versus two separate tabs
+    Rejected merging: the two records support fundamentally different
+    actions (only one is rateable) and carry very different information
+    density (a short row vs. a full transcript-and-response block).
+    Tabs let each list be read and acted on within its own consistent
+    shape; a merged view would have forced either a lowest-common-
+    denominator card design or constant visual context-switching between
+    two different card types on every scroll.
+
+Recreating the lost "Home-made Mandazi" meal record by hand (a direct
+INSERT matching its remembered fields) versus leaving the loss as-is
+and reporting it
+    Rejected fabricating a replacement row: even a field-for-field
+    reconstruction would carry a new id and a new cooked_at timestamp,
+    making it a DIFFERENT real database row presented as if it were the
+    original — closer to inventing data than recovering it. Reporting
+    the loss honestly and moving forward on the genuinely recoverable
+    parts (this session's own edits) was the more honest choice than
+    quietly patching over a gap with something that only resembled the
+    original.
+
+
+11. GLOSSARY
+=============================================================
+remove_preference (MCP tool)
+    This phase's own newly-registered tenth tool on user_intelligence
+    (mealsight/mcp_servers/user_intelligence/server.py) — a thin
+    wrapper over the already-existing domain function of the same name,
+    reached from the frontend via the new DELETE /api/profile.
+
+cuisine_preference_data_points
+    UserProfile's own new sibling field to cuisine_preferences — the
+    real, un-shrunk count of ratings behind each cuisine's own score,
+    read from preference_scores.data_points alongside score in the same
+    query.
+
+useRecipeIconCategory
+    The shared hook (src/lib/useRecipeIconCategory.ts) that fetches a
+    History entry's own recipe detail to derive its RecipeIcon category
+    from real ingredients, backed by a module-level cache shared across
+    every Ticket on the page.
+
+Tabs (History)
+    The chosen presentation for meal history vs. interaction history —
+    "Meals cooked" and "Requests" — documented directly in History.tsx's
+    own top comment, reported per this task's own explicit request to
+    state the choice and the reasoning.
+
+The WAL-checkpoint incident
+    This phase's own real, disclosed data-loss event: a live-server
+    file-level `cp` backup of user_intelligence.db captured a stale
+    checkpoint, and the subsequent restore permanently lost one real,
+    pre-existing meal_history row and its matching interaction_history
+    row. Fixed procedurally (pkill -9 on every real process holding a
+    connection, checksum-verify before trusting a restore) but the lost
+    data itself was not recoverable.
+
+
+12. INTERVIEW TALKING POINTS
+=============================================================
+Q: You'd already hit a WAL-mode restore bug in the previous phase and
+thought you'd fixed it. Why did a very similar bug bite you again here?
+
+    Because I fixed the SYMPTOM I'd diagnosed last time (a stale
+    restore, caused by not stopping the server first) without
+    generalizing to the actual underlying risk: ANY file-level copy of a
+    WAL-mode SQLite database, on either the read or the write side,
+    while ANY process might still hold a connection open, can be stale.
+    Last phase's fix (stop the server, then copy) happened to be
+    sufficient for THAT specific case because the stale connection was
+    the one I was actively managing. This time, the stale connection
+    belonged to a slow-dying PREVIOUS process I'd killed with a plain
+    kill + a fixed sleep, which isn't a guarantee of termination,
+    especially for a process with its own subprocesses. The lesson
+    generalized properly only after this second incident: kill by
+    process pattern (not just by port), confirm zero matches in ps
+    aux, and verify a restore with a checksum, not a row count that
+    could itself be read through a stale connection.
+
+Q: Why register remove_preference as a NEW mcp tool instead of, say,
+making update_preferences itself accept a "remove" mode as an extra
+parameter?
+
+    Because that would have changed a function's own established
+    contract (update_preferences REPLACES-or-appends, full stop) to grow
+    a second, different behavior behind a mode flag, which is exactly
+    the kind of implicit branching this codebase's own domain layer
+    consistently avoids elsewhere (see, for instance, how cook.py keeps
+    log_meal and remove_items as two separate calls with an explicit
+    ordering, rather than one call doing both). remove_preference
+    already existed as its own, separately-named, separately-tested
+    function with its own narrower contract — registering it as its own
+    tool keeps that same one-function-one-job shape at the transport
+    layer instead of collapsing two real operations into one
+    parameterized one.
+
+Q: The Negative pattern on a History interaction skips the "concrete
+next action" the same pattern requires on the live result view. Isn't
+that inconsistent with the design system's own stated rule?
+
+    It's a deliberate, judged exception, not an oversight — and the
+    task's own instruction ("consistent with how the result view treats
+    them") is about honesty and visual vocabulary (a negative Stamp, the
+    real explanation, never dressed up as neither a failure nor hidden),
+    not about mechanically copying every interactive element regardless
+    of context. A "concrete next action" makes sense on a LIVE result
+    because there's a real, current session to act on. A History entry
+    is a closed record of something that already happened; offering a
+    "start a new recommendation" button ON a specific old log entry
+    would imply a connection between that old request and a brand new
+    one that doesn't actually exist — Home already has its own always-
+    available way to start a new recommendation, so repeating that
+    affordance on every old Ticket would be redundant at best and
+    actively confusing at worst.

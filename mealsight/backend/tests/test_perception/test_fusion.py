@@ -170,6 +170,7 @@ def test_profile_defaults_apply_only_when_unspecified() -> None:
         cooking_skill="intermediate",
         budget_sensitivity="moderate",
         cuisine_preferences={},
+        cuisine_preference_data_points={},
     )
 
     # Unspecified — profile fills in.

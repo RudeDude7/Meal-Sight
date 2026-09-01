@@ -50,6 +50,14 @@ class UserProfile(BaseModel):
     cooking_skill: CookingSkill
     budget_sensitivity: BudgetSensitivity
     cuisine_preferences: dict[str, float]
+    # How many real ratings actually fed each cuisine's own score —
+    # preference_scores.data_points, never inflated by scoring.py's own
+    # smoothing prior (see PREFERENCE_SMOOTHING_PRIOR_WEIGHT). Added
+    # alongside cuisine_preferences, not folded into it, specifically so
+    # nothing that already reads cuisine_preferences as a plain {cuisine:
+    # score} mapping (mealsight.agent.nodes.reason's own prompt builder,
+    # for one) needs to change at all.
+    cuisine_preference_data_points: dict[str, int]
 
 
 class MealRecord(BaseModel):

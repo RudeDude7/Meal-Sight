@@ -45,12 +45,15 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 ServerName = Literal["recipe_engine", "pantry_manager", "user_intelligence"]
 
 # The tools each server is documented to expose (recipe_engine and
-# pantry_manager: six each, phase 2.4/3.3; user_intelligence: nine —
+# pantry_manager: six each, phase 2.4/3.3; user_intelligence: ten —
 # seven from phase 4.3 plus rate_meal added in the cook-confirmation
-# phase, plus record_interaction/get_interaction_history added in the
-# interaction-history phase) — the health check below fails loudly if a
-# server doesn't advertise every one of these, rather than letting a
-# partially-broken server silently join the pool.
+# phase, record_interaction/get_interaction_history added in the
+# interaction-history phase, and remove_preference added in the
+# profile/history frontend phase — it existed at the domain layer since
+# phase 4.3 but was never actually registered as an MCP tool until then)
+# — the health check below fails loudly if a server doesn't advertise
+# every one of these, rather than letting a partially-broken server
+# silently join the pool.
 EXPECTED_TOOLS: dict[ServerName, frozenset[str]] = {
     "recipe_engine": frozenset(
         {
@@ -76,6 +79,7 @@ EXPECTED_TOOLS: dict[ServerName, frozenset[str]] = {
         {
             "get_user_profile",
             "update_preferences",
+            "remove_preference",
             "log_meal",
             "rate_meal",
             "get_meal_history",

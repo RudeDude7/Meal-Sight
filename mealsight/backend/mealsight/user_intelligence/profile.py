@@ -34,11 +34,14 @@ async def _read_stored_values(user_db: Database) -> dict[str, Any]:
     return {row["key"]: json.loads(row["value"]) for row in rows}
 
 
-async def _read_cuisine_preferences(user_db: Database) -> dict[str, float]:
+async def _read_cuisine_preferences(user_db: Database) -> tuple[dict[str, float], dict[str, int]]:
     rows = await user_db.fetch_all(
-        "SELECT value, score FROM preference_scores WHERE dimension = 'cuisine' ORDER BY score DESC, value"
+        "SELECT value, score, data_points FROM preference_scores "
+        "WHERE dimension = 'cuisine' ORDER BY score DESC, value"
     )
-    return {row["value"]: row["score"] for row in rows}
+    scores = {row["value"]: row["score"] for row in rows}
+    data_points = {row["value"]: row["data_points"] for row in rows}
+    return scores, data_points
 
 
 async def get_user_profile(user_db: Database | None = None) -> UserProfile:
@@ -50,10 +53,15 @@ async def get_user_profile(user_db: Database | None = None) -> UserProfile:
     cuisine_preferences is a cuisine -> score mapping read live from
     preference_scores (dimension='cuisine'), sorted highest-scored
     first — an empty mapping, not an error, when nothing has been rated
-    yet.
+    yet. cuisine_preference_data_points is the real ratings-count behind
+    each of those scores, from the same table's own data_points column.
     """
     user_db = user_db or get_user_db()
     stored = await _read_stored_values(user_db)
     values = {**DEFAULT_PROFILE_VALUES, **stored}
-    cuisine_preferences = await _read_cuisine_preferences(user_db)
-    return UserProfile(**values, cuisine_preferences=cuisine_preferences)
+    cuisine_preferences, cuisine_preference_data_points = await _read_cuisine_preferences(user_db)
+    return UserProfile(
+        **values,
+        cuisine_preferences=cuisine_preferences,
+        cuisine_preference_data_points=cuisine_preference_data_points,
+    )

@@ -69,6 +69,7 @@ DEFAULT_INVENTORY: dict[str, list[str]] = {
     "user_intelligence": [
         "get_user_profile",
         "update_preferences",
+        "remove_preference",
         "log_meal",
         "rate_meal",
         "get_meal_history",

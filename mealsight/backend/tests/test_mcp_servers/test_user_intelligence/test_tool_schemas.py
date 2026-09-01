@@ -1,4 +1,4 @@
-"""Confirms the nine user-intelligence tools are all registered,
+"""Confirms the ten user-intelligence tools are all registered,
 described, and schema'd the way an MCP client (and, later, an agent
 selecting among them) actually needs — using the real FastMCP in-memory
 client, so this exercises the real MCP protocol, not just server.py's
@@ -13,6 +13,7 @@ from fastmcp import Client
 EXPECTED_TOOLS: dict[str, set[str]] = {
     "get_user_profile": set(),
     "update_preferences": {"preference_type", "value"},
+    "remove_preference": {"preference_type", "value"},
     "log_meal": {
         "recipe_id",
         "recipe_name",
@@ -45,7 +46,7 @@ EXPECTED_TOOLS: dict[str, set[str]] = {
 }
 
 
-async def test_all_nine_tools_are_listed_with_non_empty_descriptions(mcp_client: Client[Any]) -> None:
+async def test_all_ten_tools_are_listed_with_non_empty_descriptions(mcp_client: Client[Any]) -> None:
     tools = await mcp_client.list_tools()
     names = {t.name for t in tools}
 

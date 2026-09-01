@@ -39,6 +39,7 @@ from mealsight.user_intelligence import get_user_profile as _get_user_profile
 from mealsight.user_intelligence import log_meal as _log_meal
 from mealsight.user_intelligence import rate_meal as _rate_meal
 from mealsight.user_intelligence import record_interaction as _record_interaction
+from mealsight.user_intelligence import remove_preference as _remove_preference
 from mealsight.user_intelligence import update_preferences as _update_preferences
 from mealsight.utils.logging import get_logger
 
@@ -95,6 +96,34 @@ async def update_preferences(preference_type: str, value: Any) -> dict[str, Any]
         return validation_error(preference_type, str(exc))
     except Exception:
         logger.error("update_preferences_failed", exc_info=True, preference_type=preference_type)
+        return internal_error()
+
+
+@mcp.tool
+async def remove_preference(preference_type: str, value: str) -> dict[str, Any]:
+    """Removes one entry from an additive preference list and returns the
+    full, updated profile — the only way to shrink dietary_restrictions
+    or disliked_ingredients, since update_preferences only ever appends.
+
+    preference_type must be "dietary_restrictions" or
+    "disliked_ingredients"; value is canonicalized the same way it would
+    be on write (disliked_ingredients through normalize_ingredient +
+    the synonym table), so removing "scallions" correctly clears a
+    "green onion" entry that was stored under its own canonical name. A
+    value not currently present is a no-op, not an error — the profile
+    is returned unchanged.
+
+    Returns a structured {"error": "validation_error", ...} for any
+    other preference_type rather than raising.
+    """
+    try:
+        db = get_user_db()
+        result = await _remove_preference(preference_type, value, user_db=db)
+        return user_profile_to_dict(result)
+    except ValueError as exc:
+        return validation_error(preference_type, str(exc))
+    except Exception:
+        logger.error("remove_preference_failed", exc_info=True, preference_type=preference_type)
         return internal_error()
 
 

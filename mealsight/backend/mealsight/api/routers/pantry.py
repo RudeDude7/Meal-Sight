@@ -1,8 +1,9 @@
-"""GET/PATCH /api/pantry, DELETE /api/pantry/{item_id} — thin proxies
-onto pantry_manager's own get_pantry/update_pantry/remove_items tools
-through the shared MCPClientManager. No direct database access here;
-every response is exactly what the MCP tool itself returned (translated
-through mealsight.api.mcp_proxy for error shapes).
+"""GET/PATCH /api/pantry, GET /api/pantry/expiring, DELETE /api/pantry/
+{item_id} — thin proxies onto pantry_manager's own get_pantry/
+update_pantry/flag_expiring/remove_items tools through the shared
+MCPClientManager. No direct database access here; every response is
+exactly what the MCP tool itself returned (translated through
+mealsight.api.mcp_proxy for error shapes).
 
 DELETE by item_id specifically needs two real calls, not one:
 remove_items itself only ever addresses an item by NAME plus a
@@ -55,6 +56,22 @@ async def get_pantry(
 async def update_pantry(body: PantryUpdateRequest, manager: MCPManagerDep) -> dict[str, Any]:
     arguments = {"items": [item.model_dump() for item in body.items]}
     result = await manager.call_tool("pantry_manager", "update_pantry", arguments)
+    return unwrap_mcp_result(result)
+
+
+@router.get("/expiring")
+async def get_expiring_pantry_items(
+    manager: MCPManagerDep, days_threshold: int | None = None
+) -> dict[str, Any]:
+    """flag_expiring's own real suggested_action strings ("use today",
+    "freeze to extend", ...) previously existed only as an MCP tool with
+    no REST route — added here, thin-proxy style like every other
+    endpoint in this router, specifically so the frontend can render the
+    backend's own real copy rather than a second, drift-prone
+    reimplementation of _suggest_action's category-default table."""
+    result = await manager.call_tool(
+        "pantry_manager", "flag_expiring", {"days_threshold": days_threshold}
+    )
     return unwrap_mcp_result(result)
 
 

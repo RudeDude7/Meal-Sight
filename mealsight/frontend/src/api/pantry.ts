@@ -1,5 +1,6 @@
 import { apiRequest } from '@/api/client'
 import type {
+  ExpiringItem,
   FreshnessFilter,
   PantryItem,
   PantryItemInput,
@@ -40,4 +41,20 @@ export async function deletePantryItem(
   signal?: AbortSignal,
 ): Promise<RemovalResult> {
   return apiRequest<RemovalResult>(`/api/pantry/${itemId}`, { method: 'DELETE', signal })
+}
+
+export interface ExpiringPantryResponse {
+  items: ExpiringItem[]
+  count: number
+}
+
+/** GET /api/pantry/expiring — flag_expiring's own real suggested_action strings. */
+export async function getExpiringPantryItems(
+  daysThreshold?: number,
+  signal?: AbortSignal,
+): Promise<ExpiringPantryResponse> {
+  return apiRequest<ExpiringPantryResponse>('/api/pantry/expiring', {
+    query: daysThreshold !== undefined ? { days_threshold: daysThreshold } : {},
+    signal,
+  })
 }

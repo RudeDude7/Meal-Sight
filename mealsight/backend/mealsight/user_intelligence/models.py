@@ -140,10 +140,21 @@ class ContextSignals(BaseModel):
     calendar (see mealsight.user_intelligence.context's own hour/weekday
     boundary constants); context_notes is what cooking_patterns actually
     says about this day/hour, always at least one string even when
-    cooking_patterns has no rows at all yet."""
+    cooking_patterns has no rows at all yet.
+
+    temperature_f, conditions, and mood_suggestion are the optional
+    sixth (weather) signal — see mealsight.utils.weather's own module
+    docstring. All three are null together whenever weather data isn't
+    available (no API key configured, or the lookup failed) — never
+    partially populated, and never a reason for get_context_signals
+    itself to fail or for anything downstream to treat a recipe as
+    excluded."""
 
     model_config = ConfigDict(frozen=True)
 
     meal_type: MealType
     complexity_suggestion: str
     context_notes: list[str]
+    temperature_f: float | None = None
+    conditions: str | None = None
+    mood_suggestion: str | None = None

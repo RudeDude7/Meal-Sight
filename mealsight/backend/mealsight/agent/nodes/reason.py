@@ -178,6 +178,50 @@ def _format_recipe(recipe: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_context_signals(context_signals: dict[str, Any]) -> str:
+    """Renders get_context_signals' own output (meal_type,
+    complexity_suggestion, context_notes, and — when available —
+    temperature_f/conditions/mood_suggestion) as plain lines, instead of
+    a raw dict repr. The weather line is included ONLY when weather data
+    is actually present; when it's absent, this function emits nothing
+    for it at all, rather than a placeholder like "weather: unknown" —
+    an explicit absence in the prompt text is what lets SYSTEM_PROMPT's
+    own existing "mark not applicable, don't invent a rationale" rule
+    apply to weather exactly the way it already applies to every other
+    dimension the supplied data doesn't speak to, with no weather-
+    specific special case needed here.
+
+    mood_suggestion is stated as a SUGGESTION, matching this whole
+    project's own repeated framing (settings, prompt copy, docs) that
+    it must never act as a filter — worded here as "a possible cue", not
+    an instruction.
+    """
+    if not context_signals:
+        return "(none)"
+
+    lines = []
+    meal_type = context_signals.get("meal_type")
+    if meal_type:
+        lines.append(f"- meal_type: {meal_type}")
+    complexity_suggestion = context_signals.get("complexity_suggestion")
+    if complexity_suggestion:
+        lines.append(f"- complexity: {complexity_suggestion}")
+    for note in context_signals.get("context_notes") or []:
+        lines.append(f"- {note}")
+
+    temperature_f = context_signals.get("temperature_f")
+    conditions = context_signals.get("conditions")
+    mood_suggestion = context_signals.get("mood_suggestion")
+    if temperature_f is not None and conditions and mood_suggestion:
+        lines.append(
+            f"- current weather: {temperature_f:.0f}F, {conditions} "
+            f"(a possible cue toward {mood_suggestion} food — a suggestion only, "
+            "never a reason to exclude what the user actually asked for)"
+        )
+
+    return "\n".join(lines) if lines else "(none)"
+
+
 def _format_recent_meals(meal_history: list[dict[str, Any]]) -> str:
     if not meal_history:
         return "(none recorded)"
@@ -227,7 +271,8 @@ User preferences:
 Recent meals (avoid repeating these too soon):
 {_format_recent_meals(meal_history)}
 
-Context: {context_signals or "(none)"}
+Context:
+{_format_context_signals(context_signals)}
 
 Choose exactly one recipe id from the candidates above."""
 

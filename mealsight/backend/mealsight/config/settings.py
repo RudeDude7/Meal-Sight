@@ -61,8 +61,6 @@ class Settings(BaseSettings):
     groq_api_key: SecretStr
 
     # --- Optional / deferred secrets ---------------------------------------
-    # OpenWeatherMap integration is deferred; the field exists so config
-    # loading doesn't need to change when that feature is built.
     openweather_api_key: SecretStr | None = None
 
     # --- Model configuration (benchmark-derived, see docs/VISION_FINDINGS.md) ---
@@ -143,6 +141,23 @@ class Settings(BaseSettings):
 
     # --- External APIs --------------------------------------------------------
     themealdb_base_url: str = "https://www.themealdb.com/api/json/v1/1"
+
+    # --- Weather (OpenWeatherMap) -----------------------------------------------
+    # openweather_api_key is OPTIONAL — see mealsight.utils.weather's own
+    # module docstring for the full degrade-silently contract when it's
+    # absent or the API fails.
+    openweather_base_url: str = "https://api.openweathermap.org/data/2.5"
+    # There is no login and no stored user location anywhere in this system
+    # (no request path anywhere in mealsight.api ever collects one) — a
+    # fixed configured default is the honest, simplest answer, not a stand-
+    # in for geolocation the frontend was never asked to provide. Latitude/
+    # longitude, not a city name string: OpenWeatherMap's own docs prefer
+    # coordinate lookup over city-name matching, which is ambiguous (many
+    # cities share a name) and increasingly deprecated in their API.
+    # Defaults to Raleigh, NC; override via env (DEFAULT_WEATHER_LAT/
+    # DEFAULT_WEATHER_LON) for a real single-tenant deployment elsewhere.
+    default_weather_lat: float = 35.7796
+    default_weather_lon: float = -78.6382
 
     def get_rate_limit(self, model_id: str) -> RateLimitSpec:
         """Looks up the rate limit for a model by id.

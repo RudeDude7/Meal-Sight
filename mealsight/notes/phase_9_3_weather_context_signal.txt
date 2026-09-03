@@ -1,0 +1,420 @@
+PHASE 9.3 STUDY NOTES: WEATHER AS THE SIXTH REASONING DIMENSION — AN
+ENTIRELY OPTIONAL SIGNAL, NEVER A FILTER, WIRED THROUGH FOUR LAYERS
+=============================================================
+
+The system already advertised six reasoning dimensions
+(ingredient_match, freshness, nutrition, variety, context, taste) but
+context_reasoning had no weather signal to draw on at all — user_
+intelligence/context.py's own docstring said so explicitly ("Weather is
+deliberately out of scope: no weather API exists anywhere in this
+project"), and mcp_servers/user_intelligence/server.py's get_context_
+signals tool docstring said the same thing even more bluntly ("there is
+no weather data anywhere in this system"). This phase adds it, end to
+end: a new optional HTTP client, two new ContextSignals fields, a
+reworked reasoning-prompt formatter, and a settings-only location
+default — then, in a same-phase follow-up, retargets that default from
+a New York placeholder to Raleigh, NC.
+
+Files edited: backend/mealsight/{config/settings.py,user_intelligence/
+{context.py,models.py},mcp_servers/user_intelligence/{server.py,
+serialization.py},agent/nodes/reason.py}, backend/tests/{test_utils/
+test_weather.py (new package),test_user_intelligence/test_context.py,
+test_agent/test_nodes.py}, frontend/src/types/profile.ts, .env.example.
+File added: backend/mealsight/utils/weather.py.
+
+
+1. READ FIRST, PER THE TASK'S OWN INSTRUCTION: WHAT ACTUALLY EXISTED
+   BEFORE ANY WEATHER CODE WAS WRITTEN
+=============================================================
+get_context_signals returned exactly three fields (meal_type,
+complexity_suggestion, context_notes), all derived from the clock and
+cooking_patterns — nothing external. settings.py carried an openweather
+_api_key field already, but it was explicitly commented as deferred,
+and there was no openweather_base_url field at all despite the task's
+own framing implying one existed — a real discrepancy, reported before
+writing rather than silently assumed away. get_context.py (the agent
+node) already forwarded get_context_signals' own dict wholesale into
+state, meaning extending the model's shape would flow through the
+whole pipeline with zero changes needed to that node — confirmed by
+reading it, not assumed. reason.py's own prompt dumped context_signals
+as a raw Python dict repr (Context: {context_signals or "(none)"}) —
+functional but never actually formatted. The frontend already had an
+unused ContextSignals TypeScript interface (types/profile.ts) mirroring
+the backend model, and ReasoningPanel.tsx already rendered whatever
+free text a dimension's own reasoning field contained, generically,
+for all six dimensions — meaning no new frontend logic was needed
+specifically for weather at all, only type-completeness.
+
+
+2. THE WEATHER CLIENT: mealsight/utils/weather.py, MODELED ON THE
+   PROJECT'S OWN EXISTING NON-LLM EXTERNAL-API CONVENTION
+=============================================================
+mealsight.seed.recipes_from_mealdb.py already talks to a non-LLM
+external API (TheMealDB) through mealsight.providers.retry.
+request_with_retry, with provider="themealdb", model_id="n/a" (the
+model_id parameter is LLM-specific and only used for log labeling
+here). weather.py follows that exact pattern rather than inventing a
+second retry policy — provider="openweathermap", same request_with_
+retry, same settings.llm_max_retries/llm_retry_backoff.
+
+get_current_weather(lat=None, lon=None) -> WeatherSnapshot | None:
+    - Checks settings.openweather_api_key FIRST, before any network
+      activity — absent or blank returns None immediately, touching
+      neither the cache nor the network. This is what makes the
+      "missing key" test provably network-free: it registers zero
+      respx routes and relies on respx raising if any request were
+      actually attempted.
+    - Resolves lat/lon from explicit arguments or settings.default_
+      weather_lat/lon (section 4).
+    - Checked against an in-memory dict cache, keyed by (lat, lon),
+      TTL WEATHER_CACHE_TTL_SECONDS (3600 — one hour, matching the
+      task's own "weather doesn't change meaningfully within an hour"
+      framing and the free tier's 1,000 calls/day budget).
+    - NEVER RAISES: a ProviderError from request_with_retry, any other
+      unexpected exception, a non-200 response (a 401 from a bad key
+      comes back as a plain response, not an exception — request_with_
+      retry only raises once RETRYABLE_STATUS_CODES are exhausted), or
+      an unparseable body — all become a warning-level log line and a
+      None return.
+    - A FAILED lookup is cached too, for the same TTL as a success —
+      deliberate: a misconfigured or exhausted key shouldn't retry the
+      network on every single agent run for the next hour.
+
+No database table, per the task's own explicit instruction — the exact
+same in-process, no-external-store reasoning mealsight.api.idempotency.
+IdempotencyStore and mealsight.api.sessions.SessionStore already made
+for the identical single-process deployment shape.
+
+
+3. THE MOOD MAPPING: ONE DOCUMENTED PLACE, TEMPERATURE BANDS
+   COMBINED WITH CONDITION-STRING MEMBERSHIP
+=============================================================
+_derive_mood_suggestion(temperature_f, condition_main) is the single
+place conditions map to food character, per the task's own explicit
+requirement:
+
+    cold (<=50F) OR rainy (Thunderstorm/Drizzle/Rain) OR snowy (Snow)
+        -> "warm, hearty, comforting"
+    hot (>=85F)
+        -> "light, cold, fresh"
+    otherwise (mild, and neither rainy nor snowy)
+        -> "no strong signal" (stated plainly, never a fabricated cue)
+
+"Cold"/"hot" are temperature bands; "rainy"/"snowy" are condition-
+string membership, independent of temperature — a 60F rainy day still
+reads as comforting-food weather even though 60F alone would be mild.
+50F/85F are documented, round, defensible judgment-call thresholds, not
+benchmark-derived constants the way settings' own model rate limits
+are — recorded as such rather than dressed up as more rigorous than
+they are.
+
+THE MOOD SUGGESTION IS A SUGGESTION, NEVER A FILTER — verified two
+separate ways in this phase's own live runs, not just asserted in
+prose: the reason.py prompt text itself says so explicitly ("a
+suggestion only, never a reason to exclude what the user actually
+asked for"), and a real end-to-end run (section 6) chose a hot, hearty
+beef chili while the real weather that day was 85.78F/"light, cold,
+fresh" — the model was never blocked from recommending the
+"wrong-temperature" dish, and in this case didn't even cite weather in
+its own context_reasoning at all, correctly judging it didn't
+materially bear on a decision that was really about cookability.
+
+
+4. LOCATION: NO LOGIN, NO STORED LOCATION — A CONFIGURED DEFAULT,
+   REPORTED AS A CHOICE, LATER RETARGETED TO RALEIGH
+=============================================================
+No request path anywhere in mealsight.api ever collects a user
+location, and the frontend has no geolocation input to report one
+with — inventing frontend geolocation the task explicitly warned
+against fabricating. settings.default_weather_lat/default_weather_lon
+is the single configured default every request resolves to unless a
+caller explicitly passes its own lat/lon.
+
+Coordinates, not a city-name string: OpenWeatherMap's own docs prefer
+coordinate lookup over city-name matching, which is ambiguous (many
+cities share a name) and increasingly deprecated in their API. This
+phase's initial default was New York, NY (40.7128, -74.0060) — a
+placeholder pick with no other significance — and a same-phase, user-
+requested follow-up retargeted it to Raleigh, NC (35.7796, -78.6382),
+both in settings.py's own default and newly added to .env.example
+(DEFAULT_WEATHER_LAT/DEFAULT_WEATHER_LON) with a comment naming them as
+per-deployment overrides.
+
+A REAL, HONEST WRINKLE FROM THE RALEIGH VERIFICATION CALL, WORTH
+RECORDING RATHER THAN GLOSSING OVER: OpenWeatherMap's own reverse-
+geocoded "name" field for (35.7796, -78.6382) came back as "Wake" (Wake
+County, NC — the county Raleigh is the seat of), country "US" — not the
+literal string "Raleigh". Reported exactly as observed rather than
+claimed as an exact name match: the coordinates are correct (downtown
+Raleigh's own), the country is correct, and "Wake" is a real quirk of
+OpenWeatherMap's nearest-station reverse-geocoding database, not
+anything wrong on this project's own end.
+
+
+5. WIRING THROUGH THE PIPELINE: MODEL, MCP SERVER, AGENT NODE
+=============================================================
+ContextSignals (user_intelligence/models.py) gained three new optional
+fields — temperature_f, conditions, mood_suggestion — all null
+together whenever weather isn't available, never partially populated.
+get_context_signals (context.py) calls get_current_weather() once and
+unpacks it into those three fields (or three Nones). No try/except
+needed at this call site: get_current_weather already can't raise.
+
+mcp_servers/user_intelligence/server.py's own get_context_signals tool
+docstring, which flatly asserted no weather data existed anywhere in
+the system, was corrected to describe the real, optional contract.
+serialization.py's context_signals_to_dict needed no code change at
+all (it's a plain model_dump) — only its own docstring, updated to name
+the three new fields.
+
+agent/nodes/get_context.py needed ZERO changes — confirmed by reading
+it first, per this whole project's own standing discipline. It already
+forwards get_context_signals' full dict into state["context_signals"]
+wholesale; extending the model's shape flows through automatically.
+
+
+6. WIRING INTO THE REASONING PROMPT: A REAL FORMATTER, NOT A RAW DICT
+   DUMP, AND A MEASURED TOKEN-BUDGET IMPACT
+=============================================================
+reason.py's Context: {context_signals or "(none)"} raw-dict-repr line
+was replaced with a new _format_context_signals helper (matching this
+node's own existing _format_ingredients/_format_constraints/_format_
+recipe pattern) that renders meal_type, complexity_suggestion, and
+every context_note as plain lines, PLUS a weather line — but only when
+temperature_f, conditions, AND mood_suggestion are all present
+together. When any is missing, no weather line is emitted at all —
+deliberately not a placeholder like "weather: unknown" — which is what
+lets SYSTEM_PROMPT's own pre-existing, generic "for any dimension the
+data doesn't speak to, mark not-applicable rather than inventing a
+rationale" rule apply to weather exactly the way it already applies to
+every other dimension, with no weather-specific special case needed in
+the system prompt itself.
+
+TOKEN COUNT, MEASURED DIRECTLY (not estimated) with the same real
+unified request/candidates used in section 7's live run:
+    without weather fields: 208 tokens
+    with weather fields:    250 tokens
+    delta:                  42 tokens
+
+Against the 375K TPM budget mistral-medium-2505 runs under, a
+one-line weather addition costing ~42 tokens per request is a rounding
+error, not a budget concern — recorded as a real, measured number
+rather than an assumption that it would be small.
+
+
+7. LIVE VERIFICATION: A REAL WEATHER CALL, A REAL RECOMMENDATION WITH
+   WEATHER PRESENT, AND THE SAME RUN WITH THE KEY REMOVED
+=============================================================
+Real OpenWeatherMap call (New York default, before the Raleigh
+retarget):
+    temperature_f: 85.78
+    conditions: scattered clouds
+    mood_suggestion: light, cold, fresh          (85.78F >= 85F hot threshold)
+
+Real end-to-end reasoning run, weather present, real ground beef/beans/
+tomatoes/onion pantry against two candidates (a cookable beef chili, an
+uncookable salad missing lettuce/cucumber):
+    chosen_recipe_id: chili-001
+    context_reasoning.applies: False
+    context_reasoning.reasoning: "No cooking history or explicit
+    context constraints to apply."
+
+Worth stating plainly rather than smoothing over: the model had
+85.78F/"light, cold, fresh" available in the prompt and chose NOT to
+cite it, marking context not-applicable instead. This is the CORRECT
+behavior, not a miss — the only cookable candidate already fully
+determined the choice, and the model correctly judged that weather
+didn't materially bear on a decision that was really about
+cookability, rather than manufacturing a weather-flavored rationale
+just because the data was present. This is also direct, real evidence
+that mood_suggestion behaves as a suggestion, not a filter: nothing
+about a "light, cold, fresh" cue blocked a hot, hearty chili from being
+recommended.
+
+Same run, key cleared (settings.openweather_api_key = None set
+directly before the call, in a fresh process — real settings mutation,
+not a mock):
+    temperature_f/conditions/mood_suggestion: None, None, None
+    prompt token count: 208 (identical to "without weather fields")
+    context_reasoning.applies: True
+    context_reasoning.reasoning: "Both recipes fit the cook time
+    constraint (50 min and 15 min are under 60 min), but chili-001 is
+    preferred because it is cookable (can_cook true) over salad-002
+    (can_cook false)."
+
+Confirms exact, clean degradation: identical token count to the
+no-weather-fields baseline, and the model reasons completely normally
+with zero mention of weather — exactly today's pre-feature behavior,
+per the task's own explicit requirement.
+
+Real Raleigh-retarget verification call (section 4's own wrinkle):
+    default_weather_lat: 35.7796
+    default_weather_lon: -78.6382
+    OpenWeatherMap resolved location name: 'Wake'
+    OpenWeatherMap resolved country: 'US'
+    temperature_f: 98.38
+    conditions: clear sky
+    mood_suggestion: light, cold, fresh
+
+
+8. STATIC VERIFICATION
+=============================================================
+Backend: ruff check clean, mypy --strict clean (120 source files, one
+real error caught and fixed along the way — see section 9), full
+pytest suite 554 passed / 3 deselected (24 new tests: the weather
+client's own missing-key/API-failure/cache/mood-mapping tests in the
+new tests/test_utils/ package, get_context_signals' weather-present/
+weather-absent tests, and reason.py's weather-included/weather-omitted/
+token-count-delta tests). Frontend: typecheck clean, eslint clean (0
+warnings), production build succeeded unchanged in size (245.92 kB JS /
+18.04 kB CSS gzipped — weather added zero frontend bundle weight, since
+no new component was needed).
+
+
+9. ERRORS AND FIXES ALONG THE WAY
+=============================================================
+mypy --strict caught one real error: the params dict passed to
+client.get() mixed str and float values, inferred as dict[str, object]
+— incompatible with httpx's own accepted params type. Fixed with an
+explicit dict[str, str | float] annotation rather than loosening the
+call itself.
+
+Three real errors surfaced while writing this phase's own live-
+verification script (not in the production code, but worth recording
+since they're the kind of mistake this project's own established
+conventions specifically exist to prevent): AvailableIngredient's
+required source field was omitted from a hand-built test payload
+(pydantic caught it immediately); `from mealsight.agent.nodes import
+reason as reason_module` silently bound the RE-EXPORTED reason
+FUNCTION (agent/nodes/__init__.py does `from mealsight.agent.nodes.
+reason import reason`, shadowing the submodule's own name in the
+package's attribute namespace) rather than the reason MODULE —
+resolved the same way tests/test_agent/test_nodes.py already does,
+with importlib.import_module("mealsight.agent.nodes.reason") instead
+of a plain dotted import, sidestepping the attribute-shadowing entirely.
+
+
+10. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+A city-name string for the default location versus coordinates
+    Rejected the city name: OpenWeatherMap's own docs prefer coordinate
+    lookup, and a city name is genuinely ambiguous (many cities share a
+    name) in a way a fixed lat/lon pair isn't.
+
+Caching only successful weather lookups versus caching failures too
+    Rejected caching only successes: a misconfigured or exhausted key
+    would otherwise retry the network on every single agent run for a
+    full hour of failures, wasting calls against the free tier's own
+    1,000/day budget for no benefit — a failed lookup is exactly as
+    stable as a successful one for caching purposes at this TTL.
+
+Injecting a weather-fetching callable as a parameter into get_context_
+signals versus importing get_current_weather directly and monkey-
+patching the imported name in tests
+    Rejected the injected-callable approach: this project's own
+    established convention for optional external services (processor.
+    py's analyze_text_input/analyze_voice_memo against get_text_
+    provider(), for one) is a module-level singleton getter, mocked at
+    the imported-name level in tests — matching that convention kept
+    context.py's own signature unchanged and consistent with how every
+    other external dependency in this codebase is already tested.
+
+A weather-specific "mark not-applicable" instruction in reason.py's
+SYSTEM_PROMPT versus relying on the existing generic rule
+    Rejected adding a special case: SYSTEM_PROMPT already instructs
+    marking any dimension the supplied data doesn't speak to as not-
+    applicable rather than inventing a rationale. Simply never emitting
+    a weather line in the prompt when it's absent is sufficient for
+    that existing rule to cover weather too — an explicit new
+    instruction would have been redundant, not more correct.
+
+Emitting a placeholder line ("weather: unknown") when weather is
+absent versus omitting the line entirely
+    Rejected the placeholder: an explicit absence in the prompt text is
+    what the existing SYSTEM_PROMPT rule is designed to key off of — a
+    "weather: unknown" line would itself be data the model has to
+    interpret, right where the whole point was to give it nothing to
+    interpret at all.
+
+A database table for the weather cache versus an in-memory dict
+    Rejected a database table, per the task's own explicit instruction
+    — the exact same in-process, no-external-store reasoning this
+    project's own IdempotencyStore and SessionStore already established
+    for equivalent ephemeral, process-local state.
+
+
+11. GLOSSARY
+=============================================================
+mealsight.utils.weather.get_current_weather
+    The one entry point — never raises, returns WeatherSnapshot | None,
+    resolves location from explicit args or settings' own default,
+    cached per (lat, lon) for WEATHER_CACHE_TTL_SECONDS.
+
+WeatherSnapshot
+    temperature_f (Fahrenheit), conditions (OpenWeatherMap's own
+    lowercased human-readable description), mood_suggestion (one of
+    this module's three documented constants — never model-invented).
+
+_derive_mood_suggestion
+    The one documented place conditions map to food character —
+    temperature bands (cold <=50F, hot >=85F) combined with condition-
+    string membership (rainy/snowy), independent of each other.
+
+default_weather_lat / default_weather_lon (settings)
+    The single configured location every request resolves to absent an
+    explicit override — Raleigh, NC as of this phase's own follow-up,
+    also settable via .env's DEFAULT_WEATHER_LAT/DEFAULT_WEATHER_LON.
+
+_format_context_signals (reason.py)
+    Renders the context dimension's own data as plain prompt lines;
+    emits a weather line only when all three weather fields are
+    present together, letting SYSTEM_PROMPT's existing not-applicable
+    rule cover its absence with no special case.
+
+
+12. INTERVIEW TALKING POINTS
+=============================================================
+Q: Your own live run shows the model didn't even mention weather in its
+context_reasoning even though weather was right there in the prompt.
+Doesn't that mean the feature isn't actually working?
+
+    No — it means the feature is working exactly as specified. The
+    task's own requirement was that mood_suggestion is a suggestion fed
+    into the prompt as context, never a filter, and that the model
+    should mark a dimension not-applicable rather than invent a
+    rationale when the data doesn't actually bear on its decision. In
+    that specific run, the only cookable candidate already fully
+    determined the outcome — citing weather anyway would have been
+    exactly the "inventing a rationale" behavior the system prompt
+    explicitly forbids. The token-count numbers and the with/without-key
+    comparison both prove the wiring itself works; this particular
+    decision just didn't need it, and the model said so honestly instead
+    of padding its reasoning.
+
+Q: OpenWeatherMap returned "Wake" instead of "Raleigh" for the new
+default coordinates. Did you get the coordinates wrong?
+
+    No — 35.7796, -78.6382 are downtown Raleigh's own coordinates, and
+    the country came back correctly as US. "Wake" is Wake County, NC,
+    which Raleigh is the seat of — a real quirk of OpenWeatherMap's own
+    nearest-station reverse-geocoding database, not a location error on
+    this project's end. I reported the raw API result exactly as
+    returned rather than rounding it up to "confirmed as Raleigh,"
+    since the task specifically asked to confirm the returned
+    conditions were for Raleigh, and the honest answer is "the
+    coordinates and country check out; the name string OpenWeatherMap
+    itself returns is a county name, not the city name."
+
+Q: Why cache a FAILED weather lookup for the same hour as a successful
+one, instead of retrying sooner?
+
+    Because the two most likely failure causes — a missing/invalid key
+    or the API being genuinely down — are both things that won't
+    resolve themselves within the next few minutes, and this project's
+    own agent runs happen far more often than once an hour. Retrying on
+    every single run during an outage or a misconfiguration would burn
+    through the free tier's 1,000-calls/day budget for a feature that's
+    explicitly supposed to degrade silently anyway — caching the
+    failure costs nothing extra to the user (they already got a clean
+    "no weather" result immediately) and protects the budget for when
+    the key actually starts working again.

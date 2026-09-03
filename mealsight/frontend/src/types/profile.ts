@@ -69,6 +69,15 @@ export interface ContextSignals {
   meal_type: MealType
   complexity_suggestion: string
   context_notes: string[]
+  // Optional sixth (weather) signal — null together whenever no weather
+  // data is available (see backend mealsight.utils.weather). Not
+  // currently rendered directly anywhere; the model's own free-text
+  // context_reasoning (ReasoningPanel.tsx) is what actually surfaces
+  // weather to the user, the same way it already surfaces every other
+  // context signal.
+  temperature_f: number | null
+  conditions: string | null
+  mood_suggestion: string | null
 }
 
 /**

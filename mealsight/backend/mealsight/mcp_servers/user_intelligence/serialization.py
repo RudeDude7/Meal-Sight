@@ -79,7 +79,9 @@ def interaction_history_to_dict(records: list[InteractionRecord]) -> dict[str, A
 
 
 def context_signals_to_dict(signals: ContextSignals) -> dict[str, Any]:
-    """Shape: {"meal_type", "complexity_suggestion", "context_notes"}.
-    context_notes is always at least one string, even with no cooking
-    history at all."""
+    """Shape: {"meal_type", "complexity_suggestion", "context_notes",
+    "temperature_f", "conditions", "mood_suggestion"}. context_notes is
+    always at least one string, even with no cooking history at all;
+    the three weather fields are null together whenever weather data
+    isn't available."""
     return signals.model_dump(mode="json")

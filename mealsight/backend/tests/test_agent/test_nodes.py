@@ -1329,6 +1329,94 @@ def test_reason_prompt_token_count_is_reasonable() -> None:
     assert tokens < 5000
 
 
+def test_reason_prompt_includes_weather_when_present() -> None:
+    candidates: list[dict[str, Any]] = [
+        {
+            "recipe_id": "r1",
+            "name": "Chili",
+            "cuisine": "american",
+            "cook_time_minutes": 30,
+            "match_score": 0.8,
+        }
+    ]
+    context_signals = {
+        "meal_type": "dinner",
+        "complexity_suggestion": "Monday — a weeknight; favor something quick.",
+        "context_notes": ["No cooking history recorded for Monday around this hour yet."],
+        "temperature_f": 28.0,
+        "conditions": "light snow",
+        "mood_suggestion": "warm, hearty, comforting",
+    }
+    prompt = reason_module.build_prompt(_unified(), candidates, [], {}, [], context_signals)
+
+    assert "28F" in prompt
+    assert "light snow" in prompt
+    assert "warm, hearty, comforting" in prompt
+
+
+def test_reason_prompt_omits_weather_cleanly_when_absent() -> None:
+    candidates: list[dict[str, Any]] = [
+        {
+            "recipe_id": "r1",
+            "name": "Chili",
+            "cuisine": "american",
+            "cook_time_minutes": 30,
+            "match_score": 0.8,
+        }
+    ]
+    context_signals = {
+        "meal_type": "dinner",
+        "complexity_suggestion": "Monday — a weeknight; favor something quick.",
+        "context_notes": ["No cooking history recorded for Monday around this hour yet."],
+        "temperature_f": None,
+        "conditions": None,
+        "mood_suggestion": None,
+    }
+    prompt = reason_module.build_prompt(_unified(), candidates, [], {}, [], context_signals)
+
+    assert "weather" not in prompt.lower()
+    # The rest of the context dimension is completely unaffected by
+    # weather's absence.
+    assert "dinner" in prompt
+    assert "Monday" in prompt
+
+
+def test_reason_prompt_token_count_barely_changes_with_weather_present() -> None:
+    candidates: list[dict[str, Any]] = [
+        {
+            "recipe_id": "r1",
+            "name": "Chili",
+            "cuisine": "american",
+            "cook_time_minutes": 30,
+            "match_score": 0.8,
+        }
+    ]
+    without_weather = {
+        "meal_type": "dinner",
+        "complexity_suggestion": "quick",
+        "context_notes": ["none"],
+    }
+    with_weather = {
+        **without_weather,
+        "temperature_f": 28.0,
+        "conditions": "light snow",
+        "mood_suggestion": "warm, hearty, comforting",
+    }
+
+    tokens_before = reason_module.prompt_token_count(
+        reason_module.build_prompt(_unified(), candidates, [], {}, [], without_weather)
+    )
+    tokens_after = reason_module.prompt_token_count(
+        reason_module.build_prompt(_unified(), candidates, [], {}, [], with_weather)
+    )
+
+    # The one-line weather addition costs a real but small handful of
+    # tokens against the 375K TPM budget this prompt runs against, not a
+    # step change in prompt size.
+    assert tokens_after > tokens_before
+    assert tokens_after - tokens_before < 60
+
+
 # --------------------------------------------------------------------
 # generate_output
 # --------------------------------------------------------------------

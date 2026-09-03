@@ -1,17 +1,20 @@
-"""get_context_signals / record_cooking_pattern — turns wall-clock time
-and observed cooking history into a small set of situational hints for
-an agent deciding what to suggest right now: what meal_type this hour
-usually is, how elaborate a recipe today's day of week can typically
-support, and whether the user actually has a track record of cooking
-at this specific day/hour at all.
+"""get_context_signals / record_cooking_pattern — turns wall-clock time,
+observed cooking history, and (when available) current weather into a
+small set of situational hints for an agent deciding what to suggest
+right now: what meal_type this hour usually is, how elaborate a recipe
+today's day of week can typically support, whether the user actually
+has a track record of cooking at this specific day/hour at all, and —
+the sixth, optional signal — what the weather right now suggests about
+food character.
 
-Weather is deliberately out of scope: no weather API exists anywhere in
-this project (mealsight.config.settings even carries an explicitly
-deferred openweather_api_key field for exactly this reason — see that
-module's own comment), and this module does not add one. Every signal
-here comes from the clock and from cooking_patterns, nothing external.
-
-Deterministic, no LLM calls.
+meal_type, complexity_suggestion, and context_notes are deterministic,
+no LLM calls, exactly as before. The weather fields
+(temperature_f/conditions/mood_suggestion) go through
+mealsight.utils.weather.get_current_weather, which is itself entirely
+optional and silent about failure — see that module's own docstring for
+the full contract. This function never lets a weather lookup failure
+propagate: get_current_weather already returns None rather than raising
+on any failure, so there is nothing to catch here.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from datetime import datetime
 from mealsight.db import get_user_db
 from mealsight.db.connection import Database
 from mealsight.user_intelligence.models import ContextSignals, MealType
+from mealsight.utils.weather import get_current_weather
 
 # Hour boundaries for meal_type, each [start, end) in 24-hour local
 # time, chosen to cover the full day with no gaps: anything not
@@ -100,6 +104,11 @@ async def get_context_signals(
     one note, even on a completely empty cooking_patterns table (a
     plain "no history yet" note, never an empty list or an error).
 
+    temperature_f/conditions/mood_suggestion: current weather and its
+    derived food-character suggestion, or all three null together when
+    no weather data is available right now (no API key configured, or
+    the lookup failed) — see mealsight.utils.weather.
+
     current_time defaults to right now; day_of_week defaults to
     current_time's own weekday (Monday=0 ... Sunday=6) but can be
     overridden independently of it — current_time still supplies the
@@ -112,11 +121,15 @@ async def get_context_signals(
     meal_type = _meal_type_from_hour(current_time.hour)
     complexity_suggestion = _complexity_suggestion(resolved_day_of_week)
     behavioral_note = await _behavioral_note(user_db, resolved_day_of_week, current_time.hour)
+    weather = await get_current_weather()
 
     return ContextSignals(
         meal_type=meal_type,
         complexity_suggestion=complexity_suggestion,
         context_notes=[behavioral_note],
+        temperature_f=weather.temperature_f if weather else None,
+        conditions=weather.conditions if weather else None,
+        mood_suggestion=weather.mood_suggestion if weather else None,
     )
 
 

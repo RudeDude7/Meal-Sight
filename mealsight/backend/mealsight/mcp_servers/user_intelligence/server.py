@@ -292,12 +292,18 @@ async def get_context_signals(
     meal_type this hour usually is, a plain-language complexity_
     suggestion for today's day of week (SUGGESTION only, never a hard
     filter — Friday through Sunday leaves room for something more
-    elaborate, Monday through Thursday favors something quick), and
+    elaborate, Monday through Thursday favors something quick),
     context_notes — whether the user actually has a track record of
-    cooking around this day/hour, read from logged history.
+    cooking around this day/hour, read from logged history — and,
+    optionally, current weather (temperature_f, conditions,
+    mood_suggestion — a SUGGESTION only, never a filter, and never a
+    reason to exclude a recipe).
 
-    Deliberately has no weather signal at all — there is no weather data
-    anywhere in this system.
+    Weather is entirely optional: temperature_f/conditions/
+    mood_suggestion come back null together whenever no OpenWeatherMap
+    API key is configured or the lookup fails for any reason — see
+    mealsight.utils.weather's own module docstring. Every other field
+    behaves exactly as it always has.
 
     current_time and day_of_week both default to the real current
     moment when omitted; day_of_week (Monday=0 ... Sunday=6) can be
@@ -305,7 +311,9 @@ async def get_context_signals(
 
     Returns {"meal_type" ("breakfast"|"lunch"|"dinner"|"snack"),
     "complexity_suggestion", "context_notes" (always at least one
-    string, even with zero cooking history logged)}.
+    string, even with zero cooking history logged), "temperature_f",
+    "conditions", "mood_suggestion" (the last three null together when
+    weather is unavailable)}.
     """
     try:
         db = get_user_db()

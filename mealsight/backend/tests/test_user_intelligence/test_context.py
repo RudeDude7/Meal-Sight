@@ -5,9 +5,13 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+import pytest
+
 from mealsight.db.connection import Database
+from mealsight.user_intelligence import context as context_module
 from mealsight.user_intelligence.context import get_context_signals
 from mealsight.user_intelligence.meal_history import log_meal
+from mealsight.utils.weather import WeatherSnapshot
 
 
 async def test_meal_type_boundaries(user_db: Database) -> None:
@@ -76,3 +80,48 @@ async def test_cooking_patterns_cook_count_increments_across_calls(
     # they land in the same day/hour cell.
     assert len(rows) == 1
     assert rows[0]["cook_count"] == 2
+
+
+async def test_weather_absent_degrades_to_todays_behavior_exactly(
+    user_db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # get_current_weather already returns None whenever no key is
+    # configured or the lookup fails — monkeypatching the imported name
+    # directly is the simplest, most direct way to exercise "weather
+    # unavailable" here without touching the network at all.
+    async def _no_weather() -> WeatherSnapshot | None:
+        return None
+
+    monkeypatch.setattr(context_module, "get_current_weather", _no_weather)
+
+    result = await get_context_signals(
+        current_time=datetime(2026, 1, 5, 18, 0), day_of_week=0, user_db=user_db
+    )
+
+    assert result.temperature_f is None
+    assert result.conditions is None
+    assert result.mood_suggestion is None
+    # Every field that existed before this feature is completely
+    # unaffected by weather being unavailable.
+    assert result.meal_type == "dinner"
+    assert "quick" in result.complexity_suggestion.lower()
+    assert len(result.context_notes) == 1
+
+
+async def test_weather_present_populates_all_three_fields_together(
+    user_db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _fake_weather() -> WeatherSnapshot | None:
+        return WeatherSnapshot(
+            temperature_f=28.0, conditions="light snow", mood_suggestion="warm, hearty, comforting"
+        )
+
+    monkeypatch.setattr(context_module, "get_current_weather", _fake_weather)
+
+    result = await get_context_signals(
+        current_time=datetime(2026, 1, 5, 18, 0), day_of_week=0, user_db=user_db
+    )
+
+    assert result.temperature_f == 28.0
+    assert result.conditions == "light snow"
+    assert result.mood_suggestion == "warm, hearty, comforting"

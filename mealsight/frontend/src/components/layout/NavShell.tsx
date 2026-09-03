@@ -5,6 +5,7 @@ import {
   GroceryListIcon,
   HistoryIcon,
   HomeIcon,
+  MealPlanIcon,
   PantryIcon,
   ProfileIcon,
 } from '@/components/layout/NavIcons'
@@ -20,6 +21,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Home', end: true, Icon: HomeIcon },
   { to: '/pantry', label: 'Pantry', Icon: PantryIcon },
+  { to: '/meal-plan', label: 'Meal Plan', Icon: MealPlanIcon },
   { to: '/grocery-list', label: 'Grocery List', Icon: GroceryListIcon },
   { to: '/history', label: 'History', Icon: HistoryIcon },
   { to: '/profile', label: 'Profile', Icon: ProfileIcon },

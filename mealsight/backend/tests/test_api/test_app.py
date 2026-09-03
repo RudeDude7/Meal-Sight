@@ -432,6 +432,87 @@ async def test_waste_get_proxies_mcp_data() -> None:
     assert response.json() == {"time_range": "this_week", "total_items_wasted": 0}
 
 
+def _meal_plan_manager(recipe_ids: list[tuple[str, str]]) -> FakeManager:
+    return FakeManager(
+        responses={
+            ("pantry_manager", "get_pantry"): ToolCallResult(success=True, data={"items": [], "count": 0}),
+            ("pantry_manager", "flag_expiring"): ToolCallResult(
+                success=True, data={"items": [], "count": 0}
+            ),
+            ("user_intelligence", "get_user_profile"): ToolCallResult(
+                success=True, data={"cuisine_preferences": {}}
+            ),
+            ("recipe_engine", "search_recipes"): ToolCallResult(
+                success=True,
+                data={
+                    "results": [
+                        {
+                            "id": rid,
+                            "name": rid,
+                            "cuisine": cuisine,
+                            "meal_type": "main",
+                            "cook_time_minutes": 30,
+                            "dietary_tags": [],
+                        }
+                        for rid, cuisine in recipe_ids
+                    ],
+                    "total_matched": len(recipe_ids),
+                },
+            ),
+            ("recipe_engine", "match_ingredients"): ToolCallResult(
+                success=True,
+                data={
+                    "match_score": 0.8,
+                    "can_cook": True,
+                    "matched_items": [],
+                    "substitutable_items": [],
+                    "partial_matches": [],
+                    "missing_items": [],
+                    "critical_missing": [],
+                    "summary": "",
+                },
+            ),
+            ("recipe_engine", "get_recipe"): ToolCallResult(
+                success=True, data={"servings_base": 2, "ingredients": []}
+            ),
+            ("recipe_engine", "calculate_nutrition"): ToolCallResult(
+                success=True, data={"calories": 400.0}
+            ),
+            ("user_intelligence", "check_repetition"): ToolCallResult(
+                success=True, data={"repetition_score": 0.0, "recommendation": "acceptable"}
+            ),
+            ("pantry_manager", "create_grocery_list"): ToolCallResult(
+                success=True, data={"id": 1, "status": "active", "sections": []}
+            ),
+        }
+    )
+
+
+async def test_meal_plan_post_returns_a_real_plan() -> None:
+    recipe_ids = [(f"r{i}", f"cuisine{i}") for i in range(5)]
+    manager = _meal_plan_manager(recipe_ids)
+
+    async with running_client(manager) as (client, _manager):
+        response = await client.post("/api/meal-plan", json={"days": 5, "servings": 2})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["days"]) == 5
+    assert "grocery_list" in body
+    assert "total_distinct_ingredients" in body
+
+
+async def test_meal_plan_post_unsatisfiable_constraints_becomes_422() -> None:
+    recipe_ids = [("r0", "italian"), ("r1", "mexican")]
+    manager = _meal_plan_manager(recipe_ids)
+
+    async with running_client(manager) as (client, _manager):
+        response = await client.post("/api/meal-plan", json={"days": 5, "servings": 2})
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "plan_unsatisfiable"
+
+
 async def test_waste_get_validation_error_becomes_400() -> None:
     manager = FakeManager(
         responses={

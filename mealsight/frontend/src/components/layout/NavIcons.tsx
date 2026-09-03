@@ -68,3 +68,19 @@ export function HistoryIcon({ className }: NavIconProps) {
     </svg>
   )
 }
+
+export function MealPlanIcon({ className }: NavIconProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} {...STROKE_PROPS} aria-hidden="true">
+      <rect x="4" y="5" width="16" height="15" rx="1" />
+      <line x1="4" y1="9.5" x2="20" y2="9.5" />
+      <line x1="8.5" y1="3" x2="8.5" y2="6.5" />
+      <line x1="15.5" y1="3" x2="15.5" y2="6.5" />
+      <line x1="8" y1="13" x2="8" y2="13" />
+      <line x1="12" y1="13" x2="12" y2="13" />
+      <line x1="16" y1="13" x2="16" y2="13" />
+      <line x1="8" y1="16.5" x2="8" y2="16.5" />
+      <line x1="12" y1="16.5" x2="12" y2="16.5" />
+    </svg>
+  )
+}

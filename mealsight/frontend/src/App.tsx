@@ -6,6 +6,7 @@ import { ActiveSessionProvider } from '@/lib/activeSession'
 import { GroceryList } from '@/pages/GroceryList'
 import { History } from '@/pages/History'
 import { Home } from '@/pages/Home'
+import { MealPlan } from '@/pages/MealPlan'
 import { Pantry } from '@/pages/Pantry'
 import { Preview } from '@/pages/Preview'
 import { Profile } from '@/pages/Profile'
@@ -23,6 +24,7 @@ export function App() {
           <Route element={<NavShell />}>
             <Route index element={<Home />} />
             <Route path="pantry" element={<Pantry />} />
+            <Route path="meal-plan" element={<MealPlan />} />
             <Route path="grocery-list" element={<GroceryList />} />
             <Route path="history" element={<History />} />
             <Route path="profile" element={<Profile />} />

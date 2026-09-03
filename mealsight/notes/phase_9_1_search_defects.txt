@@ -1,0 +1,349 @@
+PHASE 9.1 STUDY NOTES: THREE SEARCH DEFECTS THAT COMPOUNDED INTO AN
+EFFECTIVELY ARBITRARY CANDIDATE POOL — FIXED, AND EACH FIX VERIFIED
+AGAINST THE REAL 250-RECIPE CORPUS, NOT A MOCK
+=============================================================
+
+Three defects logged during earlier frontend phases (8.2(b)'s own live-
+verification notes named the first two directly; the third was phase
+6.4's own original finding, never actually fixed) — reported here as
+having compounded rather than three independent bugs, because they do:
+a meal_type filter that never matches anything (defect 1) means the
+system's own bad guess still sits in the query on every attempt; a
+relaxation order that drops the user's real cuisine preference before
+that bad guess (defect 2) means the wrong thing gets sacrificed first;
+and once every filter is finally gone, alphabetical ordering (defect 3)
+means whatever's left is capped at 10 candidates with zero regard for
+what the user could actually cook. Together, a real request naming real
+ingredients could — and did, repeatedly, across this whole project's own
+prior live-verification runs — surface Bubble & Squeak and Apple
+Frangipan Tart as "top candidates" for a pantry with real chicken and
+tortillas in it.
+
+Files edited: backend/mealsight/{recipe_engine/search.py,mcp_servers/
+recipe_engine/server.py,agent/nodes/search_recipes.py}, backend/tests/
+{test_recipe_engine/test_search.py,test_agent/test_nodes.py,
+test_mcp_servers/test_recipe_engine/test_tool_schemas.py}. File added:
+backend/tests/test_recipe_engine/test_search_real_corpus.py. No
+frontend files touched — this was a backend-only task by its own scope.
+
+
+1. READ FIRST, PER THE TASK'S OWN INSTRUCTION: THE REAL meal_type
+   DISTRIBUTION, NOT THE TASK'S OWN GUESS AT IT
+=============================================================
+The task's own framing speculated "main, dessert, side, starter, and
+similar" for the corpus vocabulary. A direct query against the real,
+seeded recipes.db found five real distinct values, not the task's own
+guessed set:
+
+    main         168
+    dessert       60
+    side          11
+    breakfast      7
+    appetizer      4                    (250 total)
+
+Two things worth naming explicitly: "starter" doesn't exist anywhere in
+the real data — it's "appetizer" (TheMealDB's own real category name,
+carried through by mealsight/seed/recipe_parsing.py's seeding step
+unchanged). And "breakfast" already exists as a literal corpus value —
+one exact overlap with context.py's own four inferred values purely by
+coincidence, not by any prior design intent (nothing in context.py or
+recipe_parsing.py cross-references the other's vocabulary at all).
+
+
+2. DEFECT 1's FIX: A MANY-VALUED MAPPING, KEYED PRECISELY WHERE THE TWO
+   VOCABULARIES ACTUALLY MEET
+=============================================================
+MEAL_TYPE_TO_CORPUS_TYPES (agent/nodes/search_recipes.py) maps each of
+context.py's four inferred values onto a SET of real corpus values, not
+a single one — the task's own explicit requirement, since a single-
+value mapping would just move the mismatch rather than fix it (e.g.
+mapping "dinner" only to "main" would silently exclude every real side
+dish a dinner request should still be allowed to surface):
+
+    breakfast -> {breakfast}                (7 recipes)
+    lunch     -> {main, side, appetizer}    (183 recipes)
+    dinner    -> {main, side}               (179 recipes)
+    snack     -> {dessert, appetizer}       (64 recipes)
+
+BREAKFAST, THE HARD CASE NAMED DIRECTLY IN THE TASK: kept to JUST the
+corpus's own real "breakfast" category (7 recipes) rather than also
+folding in "main" (168 recipes, two-thirds of the entire corpus) to
+inflate the count. This was a real judgment call, recorded rather than
+made silently: diluting breakfast that far would have "fixed" the
+non-empty-results requirement in the narrowest technical sense while
+destroying the actual distinction the whole mapping exists to create —
+a breakfast request would functionally become "give me anything," which
+is precisely the original bug's own failure mode, just reached by a
+different, more defensible-looking path. 7 genuinely breakfast-
+appropriate recipes, verified non-empty against the real corpus, was
+judged the more honest answer than a bigger number built on a category
+that doesn't actually mean what it would claim to.
+
+The mapping stays a HARD filter (SQL meal_type IN (...)), not the
+soft ranking-signal fallback the task offered as an alternative — every
+one of the four mapped sets produces real, non-empty results against
+the real corpus (verified directly, not assumed; see section 6), so
+the corpus genuinely does support the distinction once the vocabularies
+are reconciled correctly. The soft-signal fallback was never needed.
+
+
+3. THE API-COMPATIBILITY DECISION: meal_type GREW A SECOND ACCEPTED
+   SHAPE RATHER THAN BEING REPLACED
+=============================================================
+recipe_engine.search_recipes's own meal_type parameter is also reachable
+directly by a human, unrelated to the agent's own inference, through GET
+/api/recipes/search (a REST endpoint this project's own frontend phase
+8.x work already built and shipped, expecting a plain single string).
+Rather than changing that parameter's shape to always be a list — a
+breaking change to an already-stable, already-used contract, entirely
+disproportionate to what this defect actually required — the parameter
+was widened to accept EITHER a single exact string (preserved, identical
+behavior for every existing caller, human or otherwise) or a sequence of
+acceptable values (new, used only by the agent's own reconciliation).
+The SQL builder branches on isinstance(meal_type, str): a single value
+still becomes meal_type = ?, exactly as before; a sequence becomes
+meal_type IN (...). Nothing that already calls this function with a
+plain string needed to change at all — checked directly by grepping
+every real caller (mealsight/api/routers/recipes.py, the recipe_engine
+MCP server, this module's own existing test suite) before committing to
+this shape, not assumed safe.
+
+
+4. DEFECT 2's FIX: REORDERED, WITH THE REASONING STATED IN THE ONE
+   PLACE A FUTURE READER WOULD ACTUALLY LOOK
+=============================================================
+Relaxation order flipped from cuisine-first to meal-type-first:
+drop the SYSTEM's own inferred meal_type guess, then relax cook time,
+then drop the USER's own stated cuisine preference last — recorded
+directly in agent/nodes/search_recipes.py's own module docstring, not
+just in a commit message, since that's where a future reader auditing
+"why does this order the way it does" would actually look. Dietary
+restrictions remain untouched at every stage, exactly as before — this
+defect was never about them, and nothing in the fix moves them.
+
+The relaxation messages themselves were reworded, not just reordered:
+the meal_type-drop message now reads "Dropping the {meal_type} meal-type
+GUESS" (not "filter") — a small, deliberate wording change acknowledging
+what that value actually is (an inference from the clock, never
+something the user asked for), consistent with this whole fix's own
+framing of WHY it drops first.
+
+
+5. DEFECT 3's FIX: A CHEAP, DETERMINISTIC PRE-RANK THAT USES THE SAME
+   CANONICALIZATION PIPELINE THE REAL MATCHER USES
+=============================================================
+search_recipes gained an optional pantry_ingredients parameter. When
+given, every candidate surviving the hard filters gets a pantry-overlap
+score — fraction of the recipe's own ingredients whose CANONICAL name
+(normalize_ingredient + resolve_canonical, the identical pipeline
+mealsight.matching's own real matcher and mealsight.pantry's own update
+path both already use) is present in the pantry — computed from the
+recipe's own ingredients JSON (now included in the SELECT, previously
+never fetched at this stage at all) before max_results caps the list.
+Ties (most commonly two recipes both scoring 0.0 overlap) fall back to
+the existing alphabetical order via Python's own stable sort — a
+deterministic tiebreak, not an arbitrary one.
+
+Deliberately using the REAL canonicalization pipeline rather than a
+cheaper naive string comparison (lowercase + strip, say) was a specific
+choice: a looser comparison could rank a recipe this pre-filter likes
+that match_ingredients' own real, authoritative scoring would evaluate
+completely differently (a recipe whose ingredient is "scallions" while
+the pantry has "green onion" needs the SAME synonym resolution both
+places to agree on whether that counts as overlap at all) — the whole
+point of this pre-filter is to narrow the field toward what the
+expensive matcher would actually find, not toward an approximation of
+it that could disagree in exactly the cases that matter most.
+
+total_matched is unaffected by any of this — it's still len() of the
+full hard-filtered list, computed before the pantry-overlap sort ever
+runs. Ranking changes ORDER; it was never allowed to change the count.
+
+NOT TOUCHED, AND WHY THAT'S CORRECT: match_rank.py itself needed zero
+changes. It already just takes candidates[:TOP_N_CANDIDATES_TO_MATCH]
+from whatever order recipe_candidates arrived in — the defect was
+entirely upstream, in what order those candidates arrived, and fixing
+it there means match_rank's own top-10 slice now naturally contains the
+pantry-plausible candidates instead of the alphabetically-early ones,
+with no change to match_rank's own logic required at all.
+
+
+6. VERIFICATION: EVERY NUMBER IN THIS PHASE CAME FROM A REAL RUN
+=============================================================
+Static: ruff check clean, mypy --strict clean (119 source files), full
+pytest suite — 514 passed (510 existing + 4 new: two real-corpus meal-
+type coverage tests, a pantry-overlap ranking test, a total_matched-
+preservation test). Two existing tests updated for the new shapes, not
+worked around: test_search_recipes_relaxes_in_order_and_never_touches_
+dietary (rewritten for the new order AND the new list-valued meal_type,
+with an explicit index-comparison assertion that the meal-type-drop
+message appears before the cuisine-drop message in stream_messages,
+not just that both exist somewhere) and test_tool_schemas.py's own
+EXPECTED_TOOLS entry (gained pantry_ingredients). One unrelated,
+pre-existing flaky test (test_ws_mid_run_receives_buffered_then_live_
+messages, a WebSocket timing test) failed once inside the full 514-test
+run and passed both in isolation and on an immediate full re-run —
+confirmed as pre-existing flakiness rather than a regression by
+checking that no file this phase touched has anything to do with
+WebSocket streaming timing at all.
+
+Phase 6.4's own scenario, re-run against the real corpus, not a
+constructed example: pantry = [peanut butter, sugar, eggs].
+
+  BEFORE (no pantry context — the old, alphabetical behavior):
+    1. Bubble & Squeak            6. Baked salmon with fennel & tomatoes
+    2. Apple & Blackberry Crumble 7. Bakewell tart
+    3. Apple Frangipan Tart       8. Banana Pancakes
+    4. BBQ Pork Sloppy Joes       9. Battenberg Cake
+    5. Baingan Bharta            10. Bean & Sausage Hotpot
+    total_matched: 250 — Peanut Butter Cookies in top 10: False
+
+  AFTER (pantry_ingredients=[peanut butter, sugar, eggs]):
+    1. Peanut Butter Cookies  <--
+    2. Home-made Mandazi
+    3. Brie wrapped in prosciutto & brioche
+    ... (7 more)
+    total_matched: 250 — Peanut Butter Cookies in top 10: True, rank #1
+
+A real end-to-end run through the actual FastAPI backend (POST /api/
+recommend, text="Mexican dinner, 5 minutes or less", polled via GET
+/api/recommend/{id}) produced these real relaxation messages, in this
+real order:
+
+    [search_recipes] Dropping the dinner meal-type guess and trying again.
+    [search_recipes] Still nothing — raising the cook-time limit from 5 to 8 minutes and trying again.
+    [search_recipes] Still nothing — dropping the Mexican cuisine preference and trying again.
+    [search_recipes] Found 20 matching recipe(s) after relaxing the search.
+
+meal_type dropped at relaxation step 1; cuisine survived two full steps
+longer, dropped only at step 3 once both system-introduced constraints
+(the clock's own guess, the stated cook-time ceiling) had already failed
+to produce results on their own.
+
+
+7. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+Diluting the breakfast mapping with "main" versus keeping it narrow to
+the corpus's own real "breakfast" category alone
+    Rejected diluting it: 168 mostly-dinner recipes relabeled as
+    "breakfast-compatible" would have satisfied the non-empty-results
+    bar in the narrowest technical sense while destroying the actual
+    distinction the mapping exists to create. 7 honest, genuinely
+    breakfast-appropriate recipes was judged the more defensible answer
+    than a bigger number built on a category stretched past what it
+    actually means.
+
+Falling back to a soft ranking signal for meal_type versus keeping it a
+hard filter
+    Rejected the soft-signal fallback: the task offered it explicitly
+    for the case where the corpus "genuinely cannot support a time-of-
+    day distinction" — but it can, once the vocabularies are correctly
+    reconciled. Every one of the four mapped sets produces real,
+    verified non-empty results; falling back to a softer, less
+    effective mechanism than the one that actually works would have
+    been solving a problem that the reconciliation itself already
+    resolved.
+
+Changing search_recipes' own meal_type parameter to always require a
+list versus letting it accept either a single value or a list
+    Rejected a shape-breaking change: GET /api/recipes/search (a stable,
+    already-shipped REST endpoint from an earlier frontend phase) passes
+    a single string, and there was no reason that caller needed to
+    change to fix a defect that lives entirely in how the AGENT's own
+    inference gets translated. Accepting either shape kept every
+    existing caller working unmodified while giving the agent's own new
+    caller exactly the richer shape it needs.
+
+A naive lowercase-and-strip ingredient comparison for the pantry-overlap
+heuristic versus reusing the real normalize_ingredient + resolve_
+canonical pipeline
+    Rejected the cheaper comparison: this pre-filter's entire purpose is
+    to narrow the field toward what match_ingredients' own real, more
+    expensive scoring would find — using a different, looser notion of
+    "the same ingredient" risks the pre-filter and the real matcher
+    disagreeing about overlap in exactly the synonym-heavy cases
+    (scallions/green onion, and similar) this project has repeatedly
+    found matter in practice.
+
+Recomputing an incremental adjustment to match_rank.py's own scoring
+versus leaving it completely untouched
+    Rejected touching match_rank.py at all: its own top-N slice already
+    operates correctly on whatever order it's handed — the defect was
+    never in HOW match_rank ranks its top 10, only in WHICH 10 it ever
+    saw. Fixing the upstream ordering was sufficient and kept the change
+    surface to exactly the code that was actually wrong.
+
+
+8. GLOSSARY
+=============================================================
+MEAL_TYPE_TO_CORPUS_TYPES
+    agent/nodes/search_recipes.py's own reconciliation table — maps each
+    of context.py's four time-of-day values to the real, verified-non-
+    empty set of corpus meal_type values plausible for it.
+
+pantry_ingredients (search_recipes parameter)
+    recipe_engine/search.py's own new optional parameter — when given,
+    pre-ranks results by pantry-overlap (the SAME canonicalization
+    pipeline match_ingredients uses) before max_results caps the list.
+    Omitted entirely for a plain browsing search, which keeps the
+    existing alphabetical order.
+
+_pantry_overlap_score
+    The cheap, deterministic heuristic itself: fraction of a recipe's
+    own ingredients whose canonical name is in the pantry — never a
+    substitute for match_ingredients' own full, importance-weighted
+    scoring, only a pre-filter to make sure the right candidates are IN
+    the field that scoring runs on.
+
+The relaxation ladder (new order)
+    meal_type (the system's own clock-derived guess) drops first, then
+    cook time relaxes, then cuisine (what the user actually asked for)
+    drops last. Dietary restrictions are never relaxed at any stage.
+
+
+9. INTERVIEW TALKING POINTS
+=============================================================
+Q: Why is the breakfast mapping "the hard case," and why didn't you just
+pick the mapping that gives the biggest number of results?
+
+    Because the corpus only has 7 recipes genuinely tagged breakfast,
+    and the only way to get a much bigger number would have been to
+    fold in "main" — 168 recipes, two-thirds of the entire corpus, most
+    of which are dinner-style entrees. That would have technically
+    satisfied "non-empty results," but it would have meant a breakfast
+    request effectively sees the same pool as a dinner request, which
+    is the exact same failure mode as the original bug (a meal_type
+    filter that doesn't actually distinguish anything) reached through a
+    different, more defensible-looking mechanism. Seven honest results
+    that actually mean "breakfast" is a better answer than 175 diluted
+    ones that don't.
+
+Q: You changed meal_type to accept either a string or a list. Doesn't
+that make the function's own contract more confusing?
+
+    It adds one conditional branch to the SQL builder, and every
+    existing caller's behavior is completely unchanged — a plain string
+    still produces the identical query it always did. The alternative
+    was either breaking a real, already-shipped REST endpoint's contract
+    for a defect that has nothing to do with it, or building a second,
+    parallel function just to accept a list — which would have meant
+    duplicating the entire filter-and-rank logic for no real benefit.
+    One function, two accepted input shapes, zero behavior change for
+    existing callers is a smaller, more honest surface than either
+    alternative.
+
+Q: How do you know the pantry-overlap ranking doesn't just move the
+Phase 6.4 bug somewhere else — say, hiding a different cookable recipe
+behind Peanut Butter Cookies now?
+
+    I don't claim it solves candidate ranking perfectly — it's
+    explicitly described in both the code and this phase's own notes as
+    a CHEAP pre-filter, not a replacement for match_ingredients' own
+    real, importance-weighted, substitution-aware scoring. What it
+    guarantees is narrower and verifiable directly: a recipe with high
+    real ingredient overlap will be IN the top max_results candidates
+    handed to match_rank, rather than being cut off by alphabetical
+    order before match_rank ever sees it at all. Whether it then wins
+    match_rank's own more sophisticated ranking is match_rank's job, not
+    this pre-filter's — and match_rank was deliberately left untouched
+    specifically so that division of responsibility stays clean.

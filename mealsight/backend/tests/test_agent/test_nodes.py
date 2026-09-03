@@ -714,26 +714,42 @@ async def test_search_recipes_relaxes_in_order_and_never_touches_dietary() -> No
 
     assert all(args["dietary_filters"] == ["vegan"] for args in call_args)
 
+    # Order: meal_type (the system's own inferred guess) drops FIRST,
+    # then cook time relaxes, then cuisine (the user's own stated
+    # preference) drops LAST — the reordering this defect fix exists
+    # for. "dinner" maps to the corpus's own real ["main", "side"]
+    # values, never the literal string "dinner" (which is never an
+    # actual stored meal_type).
     assert call_args[0]["cuisine"] == "italian"
     assert call_args[0]["max_cook_time"] == 20
-    assert call_args[0]["meal_type"] == "dinner"
+    assert call_args[0]["meal_type"] == ["main", "side"]
 
-    assert call_args[1]["cuisine"] is None
+    assert call_args[1]["cuisine"] == "italian"
     assert call_args[1]["max_cook_time"] == 20
-    assert call_args[1]["meal_type"] == "dinner"
+    assert call_args[1]["meal_type"] is None
 
-    assert call_args[2]["cuisine"] is None
+    assert call_args[2]["cuisine"] == "italian"
     assert call_args[2]["max_cook_time"] > 20
-    assert call_args[2]["meal_type"] == "dinner"
+    assert call_args[2]["meal_type"] is None
 
     assert call_args[3]["cuisine"] is None
     assert call_args[3]["meal_type"] is None
 
     assert result["recipe_candidates"] == [_recipe()]
     assert result["search_exhausted"] is False
-    assert any("Dropping the italian cuisine" in m for m in result["stream_messages"])
+    assert any("Dropping the dinner meal-type guess" in m for m in result["stream_messages"])
     assert any("raising the cook-time limit" in m for m in result["stream_messages"])
-    assert any("dropping the dinner meal-type filter" in m for m in result["stream_messages"])
+    assert any("dropping the italian cuisine preference" in m for m in result["stream_messages"])
+
+    # The stream messages themselves must report meal_type being
+    # dropped BEFORE cuisine, matching the actual call order above.
+    meal_type_msg_index = next(
+        i for i, m in enumerate(result["stream_messages"]) if "dinner meal-type guess" in m
+    )
+    cuisine_msg_index = next(
+        i for i, m in enumerate(result["stream_messages"]) if "italian cuisine preference" in m
+    )
+    assert meal_type_msg_index < cuisine_msg_index
 
 
 async def test_search_recipes_zero_after_full_relaxation_marks_exhausted() -> None:

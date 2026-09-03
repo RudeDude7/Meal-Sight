@@ -49,15 +49,17 @@ async def search_recipes(
     dietary_filters: list[str] | None = None,
     max_cook_time: int | None = None,
     cuisine: str | None = None,
-    meal_type: str | None = None,
+    meal_type: str | list[str] | None = None,
     max_results: int = 20,
+    pantry_ingredients: list[str] | None = None,
 ) -> dict[str, Any]:
     """Searches the recipe database by hard filters and returns compact
     summaries (id, name, cuisine, meal_type, cook_time_minutes,
     dietary_tags) — NOT full recipes and NOT ingredient-matched against
-    any pantry. Use this first to find candidate recipes; call
-    get_recipe for full detail on one of them, and match_ingredients
-    separately to check whether a specific pantry can actually make one.
+    any pantry (pantry_ingredients only pre-RANKS the returned order; see
+    below — call match_ingredients separately for a real, scored match
+    against a specific pantry). Use this first to find candidate
+    recipes; call get_recipe for full detail on one of them.
 
     dietary_filters (e.g. ["vegan", "gluten_free"]) is a hard constraint:
     a recipe missing even one requested tag is excluded outright, never
@@ -65,6 +67,18 @@ async def search_recipes(
     max_cook_time to skip filtering on cook time entirely; when set, any
     recipe with an unknown cook time is also excluded, since there is no
     way to confirm it meets the limit.
+
+    meal_type accepts either one exact value ("dessert") or a list of
+    acceptable values (["main", "side"]) — a recipe matches if its own
+    meal_type is any one of them.
+
+    pantry_ingredients, when given, pre-ranks the returned order by a
+    cheap ingredient-overlap heuristic (fraction of the recipe's own
+    ingredients found in the pantry) BEFORE max_results caps the list —
+    this is what keeps a genuinely cookable recipe with a late-alphabet
+    name from being cut off before anything ever scores it properly.
+    Omit it for a plain browsing search with no pantry context, which
+    returns alphabetical order as before.
 
     Returns {"results": [...], "total_matched": int}. total_matched is
     how many recipes satisfied every filter BEFORE max_results capped the
@@ -82,6 +96,7 @@ async def search_recipes(
             cuisine=cuisine,
             meal_type=meal_type,
             max_results=max_results,
+            pantry_ingredients=pantry_ingredients,
         )
         return search_results_to_dict(result)
     except Exception:

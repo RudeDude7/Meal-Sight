@@ -112,6 +112,92 @@ async def test_max_cook_time_none_does_not_filter_by_cook_time_at_all(recipe_db:
     assert {r.id for r in search_result.results} == {"1", "2", "3"}
 
 
+async def test_pantry_overlap_ranks_a_late_alphabet_cookable_recipe_ahead_of_early_alphabet_junk(
+    recipe_db: Database,
+) -> None:
+    """The phase 6.4 finding, reproduced directly: with no pantry-aware
+    ranking, an alphabetically-early recipe with zero real ingredient
+    overlap would sit ahead of a genuinely cookable, late-alphabet one
+    purely because of its name. pantry_ingredients must put the high-
+    overlap recipe first regardless of name."""
+    peanut_butter = {
+        "name": "peanut butter",
+        "quantity": 1.0,
+        "unit": "cup",
+        "importance": "critical",
+        "raw_measure": "1 cup",
+    }
+    sugar = {
+        "name": "sugar",
+        "quantity": 1.0,
+        "unit": "cup",
+        "importance": "important",
+        "raw_measure": "1 cup",
+    }
+    egg = {"name": "egg", "quantity": 1.0, "unit": None, "importance": "important", "raw_measure": "1"}
+    unrelated = {
+        "name": "saffron",
+        "quantity": 1.0,
+        "unit": "pinch",
+        "importance": "critical",
+        "raw_measure": "pinch",
+    }
+
+    # Alphabetically first, zero real overlap with the pantry below.
+    await insert_recipe(
+        recipe_db, recipe_id="1", name="Apple Saffron Rice", ingredients=[unrelated], cook_time_minutes=20
+    )
+    await insert_recipe(
+        recipe_db, recipe_id="2", name="Beet Saffron Soup", ingredients=[unrelated], cook_time_minutes=20
+    )
+    # Alphabetically last, but every ingredient is in the pantry.
+    await insert_recipe(
+        recipe_db,
+        recipe_id="3",
+        name="Zzz Peanut Butter Cookies",
+        ingredients=[peanut_butter, sugar, egg],
+        cook_time_minutes=20,
+    )
+
+    pantry = ["peanut butter", "sugar", "egg"]
+
+    without_pantry = await search_recipes(recipe_db, dietary_filters=[], max_results=10)
+    assert [r.id for r in without_pantry.results] == ["1", "2", "3"], (
+        "sanity check: with no pantry context, order stays alphabetical"
+    )
+
+    with_pantry = await search_recipes(
+        recipe_db, dietary_filters=[], max_results=2, pantry_ingredients=pantry
+    )
+    ids = [r.id for r in with_pantry.results]
+    assert "3" in ids, "the fully-cookable, late-alphabet recipe must survive the cap"
+    assert ids[0] == "3", "it must rank ahead of the two zero-overlap recipes, not just survive"
+
+
+async def test_pantry_overlap_ranking_does_not_change_total_matched(recipe_db: Database) -> None:
+    """total_matched must still report the true pre-cap count — pantry-
+    overlap ranking changes ORDER, never how many recipes matched the
+    hard filters in the first place."""
+    ingredient = {
+        "name": "flour",
+        "quantity": 1.0,
+        "unit": "cup",
+        "importance": "important",
+        "raw_measure": "1 cup",
+    }
+    for i in range(5):
+        await insert_recipe(
+            recipe_db, recipe_id=str(i), name=f"Recipe {i}", ingredients=[ingredient], cook_time_minutes=10
+        )
+
+    result = await search_recipes(
+        recipe_db, dietary_filters=[], max_results=2, pantry_ingredients=["flour"]
+    )
+
+    assert len(result.results) == 2
+    assert result.total_matched == 5
+
+
 async def test_get_recipe_returns_full_detail(recipe_db: Database) -> None:
     await insert_recipe(
         recipe_db,

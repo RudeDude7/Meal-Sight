@@ -11,7 +11,14 @@ from typing import Any
 from fastmcp import Client
 
 EXPECTED_TOOLS: dict[str, set[str]] = {
-    "search_recipes": {"dietary_filters", "max_cook_time", "cuisine", "meal_type", "max_results"},
+    "search_recipes": {
+        "dietary_filters",
+        "max_cook_time",
+        "cuisine",
+        "meal_type",
+        "max_results",
+        "pantry_ingredients",
+    },
     "get_recipe": {"recipe_id"},
     "match_ingredients": {"recipe_id", "available_ingredients", "dietary_restrictions"},
     "scale_recipe": {"recipe_id", "target_servings"},

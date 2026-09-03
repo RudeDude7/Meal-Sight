@@ -44,9 +44,25 @@ CREATE TABLE IF NOT EXISTS consumption_log (
     consumed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- The waste_log table from the original spec is deliberately deferred —
--- do not add it here without a corresponding phase task.
+-- waste_log: every logged instance of food thrown out, with a reason —
+-- separate from consumption_log (which records ANY quantity decrease,
+-- waste included, with no reason attached) because this table exists
+-- specifically to support reason-aware insights (mealsight.pantry.waste).
+-- estimated_cost has no price data anywhere in this project — the
+-- column exists per spec, but nothing ever writes a non-null value into
+-- it; see mealsight.pantry.waste's own module docstring.
+CREATE TABLE IF NOT EXISTS waste_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_name TEXT NOT NULL,
+    quantity_wasted REAL,
+    unit TEXT,
+    reason TEXT NOT NULL,
+    estimated_cost REAL,
+    logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE INDEX IF NOT EXISTS idx_pantry_category ON pantry(category);
 CREATE INDEX IF NOT EXISTS idx_pantry_name ON pantry(name);
 CREATE INDEX IF NOT EXISTS idx_pantry_last_seen_date ON pantry(last_seen_date);
+CREATE INDEX IF NOT EXISTS idx_waste_log_item_name ON waste_log(item_name);
+CREATE INDEX IF NOT EXISTS idx_waste_log_logged_at ON waste_log(logged_at);

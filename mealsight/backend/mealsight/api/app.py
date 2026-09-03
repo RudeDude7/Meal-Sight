@@ -55,6 +55,7 @@ from mealsight.api.routers import (
     profile,
     recipes,
     recommend,
+    waste,
     ws,
 )
 from mealsight.api.sessions import SessionStore
@@ -151,6 +152,7 @@ def create_app(
     app.include_router(interactions.router)
     app.include_router(profile.router)
     app.include_router(grocery.router)
+    app.include_router(waste.router)
     app.include_router(ws.router)
 
     return app

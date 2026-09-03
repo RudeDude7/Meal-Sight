@@ -12,6 +12,15 @@ interface PantryItemRowProps {
   expiring: ExpiringItem | undefined
   onAdjustQuantity: (item: PantryItem, newQuantity: number) => Promise<void>
   onRemove: (item: PantryItem) => Promise<void>
+  /**
+   * Logs the item as wasted (reason "expired") and deducts it from the
+   * pantry in the same call — see api/waste.ts / mealsight.pantry.waste.
+   * log_waste's own real insight text (once one exists) is the parent's
+   * concern, not this row's: logging waste always removes the full
+   * quantity, so this row unmounts the moment the parent reloads —
+   * nothing rendered here would survive long enough to be read.
+   */
+  onWaste: (item: PantryItem) => Promise<void>
 }
 
 /**
@@ -25,12 +34,22 @@ interface PantryItemRowProps {
  * stale is computed client-side from last_seen_date, a single fixed-
  * threshold comparison with no drift-prone table behind it (see
  * src/lib/pantryStatus.ts).
+ *
+ * "Throw out" (waste tracking) only appears on an EXPIRED item — the
+ * backend already flags it, and "throw this out" is the honest next
+ * action for something already past its estimated shelf life, so this
+ * is the one row state that offers it. A fresh or merely-expiring-soon
+ * item keeps only the existing plain Remove action; Remove and Throw
+ * out both end up deducting the pantry row, but only Throw out records
+ * WHY, which is what feeds get_waste_stats' own insights.
  */
-export function PantryItemRow({ item, expiring, onAdjustQuantity, onRemove }: PantryItemRowProps) {
+export function PantryItemRow({ item, expiring, onAdjustQuantity, onRemove, onWaste }: PantryItemRowProps) {
   const [quantityDraft, setQuantityDraft] = useState(String(item.quantity ?? ''))
   const [saving, setSaving] = useState(false)
   const [confirmingRemove, setConfirmingRemove] = useState(false)
   const [removing, setRemoving] = useState(false)
+  const [confirmingWaste, setConfirmingWaste] = useState(false)
+  const [wasting, setWasting] = useState(false)
 
   const stale = isStale(item.last_seen_date)
   const expired = expiring !== undefined && expiring.days_remaining < 0
@@ -56,6 +75,16 @@ export function PantryItemRow({ item, expiring, onAdjustQuantity, onRemove }: Pa
     } finally {
       setRemoving(false)
       setConfirmingRemove(false)
+    }
+  }
+
+  async function handleConfirmWaste(): Promise<void> {
+    setWasting(true)
+    try {
+      await onWaste(item)
+    } finally {
+      setWasting(false)
+      setConfirmingWaste(false)
     }
   }
 
@@ -93,7 +122,7 @@ export function PantryItemRow({ item, expiring, onAdjustQuantity, onRemove }: Pa
             step="any"
             value={quantityDraft}
             onChange={(event) => setQuantityDraft(event.target.value)}
-            disabled={saving || removing}
+            disabled={saving || removing || wasting}
             className="w-16 rounded-sm border border-ink-900/10 bg-paper-raised px-2 py-1 text-body-lg text-ink-900"
             aria-label={`Quantity for ${item.name}`}
           />
@@ -105,7 +134,34 @@ export function PantryItemRow({ item, expiring, onAdjustQuantity, onRemove }: Pa
             </Button>
           )}
 
-          {!confirmingRemove ? (
+          {expired && !confirmingWaste && !confirmingRemove && (
+            <Button
+              variant="ghost"
+              className="text-signal-negative hover:text-signal-negative"
+              onClick={() => setConfirmingWaste(true)}
+            >
+              Throw out
+            </Button>
+          )}
+
+          {confirmingWaste && (
+            <div className="flex items-center gap-2">
+              <span className="text-label text-ink-600">Log as wasted (expired) and remove it?</span>
+              <Button
+                variant="secondary"
+                className="border-signal-negative text-signal-negative hover:bg-signal-negative/10"
+                onClick={handleConfirmWaste}
+                disabled={wasting}
+              >
+                {wasting ? 'Logging…' : 'Yes, throw out'}
+              </Button>
+              <Button variant="ghost" onClick={() => setConfirmingWaste(false)} disabled={wasting}>
+                Cancel
+              </Button>
+            </div>
+          )}
+
+          {!confirmingWaste && !confirmingRemove ? (
             <Button
               variant="ghost"
               className="text-signal-negative hover:text-signal-negative"
@@ -113,7 +169,7 @@ export function PantryItemRow({ item, expiring, onAdjustQuantity, onRemove }: Pa
             >
               Remove
             </Button>
-          ) : (
+          ) : confirmingRemove ? (
             <div className="flex items-center gap-2">
               <span className="text-label text-ink-600">Remove this item?</span>
               <Button
@@ -132,7 +188,7 @@ export function PantryItemRow({ item, expiring, onAdjustQuantity, onRemove }: Pa
                 Cancel
               </Button>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </Ticket>

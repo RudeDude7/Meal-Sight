@@ -9,7 +9,15 @@ from __future__ import annotations
 from typing import Any
 
 from mealsight.mcp_servers.errors import internal_error, not_found_error, validation_error
-from mealsight.pantry.models import ExpiringItem, GroceryList, PantryItem, PantryUpdateResult, RemovalResult
+from mealsight.pantry.models import (
+    ExpiringItem,
+    GroceryList,
+    PantryItem,
+    PantryUpdateResult,
+    RemovalResult,
+    WasteLogResult,
+    WasteStats,
+)
 
 __all__ = [
     "expiring_items_to_dict",
@@ -20,6 +28,8 @@ __all__ = [
     "pantry_update_result_to_dict",
     "removal_result_to_dict",
     "validation_error",
+    "waste_log_result_to_dict",
+    "waste_stats_to_dict",
 ]
 
 
@@ -54,6 +64,27 @@ def expiring_items_to_dict(items: list[ExpiringItem]) -> dict[str, Any]:
     first (most negative days_remaining, i.e. already expired, sorts
     ahead of anything still counting down)."""
     return {"items": [item.model_dump(mode="json") for item in items], "count": len(items)}
+
+
+def waste_log_result_to_dict(result: WasteLogResult) -> dict[str, Any]:
+    """Shape: {"id", "item_name", "canonical_name", "quantity_wasted",
+    "unit", "reason", "logged_at", "removal": {...same shape as
+    remove_items' own detail...}, "insight"}. insight is null unless
+    this item has now been logged as wasted settings.waste_insight_
+    threshold times or more, all-time."""
+    return result.model_dump(mode="json")
+
+
+def waste_stats_to_dict(stats: WasteStats) -> dict[str, Any]:
+    """Shape: {"time_range", "total_items_wasted", "most_wasted":
+    [{"item_name", "count", "dominant_reason"}, ...], "trend": {
+    "current_period_count", "previous_period_count", "change_pct",
+    "message"}, "active_insights": [str, ...]}. change_pct is null
+    (with an explanatory message) whenever either period has too few
+    entries to compare meaningfully, or for time_range="all_time".
+    active_insights is always computed all-time, independent of
+    time_range."""
+    return stats.model_dump(mode="json")
 
 
 def grocery_list_to_dict(grocery_list: GroceryList) -> dict[str, Any]:

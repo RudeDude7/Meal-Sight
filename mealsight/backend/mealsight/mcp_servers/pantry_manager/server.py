@@ -27,11 +27,15 @@ from mealsight.mcp_servers.pantry_manager.serialization import (
     pantry_update_result_to_dict,
     removal_result_to_dict,
     validation_error,
+    waste_log_result_to_dict,
+    waste_stats_to_dict,
 )
 from mealsight.pantry import create_grocery_list as _create_grocery_list
 from mealsight.pantry import flag_expiring as _flag_expiring
 from mealsight.pantry import get_grocery_list as _get_grocery_list
 from mealsight.pantry import get_pantry as _get_pantry
+from mealsight.pantry import get_waste_stats as _get_waste_stats
+from mealsight.pantry import log_waste as _log_waste
 from mealsight.pantry import remove_items as _remove_items
 from mealsight.pantry import update_pantry as _update_pantry
 from mealsight.pantry.models import (
@@ -39,7 +43,10 @@ from mealsight.pantry.models import (
     PantryItemInput,
     RecipeMissingIngredients,
     RemovalItemInput,
+    WasteReason,
+    WasteTimeRange,
 )
+from mealsight.pantry.waste import InvalidWasteReasonError
 from mealsight.utils.logging import get_logger
 
 logger = get_logger("mealsight.mcp_servers.pantry_manager")
@@ -47,6 +54,8 @@ logger = get_logger("mealsight.mcp_servers.pantry_manager")
 mcp: FastMCP[Any] = FastMCP("pantry-manager")
 
 _FRESHNESS_FILTERS: tuple[str, ...] = get_args(FreshnessFilter)
+_WASTE_REASONS: tuple[str, ...] = get_args(WasteReason)
+_WASTE_TIME_RANGES: tuple[str, ...] = get_args(WasteTimeRange)
 
 
 class RemovalItem(BaseModel):
@@ -283,4 +292,90 @@ async def get_grocery_list(list_id: int | None = None) -> dict[str, Any]:
         return grocery_list_to_dict(result)
     except Exception:
         logger.error("get_grocery_list_failed", exc_info=True, list_id=list_id)
+        return internal_error()
+
+
+@mcp.tool
+async def log_waste(
+    item_name: str, quantity_wasted: float, unit: str | None, reason: str
+) -> dict[str, Any]:
+    """Logs one instance of item_name being thrown out and DEDUCTS
+    quantity_wasted from the pantry in the same call — a user throwing
+    something out has already lost it, so there is no separate "now
+    remove it" step; this tool already calls remove_items internally
+    (the exact same clamped-removal logic, writing the same
+    consumption_log entry any other removal would).
+
+    reason must be one of "expired", "spoiled", "didn_t_like",
+    "too_much".
+
+    Once this item has been logged as wasted settings.waste_insight_
+    threshold times or more (all-time, not just recently), the result's
+    own "insight" field carries a specific, data-derived sentence
+    naming the item, the count, and the dominant reason (e.g. "You've
+    thrown away spinach 4 times, all expired — consider buying smaller
+    amounts or keeping extra in the freezer.") — null until that
+    threshold is actually reached.
+
+    Returns {"id", "item_name", "canonical_name", "quantity_wasted",
+    "unit", "reason", "logged_at", "removal": {"name", "canonical_name",
+    "found", "quantity_requested", "quantity_removed",
+    "quantity_remaining", "discrepancy", "deleted"}, "insight"}.
+
+    Returns a structured {"error": "validation_error", ...} naming the
+    accepted reason values if reason isn't one of them.
+    """
+    if reason not in _WASTE_REASONS:
+        return validation_error(
+            "reason", f"{reason!r} is not a recognized waste reason.", accepted=list(_WASTE_REASONS)
+        )
+    try:
+        db = get_pantry_db()
+        result = await _log_waste(item_name, quantity_wasted, unit, reason, pantry_db=db)
+        return waste_log_result_to_dict(result)
+    except InvalidWasteReasonError:
+        # Defensive: _WASTE_REASONS is derived from the exact same
+        # WasteReason Literal log_waste itself validates against, so
+        # this should be unreachable given the check above — kept as a
+        # real translated error rather than an uncaught 500 in case the
+        # two ever drift.
+        return validation_error(
+            "reason", f"{reason!r} is not a recognized waste reason.", accepted=list(_WASTE_REASONS)
+        )
+    except Exception:
+        logger.error("log_waste_failed", exc_info=True, item_name=item_name)
+        return internal_error()
+
+
+@mcp.tool
+async def get_waste_stats(time_range: str) -> dict[str, Any]:
+    """Returns waste statistics for time_range ("this_week",
+    "this_month", or "all_time"): total_items_wasted (a count of
+    logged waste events in the window, not a quantity sum — quantities
+    can be in incompatible units), most_wasted (ranked by count within
+    the window, each with its dominant reason), trend (the window's
+    count against the immediately preceding equivalent period — null
+    change_pct with an explanatory message when either period has too
+    few entries to compare meaningfully, or for "all_time", which has
+    no previous period at all), and active_insights (every item
+    currently at or above the insight threshold, ALWAYS computed
+    all-time regardless of time_range — an insight is a standing
+    behavioral flag, not something that resets just because a narrower
+    window was requested).
+
+    Returns a structured {"error": "validation_error", ...} naming the
+    accepted time_range values if it isn't one of them.
+    """
+    if time_range not in _WASTE_TIME_RANGES:
+        return validation_error(
+            "time_range",
+            f"{time_range!r} is not a recognized time_range.",
+            accepted=list(_WASTE_TIME_RANGES),
+        )
+    try:
+        db = get_pantry_db()
+        result = await _get_waste_stats(time_range, pantry_db=db)  # type: ignore[arg-type]
+        return waste_stats_to_dict(result)
+    except Exception:
+        logger.error("get_waste_stats_failed", exc_info=True, time_range=time_range)
         return internal_error()

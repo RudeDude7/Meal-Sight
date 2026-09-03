@@ -1,4 +1,4 @@
-"""Confirms the six pantry-manager tools are all registered, described,
+"""Confirms the eight pantry-manager tools are all registered, described,
 and schema'd the way an MCP client (and, later, an agent selecting among
 them) actually needs — using the real FastMCP in-memory client, so this
 exercises the real MCP protocol, not just server.py's Python functions
@@ -17,10 +17,12 @@ EXPECTED_TOOLS: dict[str, set[str]] = {
     "flag_expiring": {"days_threshold"},
     "create_grocery_list": {"missing_by_recipe"},
     "get_grocery_list": {"list_id"},
+    "log_waste": {"item_name", "quantity_wasted", "unit", "reason"},
+    "get_waste_stats": {"time_range"},
 }
 
 
-async def test_all_six_tools_are_listed_with_non_empty_descriptions(mcp_client: Client[Any]) -> None:
+async def test_all_eight_tools_are_listed_with_non_empty_descriptions(mcp_client: Client[Any]) -> None:
     tools = await mcp_client.list_tools()
     names = {t.name for t in tools}
 
@@ -73,3 +75,11 @@ async def test_remove_items_description_states_it_is_called_after_cooking_is_con
 
     assert "after" in description
     assert "confirmed" in description or "actually" in description
+
+
+async def test_log_waste_description_states_it_deducts_from_the_pantry(mcp_client: Client[Any]) -> None:
+    tools = {t.name: t for t in await mcp_client.list_tools()}
+    description = (tools["log_waste"].description or "").lower()
+
+    assert "deduct" in description
+    assert "remove_items" in description

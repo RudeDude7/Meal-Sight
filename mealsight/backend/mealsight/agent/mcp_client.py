@@ -73,6 +73,8 @@ EXPECTED_TOOLS: dict[ServerName, frozenset[str]] = {
             "flag_expiring",
             "create_grocery_list",
             "get_grocery_list",
+            "log_waste",
+            "get_waste_stats",
         }
     ),
     "user_intelligence": frozenset(

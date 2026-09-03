@@ -25,6 +25,7 @@ from mealsight.pantry.models import (
     GroceryQuantity,
     GrocerySection,
     MissingIngredientInput,
+    MostWastedItem,
     PantryChangeDetail,
     PantryItem,
     PantryItemInput,
@@ -33,11 +34,17 @@ from mealsight.pantry.models import (
     RemovalDetail,
     RemovalItemInput,
     RemovalResult,
+    WasteLogResult,
+    WasteReason,
+    WasteStats,
+    WasteTimeRange,
+    WasteTrend,
 )
 from mealsight.pantry.query import get_pantry
 from mealsight.pantry.remove import remove_items
 from mealsight.pantry.shelf_life import CATEGORY_DEFAULTS, ShelfLifeEntry, resolve_shelf_life
 from mealsight.pantry.update import update_pantry
+from mealsight.pantry.waste import WASTE_REASONS, InvalidWasteReasonError, get_waste_stats, log_waste
 
 __all__ = [
     "CATEGORY_DEFAULTS",
@@ -45,6 +52,7 @@ __all__ = [
     "EXPLICIT_CATEGORY_MAP",
     "SECTION_ORDER",
     "STAPLE_ITEMS",
+    "WASTE_REASONS",
     "Category",
     "ExpiringItem",
     "FlaggedPantryItem",
@@ -54,7 +62,9 @@ __all__ = [
     "GroceryListSection",
     "GroceryQuantity",
     "GrocerySection",
+    "InvalidWasteReasonError",
     "MissingIngredientInput",
+    "MostWastedItem",
     "PantryChangeDetail",
     "PantryItem",
     "PantryItemInput",
@@ -64,10 +74,17 @@ __all__ = [
     "RemovalItemInput",
     "RemovalResult",
     "ShelfLifeEntry",
+    "WasteLogResult",
+    "WasteReason",
+    "WasteStats",
+    "WasteTimeRange",
+    "WasteTrend",
     "create_grocery_list",
     "flag_expiring",
     "get_grocery_list",
     "get_pantry",
+    "get_waste_stats",
+    "log_waste",
     "remove_items",
     "resolve_category",
     "resolve_shelf_life",

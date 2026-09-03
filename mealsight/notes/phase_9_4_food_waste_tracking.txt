@@ -1,0 +1,418 @@
+PHASE 9.4 STUDY NOTES: FOOD WASTE TRACKING — THE TABLE THE ORIGINAL
+SPEC DEFERRED, BUILT AS ITS OWN "CORRESPONDING PHASE TASK"
+=============================================================
+
+db/schema/pantry.sql carried a literal standing instruction from an
+earlier phase: "The waste_log table from the original spec is
+deliberately deferred — do not add it here without a corresponding
+phase task." This phase is that task. Everything about the feature —
+schema, canonicalization, MCP tools, REST routes, and a frontend
+action — was built new; nothing here is a bug fix.
+
+Files edited: backend/mealsight/{config/settings.py,db/schema/
+pantry.sql,pantry/{__init__.py,models.py},mcp_servers/pantry_manager/
+{server.py,serialization.py},agent/mcp_client.py,api/app.py},
+frontend/src/{types/pantry.ts,pages/Pantry.tsx,components/pantry/
+PantryItemRow.tsx}. Files added: backend/mealsight/{pantry/waste.py,
+api/routers/waste.py}, backend/tests/test_pantry/test_waste.py,
+frontend/src/api/waste.ts. Tests extended: backend/tests/{test_pantry/
+conftest.py (unchanged — already fit),test_mcp_servers/
+test_pantry_manager/{test_tool_schemas.py,test_tools.py},test_api/
+test_app.py}.
+
+
+1. READ FIRST: TWO REAL DISCREPANCIES BETWEEN THE TASK'S OWN FRAMING
+   AND WHAT ACTUALLY EXISTED
+=============================================================
+The task said "settings has waste_insight_threshold (default 3)" —
+it didn't; the field never existed. Added it fresh
+(waste_insight_threshold: int = 3), same pattern as the weather-phase
+finding that openweather_base_url didn't exist either despite being
+named as if it did. Both times: reported the gap before writing code
+that assumed it, rather than silently inventing the field and letting
+the task's own framing stand uncorrected.
+
+pantry.sql's own comment already named this exact phase's job
+precisely ("do not add it here without a corresponding phase task") —
+confirmed by reading the schema file directly before touching it, not
+assumed from the task's description alone.
+
+remove_items (pantry/remove.py, and its own MCP tool docstring) already
+described "throwing out spoiled food" as a valid, existing removal
+reason before this phase touched anything — a real signal, read
+directly from the code rather than guessed, that reusing remove_items
+for the pantry-deduction half of waste logging was the natural fit,
+not a new pattern invented for this phase.
+
+
+2. THE waste_log SCHEMA, AND estimated_cost's OWN HONEST HANDLING
+=============================================================
+    CREATE TABLE IF NOT EXISTS waste_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_name TEXT NOT NULL,
+        quantity_wasted REAL,
+        unit TEXT,
+        reason TEXT NOT NULL,
+        estimated_cost REAL,
+        logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+Two indexes (item_name, logged_at) mirror pantry's own indexing
+pattern, since get_waste_stats' own queries filter/group on exactly
+those two columns.
+
+estimated_cost is a real column in this table (kept, per the original
+spec's own field list) but log_waste NEVER writes a non-null value
+into it — there is no product-price table, no grocery-cost API, no
+price data anywhere in this project at all. The task offered "omit the
+column or leave it null and never populate it" as the two honest
+options; keeping the column but leaving it permanently unpopulated was
+chosen over deleting it, since deleting it would have been inventing a
+scope decision ("this feature will never have cost data") nobody
+actually made — a future phase with real price data can start writing
+it with no migration required, and nothing currently reads it as if it
+meant something.
+
+VERIFIED, NOT ASSUMED, THAT SCHEMA INIT PICKS THIS UP AUTOMATICALLY:
+mcp_servers/pantry_manager/__main__.py's own _initialize_schema()
+calls init_database(db, db.schema_path), and db.schema_path.read_text()
+happens fresh on every call — nothing caches the schema file's
+contents across a restart. Confirmed live, not just by reading the
+code: pointed settings.pantry_db_path at a directory that had never
+existed, ran the real _initialize_schema() function, and watched
+waste_log appear with its full 7-column shape with zero manual steps
+(section 8).
+
+
+3. log_waste's OWN CENTRAL DESIGN DECISION: IT DEDUCTS THE PANTRY,
+   IN THE SAME CALL, ALWAYS
+=============================================================
+The task asked this explicitly as an open decision, with its own
+framing already leaning toward one answer ("a user throwing something
+out has already lost it, and requiring two calls invites
+inconsistency") — that framing was followed, and log_waste calls
+mealsight.pantry.remove.remove_items directly rather than reimplementing
+any of its clamped-removal logic. A caller never gets to log a waste
+event without the pantry reflecting it, and never gets to deduct
+"because of waste" without a reason being recorded — the two
+possibilities that would otherwise let the two facts drift apart
+(a logged waste event with no matching pantry change, or a pantry
+change with no recorded reason) are both structurally impossible here,
+not just discouraged by convention.
+
+remove_items' OWN consumption_log write still happens exactly as it
+always does (used_for_recipe=None, since this removal isn't tied to
+cooking a recipe) — waste_log and consumption_log serve genuinely
+different purposes (one is a general ledger of every quantity
+decrease regardless of cause, the other exists specifically to support
+reason-aware insights) and this phase never tried to collapse them
+into one table.
+
+quantity_wasted is REQUIRED (not optional), matching remove_items' own
+quantity_used requirement — "log an unspecified amount of waste" isn't
+a shape remove_items can act on, so log_waste doesn't accept it either.
+
+
+4. THE MOOD-STYLE MAPPING PATTERN, REUSED FOR WASTE REASONS
+=============================================================
+Two small, explicitly documented dicts (_REASON_SUGGESTIONS,
+_REASON_LABELS in pantry/waste.py) are the one place a reason maps to
+actionable copy — the same "one documented mapping place" shape phase
+9.3's own weather-mood mapping used, applied here to
+expired/spoiled/didn_t_like/too_much instead of temperature/condition
+bands. _dominant_reason uses Counter.most_common's own first-inserted
+tiebreak (chronological order, since waste_log rows are read in
+insertion order) — a deterministic tiebreak, not an arbitrary one,
+recorded the same way this project always records a tiebreak choice
+rather than leaving it implicit.
+
+Insight sentence, built once by _build_insight and reused identically
+by both log_waste (in-the-moment) and get_waste_stats (all-time,
+section 5): "You've thrown away {item} {count} times, {all|mostly}
+{reason} — consider {suggestion}." — matches the task's own sample
+sentence in shape, though the exact suggestion wording ("buying smaller
+amounts or keeping extra in the freezer" for "expired") is this
+phase's own, not a literal copy of the task's illustrative example.
+
+
+5. get_waste_stats: WHY active_insights IS THE ONE FIELD THAT IGNORES
+   time_range ENTIRELY
+=============================================================
+total_items_wasted, most_wasted, and trend are all scoped to whatever
+time_range was requested — total_items_wasted is a COUNT of logged
+events, deliberately not a sum of quantity_wasted (quantities can be in
+incompatible units, "2 cups" plus "3 count" is meaningless to add).
+active_insights is the one exception: computed all-time regardless of
+which time_range was asked for, because an insight ("you keep wasting
+spinach") is a standing behavioral flag, not something that should
+silently disappear just because a caller asked for "this_week" and
+this week happens to have zero spinach entries in it. Verified live,
+not just asserted: logging three all-time-old spinach entries and then
+asking for this_week's own stats returns total_items_wasted=0 for the
+window while active_insights still names spinach (see the test of the
+identical name in test_waste.py).
+
+MIN_ENTRIES_FOR_TREND = 5 — "a handful," the task's own literal
+framing — applied to BOTH the current and the previous period, not
+just one: a current period with 10 entries against a previous period
+with 1 would otherwise report something like "900% up," a real number
+that would still be a misleading one built on a near-meaningless base.
+Both periods have to clear the bar before a percentage is trusted at
+all; otherwise the trend carries an explicit "not enough data" message
+and a null change_pct rather than a number dressed up as more
+meaningful than it is. all_time has no previous period at all — its
+own trend is null with a distinct message ("no previous period to
+compare against"), not "insufficient data" (a different, more accurate
+statement: the comparison isn't thin, it's structurally absent).
+
+TIMESTAMP COMPARISON BUG FOUND AND FIXED DURING THIS PHASE'S OWN
+DEVELOPMENT, NOT LEFT AS A LATENT RISK: logged_at is a plain TEXT
+column (no PARSE_DECLTYPES), so binding a raw Python datetime as a
+query parameter would rely on sqlite3's own default adapter — deprecated
+as of 3.12, and its actual output format (includes microseconds)
+doesn't exactly match what CURRENT_TIMESTAMP itself writes
+("YYYY-MM-DD HH:MM:SS", no microseconds), which risks a real off-by-a-
+fraction-of-a-second boundary mismatch in a lexicographic string
+comparison. Fixed by explicitly formatting every datetime bound as a
+query parameter through the same format _datetime_utils.
+parse_sqlite_timestamp already parses from, rather than trusting an
+implicit conversion.
+
+
+6. TWO TEST BUGS FOUND WHILE VERIFYING — RECORDED BECAUSE THE FIRST
+   ONE LOOKED LIKE A REAL PRODUCTION BUG UNTIL IT WASN'T
+=============================================================
+test_canonically_equivalent_names_accumulate_as_one_item's own hand-
+built synonym_map was keyed by the RAW plural form ("scallions") when
+resolve_canonical only ever looks up the already-NORMALIZED form
+(normalize_ingredient turns "scallions" into "scallion", singular,
+before any synonym lookup happens) — the test's own map never actually
+matched anything, and a second bug (no ORDER BY on a SELECT against an
+indexed column, which let SQLite return rows in index order rather
+than insertion order) made the resulting failure look for a moment
+like it had two independent causes rather than one keying mistake
+compounded by an unrelated ordering assumption. Fixed by re-keying the
+map to the correctly-normalized form and adding an explicit ORDER BY —
+a reminder that "no ORDER BY" never means "insertion order" once an
+index exists on the queried column, even when it happened to look that
+way in an earlier, unindexed test.
+
+test_this_week_excludes_entries_from_before_the_current_week's own
+local start_of_week computation forgot the .replace(hour=0, ...) step
+the REAL _period_bounds function applies — the test computed "7 days
+back at the same time of day" instead of "midnight of this week's
+Monday," so an entry placed one minute before the test's own
+(wrong) boundary actually landed one minute before the REAL boundary
+plus twelve hours, still safely inside the real current-week window —
+the test's own expectation was wrong, not the production code. Fixed
+by replicating _period_bounds' exact boundary computation in the test
+rather than a simplified approximation of it.
+
+
+7. WHY THE PANTRY-ROW ACTION IS "THROW OUT," NOT A REPLACEMENT FOR
+   "REMOVE"
+=============================================================
+"Throw out" only appears on a row the backend has already flagged
+expired (expiring.py's own real days_remaining<0 signal, the same one
+GET /api/pantry/expiring already surfaces) — the task's own explicit
+"natural place" framing. A merely expiring-soon or fresh row keeps only
+the pre-existing plain Remove action; both end up calling a pantry-
+deducting endpoint, but only Throw out records WHY, which is the one
+thing get_waste_stats' insights actually depend on. No new Button
+variant, no new primitive — Throw out reuses the identical ghost-
+button-then-confirm two-step shape Remove already established,
+following the task's own "no new visual language" instruction.
+
+THE INSIGHT BANNER LIVES ON THE PAGE, NOT THE ROW — A REAL DESIGN
+CONSTRAINT, NOT A STYLE CHOICE: log_waste always deducts the FULL
+quantity for a thrown-out item, so the row that triggered the action is
+gone by the time the parent reloads. An insight rendered inside the row
+itself would never be visible — the component unmounts before a user
+could read it. Pantry.tsx owns a page-level wasteInsight state instead,
+set directly from log_waste's own real response, shown as a dismissible
+Ticket at the top of the page. This was caught and fixed during
+implementation, not after: an earlier draft of PantryItemRow tried to
+hold the insight in row-local state before this was noticed.
+
+
+8. VERIFICATION: EVERY NUMBER CAME FROM A REAL RUN, INCLUDING A REAL
+   MUTATION THAT WAS BACKED UP AND RESTORED
+=============================================================
+Static: ruff clean, mypy --strict clean (122 source files), full
+pytest suite 585 passed / 3 deselected. Frontend typecheck/lint/build
+all clean.
+
+Live insight generation, real pantry.db, real MCP tool functions (not
+mocked): logged "kale" wasted 3 times — insight null, null, then on the
+third call: "You've thrown away kale 3 times, all expired — consider
+buying smaller amounts or keeping extra in the freezer." Exactly at the
+threshold, not one call before it.
+
+Live get_waste_stats, all three time ranges, same real data:
+total_items_wasted=3 and most_wasted=[{"kale", 3, "expired"}] in every
+range; this_week/this_month both correctly reported "not enough data"
+(3 entries, below MIN_ENTRIES_FOR_TREND=5); all_time correctly reported
+"no previous period to compare against" rather than "insufficient
+data" — the two messages mean genuinely different things and both were
+produced correctly by the code they're meant to distinguish.
+
+Live health check, real running backend: {"pantry_manager":
+{"status":"up","tool_count":8}} — confirms all eight tools (six
+original plus log_waste/get_waste_stats) actually registered and
+passed the real MCP startup handshake, not just present in source.
+
+Fresh database: a directory that had never existed before this run,
+pointed at directly by settings.pantry_db_path, got waste_log with its
+full 7-column shape via the real _initialize_schema() startup function
+— zero manual steps, confirmed by inspecting PRAGMA table_info directly
+against the freshly-created file.
+
+Screenshots, real running frontend + backend, real Puppeteer clicks:
+before (multiple genuinely-expired real pantry rows each showing
+"Throw out" — Chicken Thigh, Chicken Breast, Banana, Spinach, Green
+Onion, Milk — while merely-expiring-soon rows like Blueberry/Heavy
+Cream/Raspberry correctly show only Remove, no Throw out), confirm
+("Log as wasted (expired) and remove it? Yes, throw out / Cancel"),
+and after (Chicken Thigh — the one actually thrown out — genuinely
+gone from the list, a real pantry deduction, not a UI-only removal).
+
+THE CLEANUP, RECORDED EXPLICITLY: the live verification run genuinely
+mutated the real pantry.db (three synthetic "kale" waste_log rows, one
+real "Chicken Thigh" pantry row consumed by the screenshot demo).
+Backed the file up before running any of it, and restored it
+afterward, following this project's own standing safe-mutation
+discipline (back up first, confirm nothing else holds an open
+connection before restoring, verify the restore with an independent
+query) rather than leaving demo data sitting in what's meant to be the
+real local dataset.
+
+
+9. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+Deleting the estimated_cost column versus keeping it permanently null
+    Rejected deleting it: the column is part of the original spec's own
+    field list, and removing it would have been making a real scope
+    decision ("this feature will never carry cost data") that nobody
+    actually asked for. Keeping it unpopulated costs nothing and leaves
+    a real future phase with price data free to start writing it
+    without a migration.
+
+log_waste requiring a separate remove_items call from its own caller
+versus deducting the pantry internally
+    Rejected the two-call design: the task's own framing already named
+    the real risk (drift between "logged" and "actually removed"), and
+    a single atomic call structurally closes that gap rather than
+    relying on every future caller remembering to make both calls in
+    the right order.
+
+Scoping active_insights to the requested time_range versus always
+computing it all-time
+    Rejected scoping it: an insight is meant to describe a standing
+    pattern in the user's own behavior, and a pattern real enough to
+    surface at all shouldn't vanish from the response just because a
+    narrower window was asked for — verified directly that this
+    actually matters (section 5's own this_week-with-old-data case).
+
+Requiring only the CURRENT period to clear MIN_ENTRIES_FOR_TREND versus
+requiring both periods
+    Rejected checking only the current period: a real trend comparison
+    against a near-empty previous period (say, one entry) can produce a
+    huge, technically-correct-but-meaningless percentage — "the data is
+    insufficient" has to describe the weaker of the two periods, not
+    just the one being asked about right now.
+
+Rendering the post-waste insight inside the pantry row itself versus
+lifting it to the page
+    Rejected the row-local version once the actual unmount timing was
+    traced through: log_waste always removes the full quantity, so the
+    row that would show the insight is gone before a user could read
+    it. The page is the only place in this component tree stable
+    enough to hold something that needs to outlive the row that
+    produced it.
+
+
+10. GLOSSARY
+=============================================================
+waste_log
+    New pantry.db table: id, item_name (canonical), quantity_wasted,
+    unit, reason, estimated_cost (always null), logged_at.
+
+mealsight.pantry.waste.log_waste
+    Validates reason, canonicalizes item_name, calls remove_items
+    against the SAME pantry_db (deducting the pantry in the same call),
+    writes the waste_log row, and returns an insight once this item's
+    own all-time count reaches settings.waste_insight_threshold.
+
+mealsight.pantry.waste.get_waste_stats
+    total_items_wasted/most_wasted/trend scoped to time_range;
+    active_insights always all-time. MIN_ENTRIES_FOR_TREND=5 gates
+    change_pct on both periods at once.
+
+InvalidWasteReasonError
+    ValueError subclass log_waste raises for an unrecognized reason —
+    the pantry_manager MCP tool also pre-checks the same WASTE_REASONS
+    set before ever calling log_waste, so the real error path (an
+    invalid reason from a real caller) never actually reaches this
+    exception in practice; it exists as a defensive guard in case the
+    two checks ever drift apart.
+
+_REASON_SUGGESTIONS / _REASON_LABELS
+    The one documented place a waste reason maps to actionable copy —
+    the same "one documented mapping" shape phase 9.3's weather-mood
+    dict used, applied to expired/spoiled/didn_t_like/too_much.
+
+"Throw out" (PantryItemRow.tsx)
+    The waste-logging action, shown only on a row the backend has
+    already flagged expired — reuses the exact ghost-then-confirm
+    pattern Remove already established, reason hardcoded to "expired"
+    since that's the one condition that triggers the row's own
+    visibility in the first place.
+
+
+11. INTERVIEW TALKING POINTS
+=============================================================
+Q: Why does log_waste call remove_items instead of writing its own
+pantry-decrement SQL directly?
+
+    Two reasons. First, remove_items already has the real, tested
+    clamped-removal behavior (never goes negative, deletes a row that
+    reaches zero, writes consumption_log) — reimplementing any of that
+    here would be a second copy of logic this project has already
+    gotten right once, with its own chance to drift out of sync with
+    the original. Second, it's the same principle this whole codebase
+    already follows everywhere else (expiring.py reuses get_pantry
+    rather than recomputing days_remaining, the pantry-manager MCP
+    server never reimplements logic its own tools already call into) —
+    waste tracking is a new FEATURE, but "how do you decrement a pantry
+    row safely" isn't a new PROBLEM, so it shouldn't get a new answer.
+
+Q: Your own trend logic treats "all_time" and "not enough data"
+differently even though both end up with a null change_pct. Why not
+just use one generic "insufficient" message for both?
+
+    Because they're not the same situation, and collapsing them would
+    quietly lose real information. "Not enough data" means a real
+    previous period exists but doesn't have enough entries yet to trust
+    a percentage against — it's a statement about sample size that will
+    resolve itself as more data comes in. "all_time has no previous
+    period" is a structural fact that will never resolve, no matter how
+    much data accumulates — there is no month before all_time.
+    Reporting them with the same wording would make a permanent
+    limitation look like a temporary one.
+
+Q: You mentioned finding two bugs in your OWN tests while verifying
+this feature. Doesn't that undermine confidence in the tests that
+didn't fail?
+
+    It's closer to the opposite — both bugs were caught specifically
+    because I ran the tests and read the actual failure output rather
+    than trusting that a test I'd just written must be correct. The
+    first one (a wrongly-keyed synonym map plus an un-ordered SELECT)
+    looked for a moment like a real canonicalization bug in production
+    code; tracing it down to the test's own setup, rather than patching
+    the production code to make a wrong test pass, is what kept an
+    actual regression from being introduced right there. The second
+    (a boundary computation that didn't match _period_bounds exactly)
+    is the same lesson this project has hit before — a test's own
+    "obviously correct" helper logic needs to be checked against the
+    real implementation it's testing, not just against intuition.

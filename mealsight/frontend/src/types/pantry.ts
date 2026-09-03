@@ -110,3 +110,54 @@ export interface GroceryList {
   created_at: string
   sections: GroceryListSection[]
 }
+
+export type WasteReason = 'expired' | 'spoiled' | 'didn_t_like' | 'too_much'
+
+export type WasteTimeRange = 'this_week' | 'this_month' | 'all_time'
+
+/** The input shape for POST /api/waste. */
+export interface LogWasteInput {
+  item_name: string
+  quantity_wasted: number
+  unit: string | null
+  reason: WasteReason
+}
+
+/**
+ * What POST /api/waste returns. insight is null unless this item has
+ * now been logged as wasted the backend's own configured threshold
+ * times or more (all-time) — see mealsight.pantry.waste.
+ */
+export interface WasteLogResult {
+  id: number
+  item_name: string
+  canonical_name: string
+  quantity_wasted: number
+  unit: string | null
+  reason: WasteReason
+  logged_at: string
+  removal: RemovalDetail
+  insight: string | null
+}
+
+export interface MostWastedItem {
+  item_name: string
+  count: number
+  dominant_reason: WasteReason
+}
+
+export interface WasteTrend {
+  current_period_count: number
+  previous_period_count: number
+  change_pct: number | null
+  message: string
+}
+
+/** What GET /api/waste returns. active_insights is always all-time, independent of time_range. */
+export interface WasteStats {
+  time_range: WasteTimeRange
+  total_items_wasted: number
+  most_wasted: MostWastedItem[]
+  trend: WasteTrend
+  active_insights: string[]
+}

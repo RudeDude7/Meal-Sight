@@ -212,3 +212,73 @@ class GroceryList(BaseModel):
     status: str
     created_at: datetime
     sections: list[GroceryListSection]
+
+
+WasteReason = Literal["expired", "spoiled", "didn_t_like", "too_much"]
+
+WasteTimeRange = Literal["this_week", "this_month", "all_time"]
+
+
+class WasteLogResult(BaseModel):
+    """What log_waste returns: the logged row itself, plus what
+    happened to the pantry (removal is never skipped — see
+    mealsight.pantry.waste's own module docstring for why logging waste
+    always deducts from the pantry in the same call), plus an insight
+    string once this item has been wasted settings.waste_insight_
+    threshold times or more (all-time), else null."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: int
+    item_name: str
+    canonical_name: str
+    quantity_wasted: float
+    unit: str | None
+    reason: WasteReason
+    logged_at: datetime
+    removal: RemovalDetail
+    insight: str | None
+
+
+class MostWastedItem(BaseModel):
+    """One line of get_waste_stats' own most_wasted ranking — a
+    canonical item, how many times it was logged as wasted within the
+    requested time_range, and which reason was cited most often across
+    those same entries."""
+
+    model_config = ConfigDict(frozen=True)
+
+    item_name: str
+    count: int
+    dominant_reason: WasteReason
+
+
+class WasteTrend(BaseModel):
+    """Compares the requested time_range's own count against the
+    immediately preceding equivalent period (last week for this_week,
+    last calendar month for this_month). change_pct is null — never a
+    misleading percentage — whenever either period has fewer than
+    mealsight.pantry.waste.MIN_ENTRIES_FOR_TREND entries, or for
+    all_time (which has no previous period to compare against at all)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    current_period_count: int
+    previous_period_count: int
+    change_pct: float | None
+    message: str
+
+
+class WasteStats(BaseModel):
+    """What get_waste_stats returns. active_insights is always computed
+    all-time, independent of time_range — an insight is a standing
+    behavioral flag ("you keep wasting spinach"), not something that
+    should reset every week just because the requested window did."""
+
+    model_config = ConfigDict(frozen=True)
+
+    time_range: WasteTimeRange
+    total_items_wasted: int
+    most_wasted: list[MostWastedItem]
+    trend: WasteTrend
+    active_insights: list[str]

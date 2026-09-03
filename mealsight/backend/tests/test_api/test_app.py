@@ -65,6 +65,8 @@ DEFAULT_INVENTORY: dict[str, list[str]] = {
         "flag_expiring",
         "create_grocery_list",
         "get_grocery_list",
+        "log_waste",
+        "get_waste_stats",
     ],
     "user_intelligence": [
         "get_user_profile",
@@ -388,6 +390,61 @@ async def test_grocery_list_proxies_mcp_data() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"id": 1, "sections": []}
+
+
+async def test_waste_post_proxies_mcp_data() -> None:
+    manager = FakeManager(
+        responses={
+            ("pantry_manager", "log_waste"): ToolCallResult(
+                success=True, data={"id": 1, "item_name": "spinach", "insight": None}
+            )
+        }
+    )
+    async with running_client(manager) as (client, _manager):
+        response = await client.post(
+            "/api/waste",
+            json={"item_name": "spinach", "quantity_wasted": 1.0, "unit": "bag", "reason": "expired"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"id": 1, "item_name": "spinach", "insight": None}
+    call_args = next(args for _, tool, args in manager.calls if tool == "log_waste")
+    assert call_args == {
+        "item_name": "spinach",
+        "quantity_wasted": 1.0,
+        "unit": "bag",
+        "reason": "expired",
+    }
+
+
+async def test_waste_get_proxies_mcp_data() -> None:
+    manager = FakeManager(
+        responses={
+            ("pantry_manager", "get_waste_stats"): ToolCallResult(
+                success=True, data={"time_range": "this_week", "total_items_wasted": 0}
+            )
+        }
+    )
+    async with running_client(manager) as (client, _manager):
+        response = await client.get("/api/waste", params={"time_range": "this_week"})
+
+    assert response.status_code == 200
+    assert response.json() == {"time_range": "this_week", "total_items_wasted": 0}
+
+
+async def test_waste_get_validation_error_becomes_400() -> None:
+    manager = FakeManager(
+        responses={
+            ("pantry_manager", "get_waste_stats"): ToolCallResult(
+                success=True,
+                data={"error": "validation_error", "parameter": "time_range", "message": "bad range"},
+            )
+        }
+    )
+    async with running_client(manager) as (client, _manager):
+        response = await client.get("/api/waste", params={"time_range": "bogus"})
+
+    assert response.status_code == 400
 
 
 # --------------------------------------------------------------------

@@ -2,9 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { ApiError } from '@/api/client'
 import { deletePantryItem, getExpiringPantryItems, getPantry, updatePantry } from '@/api/pantry'
+import { logWaste } from '@/api/waste'
 import { PageError } from '@/components/common/PageError'
 import { PageLoading } from '@/components/common/PageLoading'
+import { Button } from '@/components/primitives/Button'
 import { EmptyState } from '@/components/primitives/EmptyState'
+import { Ticket } from '@/components/primitives/Ticket'
 import { AddPantryItemForm } from '@/components/pantry/AddPantryItemForm'
 import { PantryItemRow } from '@/components/pantry/PantryItemRow'
 import { isStale } from '@/lib/pantryStatus'
@@ -27,6 +30,12 @@ export function Pantry() {
   const [expiring, setExpiring] = useState<ExpiringItem[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  // Set only right after a "Throw out" action, from log_waste's own
+  // real insight text (mealsight.pantry.waste) — never client-invented
+  // copy. The row that triggered it is gone by the time this renders
+  // (log_waste always removes the full quantity), so the insight has
+  // to live at the page level to be visible at all.
+  const [wasteInsight, setWasteInsight] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -72,6 +81,21 @@ export function Pantry() {
 
   async function handleRemove(item: PantryItem): Promise<void> {
     await deletePantryItem(item.id)
+    await load()
+  }
+
+  async function handleWasteItem(item: PantryItem): Promise<void> {
+    // The full quantity, not a partial one: "throw out" on an expired
+    // row means the whole thing is gone, the same way this page's own
+    // Remove already treats a delete as "all of it" (deletePantryItem
+    // resolves to remove_items with the item's full current quantity).
+    const result = await logWaste({
+      item_name: item.name,
+      quantity_wasted: item.quantity ?? 0,
+      unit: item.unit,
+      reason: 'expired',
+    })
+    setWasteInsight(result.insight)
     await load()
   }
 
@@ -122,6 +146,19 @@ export function Pantry() {
     <section className="rounded-sm bg-paper-raised p-8">
       <h1 className="text-title text-ink-900">Pantry</h1>
 
+      {wasteInsight && (
+        <div className="mt-6">
+          <Ticket padding="compact" className="border-signal-info">
+            <div className="flex items-start justify-between gap-4">
+              <p className="text-body-lg text-ink-900">{wasteInsight}</p>
+              <Button variant="ghost" onClick={() => setWasteInsight(null)}>
+                Dismiss
+              </Button>
+            </div>
+          </Ticket>
+        </div>
+      )}
+
       {sortedItems.length === 0 ? (
         <div className="mt-6">
           <EmptyState
@@ -138,6 +175,7 @@ export function Pantry() {
               expiring={expiringByName.get(canonicalKey(item.name))}
               onAdjustQuantity={handleAdjustQuantity}
               onRemove={handleRemove}
+              onWaste={handleWasteItem}
             />
           ))}
         </div>

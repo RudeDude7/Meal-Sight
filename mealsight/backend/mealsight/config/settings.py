@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     expiring_soon_days: int = 3
     stale_pantry_item_days: int = 14
 
+    # --- Waste --------------------------------------------------------------
+    # How many times an item has to be logged as wasted (all-time, not
+    # scoped to any one get_waste_stats time_range) before mealsight.
+    # pantry.waste generates an insight about it.
+    waste_insight_threshold: int = 3
+
     # --- Nutrition --------------------------------------------------------------
     high_protein_threshold_g: float = 25
     low_carb_threshold_g: float = 30

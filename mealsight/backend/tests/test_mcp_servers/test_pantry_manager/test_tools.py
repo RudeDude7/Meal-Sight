@@ -157,3 +157,63 @@ async def test_get_grocery_list_no_active_list_returns_structured_not_found(mcp_
     result = await mcp_client.call_tool("get_grocery_list", {})
 
     assert result.data["error"] == "not_found"
+
+
+async def test_log_waste_happy_path_deducts_the_pantry(mcp_client: Client[Any]) -> None:
+    await insert_pantry_item(name="spinach", quantity=5.0)
+
+    result = await mcp_client.call_tool(
+        "log_waste", {"item_name": "spinach", "quantity_wasted": 2.0, "unit": "count", "reason": "spoiled"}
+    )
+
+    assert result.data["reason"] == "spoiled"
+    assert result.data["removal"]["quantity_removed"] == 2.0
+    assert result.data["insight"] is None
+
+
+async def test_log_waste_invalid_reason_returns_validation_error(mcp_client: Client[Any]) -> None:
+    result = await mcp_client.call_tool(
+        "log_waste", {"item_name": "spinach", "quantity_wasted": 1.0, "unit": None, "reason": "bogus"}
+    )
+
+    assert result.data["error"] == "validation_error"
+    assert result.data["parameter"] == "reason"
+    assert set(result.data["accepted_values"]) == {"expired", "spoiled", "didn_t_like", "too_much"}
+
+
+async def test_log_waste_insight_appears_at_the_threshold_through_the_real_mcp_tool(
+    mcp_client: Client[Any],
+) -> None:
+    for _ in range(2):
+        result = await mcp_client.call_tool(
+            "log_waste",
+            {"item_name": "spinach", "quantity_wasted": 1.0, "unit": "bag", "reason": "expired"},
+        )
+        assert result.data["insight"] is None
+
+    result = await mcp_client.call_tool(
+        "log_waste", {"item_name": "spinach", "quantity_wasted": 1.0, "unit": "bag", "reason": "expired"}
+    )
+    assert result.data["insight"] is not None
+    assert "spinach" in result.data["insight"]
+
+
+async def test_get_waste_stats_happy_path(mcp_client: Client[Any]) -> None:
+    await mcp_client.call_tool(
+        "log_waste", {"item_name": "spinach", "quantity_wasted": 1.0, "unit": "bag", "reason": "expired"}
+    )
+
+    result = await mcp_client.call_tool("get_waste_stats", {"time_range": "all_time"})
+
+    assert result.data["time_range"] == "all_time"
+    assert result.data["total_items_wasted"] == 1
+    assert result.data["most_wasted"][0]["item_name"] == "spinach"
+    assert result.data["trend"]["change_pct"] is None  # all_time has no previous period
+
+
+async def test_get_waste_stats_invalid_time_range_returns_validation_error(mcp_client: Client[Any]) -> None:
+    result = await mcp_client.call_tool("get_waste_stats", {"time_range": "bogus"})
+
+    assert result.data["error"] == "validation_error"
+    assert result.data["parameter"] == "time_range"
+    assert set(result.data["accepted_values"]) == {"this_week", "this_month", "all_time"}

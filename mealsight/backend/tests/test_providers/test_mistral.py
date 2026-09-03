@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from mealsight.config.settings import MODEL_RATE_LIMITS, RateLimitSpec
 from mealsight.providers.exceptions import InvalidResponse
-from mealsight.providers.mistral import MistralProvider
+from mealsight.providers.mistral import MistralProvider, _describe_schema
 from mealsight.providers.rate_limiter import RateLimiter
 
 CHAT_URL = "https://api.mistral.ai/v1/chat/completions"
@@ -47,6 +47,59 @@ def _chat_response(content: str, *, prompt_tokens: int = 10, completion_tokens: 
             },
         },
     )
+
+
+class _Sub(BaseModel):
+    applies: bool
+    reasoning: str
+
+
+class _Nested(BaseModel):
+    chosen_id: str
+    note: str | None
+    tags: list[str]
+    detail: _Sub
+
+
+def test_describe_schema_is_a_compact_name_and_type_list_not_a_json_schema_dump() -> None:
+    # The exact defect-1 fix: field NAMES and rough TYPES, terse enough
+    # to cost near-zero extra tokens — never a full JSON Schema dump
+    # (no "title"/"description"/"$defs" keys, no per-field descriptions).
+    description = _describe_schema(_Ingredient)
+
+    assert description == '{"name": str, "quantity": int}'
+    assert "$defs" not in description
+    assert "title" not in description
+
+
+def test_describe_schema_recurses_into_a_nested_basemodel_field() -> None:
+    # RecipeDecision's own real shape (six nested DimensionReasoning
+    # objects) is exactly this case — a nested field must still produce
+    # a real, if terse, shape, not just the word "object".
+    description = _describe_schema(_Nested)
+
+    assert description == (
+        '{"chosen_id": str, "note": str|null, "tags": list[str], '
+        '"detail": {"applies": bool, "reasoning": str}}'
+    )
+
+
+@respx.mock
+async def test_complete_json_embeds_the_schema_so_a_caller_cannot_forget(
+    provider: MistralProvider,
+) -> None:
+    # The literal phase 6.3 bug: a caller whose OWN prompt text never
+    # mentions field names must still get a schema-conforming response,
+    # because complete_json itself now always tells the model the shape.
+    route = respx.post(CHAT_URL)
+    route.mock(return_value=_chat_response('{"name": "egg", "quantity": 3}'))
+
+    await provider.complete_json("list an ingredient — no field names given here", _Ingredient, TEST_MODEL)
+
+    sent_body = json.loads(route.calls[0].request.content)
+    sent_prompt = sent_body["messages"][-1]["content"]
+    assert '"name": str' in sent_prompt
+    assert '"quantity": int' in sent_prompt
 
 
 @respx.mock

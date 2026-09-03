@@ -8,6 +8,40 @@
   body {
     @apply bg-paper-0 text-ink-900 font-sans text-body-lg antialiased;
   }
+
+  /* Defect 5 fix: the page scrolls at the document/html level (there is
+     no nested overflow container), so a native focus-triggered
+     scrollIntoView (e.g. a mobile keyboard opening under a focused
+     textarea) has no idea the fixed 56px BottomTabBar (h-14, md:hidden
+     in NavShell.tsx) visually covers the bottom of the viewport — it
+     can scroll a target element flush with the viewport's bottom edge,
+     landing it behind the tab bar so a real tap there hits the tab bar
+     instead. scroll-padding-bottom reserves space so native
+     scroll-into-view respects it, the same way scroll-margin/padding is
+     meant to for any fixed overlay.
+
+     The reserved value is more than the bar's own 56px: scroll-padding
+     only guarantees clearance for whatever element is the actual
+     scroll-into-view TARGET (the focused textarea) — it says nothing
+     about interactive elements sitting further down the page, like
+     Home's own submit button (measured ~91px below the text field on
+     this page, itself ~40px tall). Reproducing with a squeezed,
+     soft-keyboard-sized viewport (375x320) confirmed 56px alone still
+     left the submit button's rect overlapping the tab bar's after a
+     focus-triggered scroll; 160px (bar height + realistic
+     field-to-action-button clearance, rounded up) was verified via the
+     same repro to clear it. Scoped to below md (768px), the exact
+     breakpoint the tab bar itself is hidden at, so desktop (no tab bar,
+     no reserved space needed) is unaffected. */
+  html {
+    scroll-padding-bottom: 160px;
+  }
+
+  @media (min-width: 768px) {
+    html {
+      scroll-padding-bottom: 0px;
+    }
+  }
 }
 
 @layer utilities {

@@ -18,10 +18,11 @@ import base64
 import json
 import re
 import time
-from typing import Any
+from types import UnionType
+from typing import Any, Union, get_args, get_origin
 
 import httpx
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from mealsight.config.settings import settings
 from mealsight.providers.base import SchemaT, TextProvider, TextResponse, VisionProvider
@@ -78,6 +79,50 @@ def _strip_code_fences(text: str) -> str:
 def _parse_and_validate(text: str, schema: type[SchemaT]) -> SchemaT:
     data = json.loads(_strip_code_fences(text))
     return schema.model_validate(data)
+
+
+def _describe_type(annotation: Any) -> str:
+    """A terse, JSON-flavored type name for one field's annotation — the
+    building block of _describe_schema below. Deliberately NOT a full
+    JSON Schema dump (title/description/constraints per field): this
+    exists purely to tell a model the field NAMES and rough SHAPE it
+    must produce, at close to zero extra tokens, not to fully specify
+    every field the way a real JSON Schema would."""
+    origin = get_origin(annotation)
+
+    if origin is Union or origin is UnionType:
+        args = get_args(annotation)
+        nullable = type(None) in args
+        non_none = [a for a in args if a is not type(None)]
+        rendered = "|".join(_describe_type(a) for a in non_none)
+        return f"{rendered}|null" if nullable else rendered
+
+    if origin is list:
+        (item_type,) = get_args(annotation) or (Any,)
+        return f"list[{_describe_type(item_type)}]"
+
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return _describe_schema(annotation)
+
+    if isinstance(annotation, type):
+        return annotation.__name__.lower()
+
+    return "any"
+
+
+def _describe_schema(schema: type[BaseModel]) -> str:
+    """A compact {"field": type, ...} description of schema's own top-
+    level fields (recursing into any nested BaseModel field, so a
+    caller like reason.py's own RecipeDecision — six nested Dimension
+    Reasoning objects — still gets a real, if terse, shape rather than
+    just "object") — cheap enough in tokens to include in every
+    complete_json request unconditionally, so no caller can forget to
+    tell the model what shape to produce (see this module's own
+    complete_json docstring for the real bug this exists to close)."""
+    fields = ", ".join(
+        f'"{name}": {_describe_type(field.annotation)}' for name, field in schema.model_fields.items()
+    )
+    return f"{{{fields}}}"
 
 
 class MistralProvider(TextProvider, VisionProvider):
@@ -192,8 +237,19 @@ class MistralProvider(TextProvider, VisionProvider):
         max_tokens: int | None = None,
         temperature: float = 0.0,
     ) -> SchemaT:
+        """Requests JSON matching `schema`, validates it, and retries once
+        on failure. The request ALWAYS embeds a compact, derived field-
+        name-and-type description of `schema` (see _describe_schema) —
+        a caller's own prompt text can still explain what each field
+        MEANS (worth keeping when it does), but never has to hand-spell
+        the JSON shape itself to get a schema-conforming response; a
+        caller that forgot to (phase 6.3's own reason.py, on its first
+        real run) used to fail validation twice before falling back."""
+        schema_description = _describe_schema(schema)
         json_prompt = (
-            f"{prompt}\n\nRespond with valid JSON only, matching the required schema, and no other text."
+            f"{prompt}\n\nRespond with valid JSON only, matching EXACTLY this shape "
+            f"(use null for an absent value, [] for an empty list): {schema_description}\n"
+            "No markdown code fences, no other text."
         )
         response = await self.complete(
             json_prompt, model_id, system=system, max_tokens=max_tokens, temperature=temperature

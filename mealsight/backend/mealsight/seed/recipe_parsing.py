@@ -247,8 +247,43 @@ def _matches_any_term_whole_word(name: str, terms: frozenset[str]) -> bool:
     "black pepper", starts and ends that whole phrase) — "egg" no longer
     matches inside "reggiano" since there's no word boundary between the
     "r" before it and the "i" after it.
+
+    An optional trailing "s" or "es" is tolerated (the same pluralization
+    tolerance frontend/src/lib/wholeWordMatch.ts already applies for the
+    identical reason — "prawn" needing to still match "prawns"): a strict
+    \\bterm\\b alone would stop NUT_TERMS' own "peanut" from matching an
+    ingredient literally named "Peanuts", since the trailing "s" removes
+    the word boundary right after "peanut" that \\b requires. Found by a
+    real, previously-passing test (test_peanuts_block_nut_free_tag)
+    failing the moment whole-word matching replaced substring matching
+    here — not spotted by inspection alone.
     """
-    return any(re.search(rf"\b{re.escape(term)}\b", name) for term in terms)
+    return any(re.search(rf"\b{re.escape(term)}(?:es|s)?\b", name) for term in terms)
+
+
+# KNOWN_ISSUES.md #2's own real fix, built from an actual 15-recipe
+# investigation of this exact corpus, not a speculative expansion: a
+# curated, deliberately small set of non-protein STARCH/VEGETABLE terms
+# that name a dish's own defining ingredient even when the English
+# title never says so (Spanish Tortilla never says "potato"; Baingan
+# Bharta never says "aubergine"). Checked as its own tier, between
+# title-match and the protein-term fallback — the investigation found
+# the protein fallback firing on a minor background ingredient (an egg
+# in pierogi dough, a splash of chicken stock, a lentil filler) ahead of
+# the dish's own real defining staple whenever that staple happened to
+# sit later in the ingredient list than any protein-term match; putting
+# this tier BEFORE the protein fallback, not after it, is what actually
+# fixes that failure mode rather than just adding an alternative that
+# never gets reached. Every term here traces to one of the 9 genuine
+# misses that investigation found (6/15 sampled recipes reaching zero
+# critical or the wrong one via protein-fallback, 3/15 reaching no
+# critical ingredient at all) — "aubergine" not "eggplant" for the same
+# reason MEAT_TERMS/DAIRY_TERMS already prefer this corpus's own real
+# British vocabulary; "farfalle"/"fettuccine" alongside generic "pasta"
+# because neither pasta SHAPE name contains the word "pasta" itself.
+DEFINING_STAPLE_TERMS = frozenset(
+    {"potato", "noodle", "pasta", "farfalle", "fettuccine", "squash", "aubergine"}
+)
 
 
 def assign_importances(recipe_name: str, ingredient_names: list[str]) -> list[Importance]:
@@ -258,8 +293,11 @@ def assign_importances(recipe_name: str, ingredient_names: list[str]) -> list[Im
 
     Rule, in order:
       1. At most one ingredient is "critical": the first one (in ingredient
-         order) whose name appears in the recipe's own title, or — if none
-         does — the first one that matches a known protein/defining term.
+         order) whose name appears in the recipe's own title; failing
+         that, the first one matching a DEFINING_STAPLE_TERMS entry (a
+         non-protein staple that names the dish even when the title
+         doesn't); failing that, the first one matching a known
+         PROTEIN_TERMS entry.
       2. Anything matching GARNISH_AND_SEASONING_TERMS is "optional" —
          *unless* it also matches a PROTEIN_TERMS word, in which case the
          protein match wins and it's "important" instead. Without this,
@@ -278,6 +316,11 @@ def assign_importances(recipe_name: str, ingredient_names: list[str]) -> list[Im
         if name and name in recipe_name_lower:
             critical_index = index
             break
+    if critical_index is None:
+        for index, name in enumerate(normalized):
+            if _matches_any_term_whole_word(name, DEFINING_STAPLE_TERMS):
+                critical_index = index
+                break
     if critical_index is None:
         for index, name in enumerate(normalized):
             if _matches_any_term_whole_word(name, PROTEIN_TERMS):
@@ -314,7 +357,14 @@ MEAT_TERMS = frozenset(
         "chicken", "beef", "pork", "lamb", "turkey", "duck", "goat", "veal",
         "bacon", "sausage", "ham", "prosciutto", "salami", "pepperoni",
         "shrimp", "prawn", "fish", "salmon", "tuna", "cod", "crab", "lobster",
-        "squid", "octopus", "anchovy", "anchovies", "gelatin", "lard",
+        "squid", "octopus", "anchovy", "anchovies",
+        # American/British spelling pair, same convention as DAIRY_TERMS'
+        # own "yogurt"/"yoghurt" — found switching to whole-word matching:
+        # "gelatin" alone no longer matches "Gelatine Leafs" (a real
+        # ingredient in the seeded corpus), since the trailing "e" isn't
+        # covered by the s/es pluralization tolerance either. Listed
+        # explicitly rather than widening the matching regex further.
+        "gelatin", "gelatine", "lard",
         "chorizo", "mince", "ground beef", "ground pork", "ground turkey",
         "meat",
     }
@@ -335,8 +385,8 @@ HONEY_TERMS = frozenset({"honey"})
 
 # "flour"/"bread"/"noodle" are ambiguous — these prefixes make them
 # gluten-free in practice, so a match here overrides a GLUTEN_TERMS hit.
-_GLUTEN_SAFE_QUALIFIERS = (
-    "rice", "corn", "almond", "coconut", "chickpea", "gluten-free", "gluten free", "gf",
+_GLUTEN_SAFE_QUALIFIERS = frozenset(
+    {"rice", "corn", "almond", "coconut", "chickpea", "gluten-free", "gluten free", "gf"}
 )
 
 GLUTEN_TERMS = frozenset(
@@ -361,15 +411,30 @@ NUT_TERMS = frozenset(
 
 
 def _any_term_matches(ingredient_names: list[str], terms: frozenset[str]) -> bool:
+    """Whole-word matching (see _matches_any_term_whole_word's own
+    docstring for the real "reggiano" contains "egg" bug this same
+    pattern was fixed for in assign_importances) — not raw substring
+    containment. Every one of this module's five dietary-tag blocklists
+    (MEAT_TERMS, DAIRY_TERMS, EGG_TERMS, HONEY_TERMS, NUT_TERMS) runs
+    through here, so "eggplant" no longer falsely matches EGG_TERMS'
+    own "egg" entry."""
     normalized = [_normalize_ingredient_name(name) for name in ingredient_names]
-    return any(any(term in name for term in terms) for name in normalized)
+    return any(_matches_any_term_whole_word(name, terms) for name in normalized)
 
 
 def _has_unsafe_gluten_ingredient(ingredient_names: list[str]) -> bool:
+    """GLUTEN_TERMS and _GLUTEN_SAFE_QUALIFIERS carry the identical
+    substring-matching risk the other five blocklists had — found while
+    fixing those (this file's own sixth term-list pair, not one of the
+    five KNOWN_ISSUES.md itself named): raw `term in name` would let
+    GLUTEN_TERMS' own "wheat" falsely match inside "buckwheat" (a real
+    pseudocereal, genuinely gluten-free despite the name), wrongly
+    denying a recipe the gluten_free tag it should get. Whole-word
+    matching fixes that the same way it fixes "eggplant"."""
     for name in ingredient_names:
         normalized = _normalize_ingredient_name(name)
-        has_gluten_term = any(term in normalized for term in GLUTEN_TERMS)
-        has_safe_qualifier = any(safe in normalized for safe in _GLUTEN_SAFE_QUALIFIERS)
+        has_gluten_term = _matches_any_term_whole_word(normalized, GLUTEN_TERMS)
+        has_safe_qualifier = _matches_any_term_whole_word(normalized, _GLUTEN_SAFE_QUALIFIERS)
         if has_gluten_term and not has_safe_qualifier:
             return True
     return False

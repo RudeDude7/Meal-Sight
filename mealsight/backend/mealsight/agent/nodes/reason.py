@@ -84,24 +84,10 @@ SYSTEM_PROMPT = (
     "false one ranks higher in the list — a recipe the user cannot actually make is "
     "not a good recommendation regardless of how well it otherwise fits.\n"
     "\n"
-    "Respond with valid JSON only (no markdown code fences, no other commentary) "
-    "matching exactly this shape:\n"
-    "{\n"
-    '  "chosen_recipe_id": "<the id of exactly one recipe from the candidates '
-    'above, copied exactly>",\n'
-    '  "ingredient_match_reasoning": {"applies": <true or false>, "reasoning": '
-    '"<brief justification citing the supplied match data>"},\n'
-    '  "freshness_reasoning": {"applies": <true or false>, "reasoning": "<...>"},'
-    "\n"
-    '  "nutrition_reasoning": {"applies": <true or false>, "reasoning": "<...>"},'
-    "\n"
-    '  "variety_reasoning": {"applies": <true or false>, "reasoning": "<...>"},\n'
-    '  "context_reasoning": {"applies": <true or false>, "reasoning": "<...>"},\n'
-    '  "taste_reasoning": {"applies": <true or false>, "reasoning": "<...>"},\n'
-    '  "overall_summary": "<one or two sentences summarizing the choice>"\n'
-    "}\n"
-    "Every one of the six *_reasoning fields is required and must be an object "
-    'with both "applies" and "reasoning" keys, even when applies is false.'
+    "chosen_recipe_id must be the id of exactly one recipe from the candidates "
+    "above, copied exactly — never an id that wasn't actually offered. Every one "
+    "of the six *_reasoning fields is required, even when applies is false — "
+    "never omit one just because it doesn't apply."
 )
 
 

@@ -10,6 +10,8 @@ from mealsight.recipe_engine.models import (
     RecipeDetail,
     RecipeIngredient,
     RecipeSummary,
+    ReverseMatchedRecipe,
+    ReverseSearchResults,
     ScaledIngredient,
     ScaledRecipe,
     SearchResults,
@@ -18,15 +20,22 @@ from mealsight.recipe_engine.models import (
     SubstitutionSuggestion,
 )
 from mealsight.recipe_engine.nutrition import calculate_nutrition
+from mealsight.recipe_engine.reverse_search import (
+    DEFAULT_MINIMUM_MATCH_PERCENTAGE,
+    get_recipe_by_ingredients,
+)
 from mealsight.recipe_engine.scaling import scale_recipe
 from mealsight.recipe_engine.search import get_recipe, search_recipes
 from mealsight.recipe_engine.substitutions import find_substitutions
 
 __all__ = [
+    "DEFAULT_MINIMUM_MATCH_PERCENTAGE",
     "NutritionResult",
     "RecipeDetail",
     "RecipeIngredient",
     "RecipeSummary",
+    "ReverseMatchedRecipe",
+    "ReverseSearchResults",
     "ScaledIngredient",
     "ScaledRecipe",
     "SearchResults",
@@ -36,6 +45,7 @@ __all__ = [
     "calculate_nutrition",
     "find_substitutions",
     "get_recipe",
+    "get_recipe_by_ingredients",
     "scale_recipe",
     "search_recipes",
 ]

@@ -184,3 +184,28 @@ async def test_find_substitutions_invalid_reason_returns_validation_error_naming
     assert result.data["error"] == "validation_error"
     assert result.data["parameter"] == "reason"
     assert set(result.data["accepted_values"]) == {"unavailable", "allergic", "dietary", "dislike"}
+
+
+async def test_get_recipe_by_ingredients_ranks_by_proportional_use(mcp_client: Client[Any]) -> None:
+    await insert_recipe(
+        recipe_id="small", name="Small",
+        ingredients=[
+            {"name": "egg", "quantity": 1.0, "unit": None, "importance": "important", "raw_measure": "1"},
+        ],
+    )
+    result = await mcp_client.call_tool(
+        "get_recipe_by_ingredients", {"ingredients": ["egg"], "minimum_match_percentage": 0.5}
+    )
+
+    assert result.data["results"][0]["id"] == "small"
+    assert result.data["results"][0]["match_percentage"] == 1.0
+
+
+async def test_get_recipe_by_ingredients_invalid_percentage_returns_validation_error(
+    mcp_client: Client[Any],
+) -> None:
+    result = await mcp_client.call_tool(
+        "get_recipe_by_ingredients", {"ingredients": ["egg"], "minimum_match_percentage": 1.5}
+    )
+    assert result.data["error"] == "validation_error"
+    assert result.data["parameter"] == "minimum_match_percentage"

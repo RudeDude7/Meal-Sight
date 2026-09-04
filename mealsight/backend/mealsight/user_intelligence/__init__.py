@@ -23,6 +23,8 @@ from mealsight.user_intelligence.models import (
     PreferenceType,
     RepetitionCheck,
     RepetitionRecommendation,
+    TasteInsights,
+    TasteTimeRange,
     UserProfile,
 )
 from mealsight.user_intelligence.preferences import remove_preference, update_preferences
@@ -32,6 +34,7 @@ from mealsight.user_intelligence.scoring import (
     PREFERENCE_SMOOTHING_PRIOR_WEIGHT,
     recompute_preference_scores,
 )
+from mealsight.user_intelligence.taste_insights import get_taste_insights
 
 __all__ = [
     "ADDITIVE_PREFERENCE_TYPES",
@@ -46,11 +49,14 @@ __all__ = [
     "PreferenceType",
     "RepetitionCheck",
     "RepetitionRecommendation",
+    "TasteInsights",
+    "TasteTimeRange",
     "UserProfile",
     "check_repetition",
     "get_context_signals",
     "get_interaction_history",
     "get_meal_history",
+    "get_taste_insights",
     "get_user_profile",
     "log_meal",
     "rate_meal",

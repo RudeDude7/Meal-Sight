@@ -38,6 +38,41 @@ class SearchResults(BaseModel):
     total_matched: int
 
 
+class ReverseMatchedRecipe(BaseModel):
+    """One get_recipe_by_ingredients result. match_percentage is what
+    FRACTION OF THE SUPPLIED ingredient list this recipe actually uses
+    — the opposite denominator from search_recipes' own pantry-overlap
+    pre-ranking (_pantry_overlap_score, matched / the RECIPE's own
+    ingredient count) — see get_recipe_by_ingredients' own module
+    docstring for why that distinction is the entire point of this
+    tool. recipe_ingredient_count is included for context only (how
+    big the recipe's own full ingredient list is), never part of the
+    ranking itself."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    name: str
+    cuisine: str | None
+    meal_type: str | None
+    cook_time_minutes: int | None
+    match_percentage: float
+    matched_ingredient_names: list[str]
+    recipe_ingredient_count: int
+
+
+class ReverseSearchResults(BaseModel):
+    """What get_recipe_by_ingredients returns. total_matched is how
+    many recipes cleared minimum_match_percentage before max_results
+    capped the list — the same "both the capped list and the real
+    total" shape SearchResults already established."""
+
+    model_config = ConfigDict(frozen=True)
+
+    results: list[ReverseMatchedRecipe]
+    total_matched: int
+
+
 class RecipeIngredient(BaseModel):
     model_config = ConfigDict(frozen=True)
 

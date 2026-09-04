@@ -14,6 +14,7 @@ from mealsight.user_intelligence.models import (
     InteractionRecord,
     MealRecord,
     RepetitionCheck,
+    TasteInsights,
     UserProfile,
 )
 
@@ -26,6 +27,7 @@ __all__ = [
     "meal_record_to_dict",
     "not_found_error",
     "repetition_check_to_dict",
+    "taste_insights_to_dict",
     "user_profile_to_dict",
     "validation_error",
 ]
@@ -85,3 +87,14 @@ def context_signals_to_dict(signals: ContextSignals) -> dict[str, Any]:
     the three weather fields are null together whenever weather data
     isn't available."""
     return signals.model_dump(mode="json")
+
+
+def taste_insights_to_dict(insights: TasteInsights) -> dict[str, Any]:
+    """Shape: {"time_range", "sufficient_history", "message",
+    "total_meals_cooked", "most_cooked_cuisine", "average_rating",
+    "protein_variety_score", "cooking_frequency_per_week",
+    "preferred_cook_time_minutes", "stated_preferred_cook_time_minutes",
+    "suggestions": [str, ...]}. When sufficient_history is false, every
+    statistic is null and message explains why — never a real-looking
+    number computed over a handful of meals."""
+    return insights.model_dump(mode="json")

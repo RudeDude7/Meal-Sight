@@ -57,6 +57,7 @@ DEFAULT_INVENTORY: dict[str, list[str]] = {
         "scale_recipe",
         "calculate_nutrition",
         "find_substitutions",
+        "get_recipe_by_ingredients",
     ],
     "pantry_manager": [
         "update_pantry",
@@ -79,6 +80,7 @@ DEFAULT_INVENTORY: dict[str, list[str]] = {
         "get_context_signals",
         "record_interaction",
         "get_interaction_history",
+        "get_taste_insights",
     ],
 }
 
@@ -172,7 +174,7 @@ async def test_health_reports_all_servers() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "healthy"
-    assert body["mcp_servers"]["recipe_engine"] == {"status": "up", "tool_count": 6}
+    assert body["mcp_servers"]["recipe_engine"] == {"status": "up", "tool_count": 7}
     assert body["mcp_servers"]["pantry_manager"]["status"] == "up"
     assert body["mcp_servers"]["user_intelligence"]["status"] == "up"
     assert body["providers"]["mistral"]["status"] == "up"
@@ -345,6 +347,43 @@ async def test_recipes_get_by_id_proxies_mcp_data() -> None:
 
     assert response.status_code == 200
     assert response.json()["name"] == "PBC"
+
+
+async def test_recipes_by_ingredients_proxies_mcp_data_and_is_matched_before_the_id_route() -> None:
+    manager = FakeManager(
+        responses={
+            ("recipe_engine", "get_recipe_by_ingredients"): ToolCallResult(
+                success=True, data={"results": [{"id": "1", "match_percentage": 1.0}], "total_matched": 1}
+            )
+        }
+    )
+    async with running_client(manager) as (client, _manager):
+        response = await client.get(
+            "/api/recipes/by-ingredients", params={"ingredients": ["egg", "flour"]}
+        )
+
+    assert response.status_code == 200
+    assert response.json()["total_matched"] == 1
+    call_args = next(
+        args for _, tool, args in manager.calls if tool == "get_recipe_by_ingredients"
+    )
+    assert call_args["ingredients"] == ["egg", "flour"]
+    assert call_args["minimum_match_percentage"] == 0.6
+
+
+async def test_insights_get_proxies_mcp_data() -> None:
+    manager = FakeManager(
+        responses={
+            ("user_intelligence", "get_taste_insights"): ToolCallResult(
+                success=True, data={"time_range": "this_month", "sufficient_history": False}
+            )
+        }
+    )
+    async with running_client(manager) as (client, _manager):
+        response = await client.get("/api/insights", params={"time_range": "this_month"})
+
+    assert response.status_code == 200
+    assert response.json()["sufficient_history"] is False
 
 
 async def test_history_proxies_mcp_data() -> None:

@@ -7,12 +7,17 @@ isolated means repointing that singleton at a fresh, throwaway database
 per test. log_meal/check_repetition also read recipes.db (for cook_time_
 minutes, cuisine, and ingredients), and disliked_ingredients-style
 canonicalization isn't used here at all, but the recipe read is real, so
-a fresh recipes.db needs to exist too.
+a fresh recipes.db needs to exist too. get_taste_insights' own waste-
+correlation suggestion reaches into pantry.db as a third real (if
+throwaway) database — without repointing settings.pantry_db_path here
+too, its own get_pantry_db() singleton would otherwise resolve to
+whatever real pantry.db happens to exist on disk.
 
-_fresh_user_db does all of that: monkeypatches both settings.
-user_intelligence_db_path and settings.recipes_db_path to tmp_path
-files, resets the process-wide Database singletons, and applies both
-real schemas, before every single test.
+_fresh_user_db does all of that: monkeypatches settings.
+user_intelligence_db_path, settings.recipes_db_path, AND settings.
+pantry_db_path to tmp_path files, resets the process-wide Database
+singletons, and applies all three real schemas, before every single
+test.
 """
 
 from __future__ import annotations
@@ -26,7 +31,7 @@ import pytest
 from fastmcp import Client
 
 from mealsight.config.settings import settings
-from mealsight.db import close_all, get_recipe_db, get_user_db
+from mealsight.db import close_all, get_pantry_db, get_recipe_db, get_user_db
 from mealsight.db.connection import SCHEMA_DIR, Database
 from mealsight.db.init import init_database
 from mealsight.mcp_servers.user_intelligence.server import mcp
@@ -36,12 +41,15 @@ from mealsight.mcp_servers.user_intelligence.server import mcp
 async def _fresh_user_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
     monkeypatch.setattr(settings, "user_intelligence_db_path", tmp_path / "user_intelligence_test.db")
     monkeypatch.setattr(settings, "recipes_db_path", tmp_path / "recipes_test.db")
+    monkeypatch.setattr(settings, "pantry_db_path", tmp_path / "pantry_test.db")
     await close_all()
 
     user_db = get_user_db()
     await init_database(user_db, SCHEMA_DIR / "user_intelligence.sql")
     recipe_db = get_recipe_db()
     await init_database(recipe_db, SCHEMA_DIR / "recipes.sql")
+    pantry_db = get_pantry_db()
+    await init_database(pantry_db, SCHEMA_DIR / "pantry.sql")
 
     yield
 

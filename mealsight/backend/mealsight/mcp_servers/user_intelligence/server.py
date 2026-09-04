@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import date as date_
 from datetime import datetime
-from typing import Any
+from typing import Any, get_args
 
 from fastmcp import FastMCP
 
@@ -28,6 +28,7 @@ from mealsight.mcp_servers.user_intelligence.serialization import (
     meal_record_to_dict,
     not_found_error,
     repetition_check_to_dict,
+    taste_insights_to_dict,
     user_profile_to_dict,
     validation_error,
 )
@@ -35,17 +36,21 @@ from mealsight.user_intelligence import check_repetition as _check_repetition
 from mealsight.user_intelligence import get_context_signals as _get_context_signals
 from mealsight.user_intelligence import get_interaction_history as _get_interaction_history
 from mealsight.user_intelligence import get_meal_history as _get_meal_history
+from mealsight.user_intelligence import get_taste_insights as _get_taste_insights
 from mealsight.user_intelligence import get_user_profile as _get_user_profile
 from mealsight.user_intelligence import log_meal as _log_meal
 from mealsight.user_intelligence import rate_meal as _rate_meal
 from mealsight.user_intelligence import record_interaction as _record_interaction
 from mealsight.user_intelligence import remove_preference as _remove_preference
 from mealsight.user_intelligence import update_preferences as _update_preferences
+from mealsight.user_intelligence.models import TasteTimeRange
 from mealsight.utils.logging import get_logger
 
 logger = get_logger("mealsight.mcp_servers.user_intelligence")
 
 mcp: FastMCP[Any] = FastMCP("user-intelligence")
+
+_TASTE_TIME_RANGES: tuple[str, ...] = get_args(TasteTimeRange)
 
 
 @mcp.tool
@@ -404,4 +409,47 @@ async def get_interaction_history(days_back: int = 30, limit: int = 50) -> dict[
         return interaction_history_to_dict(result)
     except Exception:
         logger.error("get_interaction_history_failed", exc_info=True, days_back=days_back)
+        return internal_error()
+
+
+@mcp.tool
+async def get_taste_insights(time_range: str) -> dict[str, Any]:
+    """Behavioral analytics over cooking history for time_range
+    ("this_week", "this_month", or "all_time"): total meals cooked,
+    most-cooked cuisine, average rating, protein_variety_score (a
+    0.0-1.0 evenness measure over which protein each meal centered on —
+    NOT a distinct-count; cooking chicken nine times and beef once
+    scores poorly here, close to 0.0, not "2 proteins"),
+    cooking_frequency_per_week, the ACTUAL median cook time of recipes
+    cooked (preferred_cook_time_minutes) alongside the profile's own
+    STATED preference (stated_preferred_cook_time_minutes) for direct
+    comparison, and 0 or more specific, data-derived suggestions.
+
+    Below a configured minimum number of cooked meals in the window,
+    sufficient_history is false, every statistic is null, and message
+    explains why — this tool never computes real-looking numbers over
+    a handful of meals.
+
+    Suggestions are plain sentences built from real queried numbers —
+    never generic advice — and can include a waste/cooking correlation
+    (an ingredient frequently thrown out and rarely actually cooked
+    with) only when the real data supports it; see mealsight.user_
+    intelligence.taste_insights's own module docstring for the exact
+    thresholds.
+
+    Returns a structured {"error": "validation_error", ...} naming the
+    accepted time_range values if it isn't one of them.
+    """
+    if time_range not in _TASTE_TIME_RANGES:
+        return validation_error(
+            "time_range",
+            f"{time_range!r} is not a recognized time_range.",
+            accepted=list(_TASTE_TIME_RANGES),
+        )
+    try:
+        db = get_user_db()
+        result = await _get_taste_insights(time_range, user_db=db)  # type: ignore[arg-type]
+        return taste_insights_to_dict(result)
+    except Exception:
+        logger.error("get_taste_insights_failed", exc_info=True, time_range=time_range)
         return internal_error()

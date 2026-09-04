@@ -1,0 +1,400 @@
+PHASE 9.6 STUDY NOTES: THE LAST TWO FEATURES CUT FROM THE ORIGINAL
+SPEC — BEHAVIORAL ANALYTICS OVER COOKING HISTORY, AND REVERSE SEARCH
+FROM INGREDIENTS
+=============================================================
+
+Two independent features landed in this phase, one per remaining
+server: get_taste_insights (user_intelligence, 10 tools -> 11) and
+get_recipe_by_ingredients (recipe_engine, 8 tools -> 9). Both reuse
+more existing project machinery than they introduce — the real work in
+this phase was finding the right formula/threshold/denominator for
+each, not writing new plumbing.
+
+Files added: backend/mealsight/{user_intelligence/taste_insights.py,
+recipe_engine/reverse_search.py}, backend/tests/{test_user_intelligence/
+test_taste_insights.py,test_recipe_engine/test_reverse_search.py},
+frontend/src/{components/profile/TasteInsightsPanel.tsx,components/
+pantry/WhatCanIMake.tsx,api/insights.ts}. Files edited: backend/
+mealsight/{config/settings.py,user_intelligence/{__init__.py,models.py},
+recipe_engine/{__init__.py,models.py},mcp_servers/{user_intelligence/
+{server.py,serialization.py},recipe_engine/{server.py,serialization.py}},
+agent/mcp_client.py,api/{app.py,routers/{recipes.py,insights.py (new)}}},
+frontend/src/{types/{profile.ts,recipe.ts},api/recipes.ts,pages/
+{Profile.tsx,Pantry.tsx}}, plus tests/test_api/test_app.py and both
+servers' own test_tool_schemas.py for the new tool counts.
+
+
+1. READ FIRST: TWO REAL PIECES OF PRIOR ART THAT MADE BOTH FEATURES
+   MOSTLY REUSE, NOT NEW PLUMBING
+=============================================================
+Before writing get_taste_insights, read mealsight.user_intelligence.
+scoring.py in full — it already exposes derive_protein (first
+PROTEIN_TERMS whole-word match among a meal's own ingredients) and
+load_recipe_ingredient_names (the established cross-database
+"load recipes.db into a plain dict, never a SQL join" pattern), both
+already used by recompute_preference_scores and check_repetition. Taste
+insights reuses both directly rather than re-deriving protein a third
+way — see section 5 for the one place this phase's own reuse still
+leaves a real, named gap with phase 9.5's own separate protein-
+derivation helper in meal_planner.py.
+
+Before writing get_recipe_by_ingredients, read recipe_engine/search.py's
+own _pantry_overlap_score in full — the exact canonicalization pipeline
+(normalize_ingredient + resolve_canonical against one shared
+synonym_map) this new tool reuses. The task's own explicit instruction
+("reuse that logic rather than writing a third overlap implementation")
+turned out to mean reusing the PIPELINE, not the FORMULA — see section 3
+for why the formula itself has to be the opposite fraction.
+
+
+2. FEATURE 1's PROTEIN VARIETY FORMULA: NORMALIZED SHANNON ENTROPY
+   (PIELOU'S EVENNESS INDEX), NOT A DISTINCT-COUNT
+=============================================================
+protein_variety_score = (-sum(p * ln p) over each distinct protein's own
+share p of protein-identifiable meals) / ln(N), where N is how many
+distinct proteins appear at all. 0.0 means every meal centered on one
+protein; 1.0 means every distinct protein appeared equally often.
+
+Chosen and reported explicitly because the task named the exact failure
+mode a plain distinct-count has: cooking chicken nine times and beef
+once IS "2 distinct proteins," a naive count that hides a completely
+skewed pattern. Verified directly, not just asserted: a real 9-chicken/
+1-beef split scores well below a 5-chicken/5-beef split built from the
+identical two proteins (test_protein_variety_scores_a_skewed_
+distribution_lower_than_an_even_one), and a genuinely single-protein
+history scores exactly 0.0 (a special case handled explicitly, since
+ln(1)=0 would otherwise divide by zero).
+
+Meals with no identifiable protein (a vegetable/grain-forward dish)
+are excluded from the denominator entirely, not counted as their own
+"protein" — a dish deriving no protein_type isn't evidence of dietary
+variety, it's just absence of a signal.
+
+
+3. FEATURE 2's DENOMINATOR: THE SUPPLIED LIST'S OWN SIZE, THE EXACT
+   OPPOSITE OF _pantry_overlap_score's OWN DENOMINATOR
+=============================================================
+_pantry_overlap_score (search.py) answers "of THIS RECIPE's own
+ingredients, how many are in the pantry" — matched / the recipe's own
+ingredient count. That is precisely the wrong question for reverse
+search, which answers "of the ingredients I GAVE YOU, how many did this
+recipe actually use" — match_percentage = matched / the SUPPLIED list's
+own size. The task's own worked example is a direct illustration of why
+the denominator has to flip: a recipe using all 3 of 3 supplied
+ingredients must outrank one using those same 3 ingredients out of its
+own 12, and the old (recipe-sized) denominator would score the second
+recipe at a punishing 3/12=25% purely for happening to have more
+ingredients overall — a fact about the recipe that has nothing to do
+with how well it used what was actually supplied.
+
+Verified directly on real corpus data, not just in a synthetic test: a
+targeted 8-ingredient query ranked a 4-ingredient recipe using all 4 of
+its own ingredients (50% of supplied) above three recipes with 11, 14,
+and 16 total ingredients of their own, all three of which matched 3 of
+the same 8 supplied items (37.5% each) — under the OLD denominator
+those three would have scored 3/14≈21%, 3/16≈19%, 3/11≈27% respectively,
+each artificially depressed by the recipe's own size, a fact this tool's
+whole existence is meant to correct for.
+
+The canonicalization pipeline itself (normalize_ingredient +
+resolve_canonical against one load_synonym_map call) is the literal
+same code shape _pantry_overlap_score already uses — only the fraction's
+own denominator differs, exactly matching the task's own "reuse that
+logic" instruction read as "reuse the comparison, not the formula."
+
+
+4. WASTE CORRELATION: settings.waste_insight_threshold REUSED, ONE
+   NEW THRESHOLD ADDED WHERE NOTHING EXISTING ANSWERED IT
+=============================================================
+"Frequently wasted" reuses settings.waste_insight_threshold (phase
+9.4's own constant) directly — there was no reason a second,
+independently-tuned "has this been wasted enough to mention" threshold
+should exist for the identical underlying question asked from a
+different module. "Rarely cooked with" is this phase's own new
+constant, RARELY_COOKED_MAX_MEALS=1 (not 0) — deliberately chosen so an
+ingredient bought once, genuinely tried once, and then repeatedly
+thrown out afterward still counts as a real "you keep buying this and
+not using it" pattern, rather than being disqualified the moment it was
+tried a single time.
+
+Cross-database reach: get_taste_insights lives on user_intelligence but
+its own waste-correlation suggestion has to read pantry.db's waste_log
+— a genuinely NEW third physical database this package's own tests now
+reach into, following the identical "load into memory, never a SQL
+join" discipline scoring.py/repetition.py already established for their
+own recipes.db reads. tests/test_user_intelligence/conftest.py gained
+a pantry_db fixture for exactly this; tests/test_mcp_servers/test_
+user_intelligence/conftest.py's own _fresh_user_db fixture ALSO needed
+extending to monkeypatch settings.pantry_db_path — caught directly
+while writing the MCP-level tests: without it, a real MCP tool test for
+get_taste_insights would have silently queried whatever real pantry.db
+happens to exist on disk instead of a throwaway one.
+
+Verified both directions: fires and names the real ingredient and real
+count above threshold; does NOT fire below threshold; does NOT fire
+when the ingredient is genuinely, frequently cooked with despite being
+wasted often too (three separate, explicit tests, not one conflated
+one).
+
+
+5. A REAL, NAMED DUPLICATION LEFT UNFIXED — REPORTED, NOT SILENTLY
+   PATCHED OVER
+=============================================================
+Phase 9.5's own meal_planner.py already has its own _protein_type
+helper, deriving a recipe's protein a slightly different way (from
+match_ingredients' own matched/missing/partial item lists, since
+planning candidates never carry a full ingredients_by_recipe map the
+way get_taste_insights' own meal_history rows do). This phase's own
+get_taste_insights instead reuses scoring.py's derive_protein directly,
+since it already has recipe_db loaded and the exact ingredient lists on
+hand. Two real, independently-justified protein-derivation call sites
+now exist in this codebase, doing conceptually the same thing slightly
+differently for genuinely different reasons (one has full recipe
+ingredient lists in hand already, one only has match_ingredients' own
+matched/missing/partial buckets) — named here explicitly as a real
+observation rather than silently reconciled, since unifying them would
+have meant either giving meal_planner.py an extra get_recipe call per
+candidate it doesn't otherwise need, or giving get_taste_insights a
+dependency on match_ingredients it doesn't otherwise need — neither
+was in scope for this phase's own task.
+
+
+6. MINIMUM HISTORY: settings.min_meals_for_insights=5, THE SAME
+   "A HANDFUL" NUMBER PHASE 9.4 ALREADY ESTABLISHED
+=============================================================
+Below 5 cooked meals in the requested window, every statistic in the
+response is null and message says exactly why, in plain language naming
+both the real count and the real minimum — never a real-looking number
+computed over a handful of data points. 5 was not picked freshly for
+this phase: it's the identical value phase 9.4's own MIN_ENTRIES_FOR_
+TREND already uses for waste-stats trend comparisons, for the same
+"a handful" framing the task itself used — reused rather than
+independently re-derived, since there was no reason cooking-history
+statistics needed a different bar than waste-history statistics for
+the same underlying judgment ("is this enough data to say something
+real").
+
+
+7. FRONTEND PLACEMENT, BOTH REPORTED BEFORE BUILDING PER THE TASK'S
+   OWN INSTRUCTION
+=============================================================
+Taste insights: Profile page, directly below the (already existing,
+read-only) cuisine preference bars — identical data lineage
+(meal_history), and the task's own reasoning (it gives that page a
+real reason to be visited) matched what was already true of the page's
+own existing cuisine-bars section. Insufficient history renders via the
+EmptyState primitive, not a panel full of null-shaped stats.
+
+Reverse search: Pantry page, as "What can I make?" — the task's own
+suggested placement, taken and followed rather than defaulting to a
+separate search page, on the same reasoning the task itself gave: "what
+can I make with what I have" is closer to this product's own core
+question than a generic ingredient-search page would be. It reuses the
+pantry's own real, already-loaded item names as the query input rather
+than asking the user to re-type them.
+
+
+8. TWO REAL BUGS FOUND WHILE VERIFYING, BOTH FIXED BEFORE MOVING ON
+=============================================================
+FastAPI query-param inference: GET /api/recipes/by-ingredients' own
+`ingredients: list[str]` parameter, with no default, was silently
+inferred as a REQUIRED REQUEST BODY field rather than a query
+parameter — a real FastAPI behavior (a required list-typed parameter
+defaults to body inference unless explicitly marked), caught by an
+actual 422 in the REST-level test, not assumed. Fixed with an explicit
+Annotated[list[str], Query()] rather than adding a fake default just to
+dodge the inference rule.
+
+A stale SQLite WAL file silently reintroducing newer data during a
+live-verification restore: after backing up user_intelligence.db,
+seeding demo meal history, and later restoring the ORIGINAL backup via
+a plain file copy, a fresh row-count check still showed 7 meals, not
+the original 3 — the backup file itself, checked independently, really
+did have 3. The actual cause: killing the backend's processes leaves a
+`-wal` file with the newer, uncommitted-relative-to-the-backup writes
+still on disk, and a bare `cp` of the main `.db` file alone doesn't
+touch it — the next real read replays that stale WAL right back on top
+of the restored file. Fixed by deleting the `-wal`/`-shm` files
+alongside the `.db` file itself before restoring, once every process
+holding a connection was confirmed stopped. Recorded here as a real
+addition to this project's own established "back up, confirm no live
+connection, verify with an independent query" safe-mutation discipline
+— that discipline needs one more step for a WAL-mode database
+specifically: clear the WAL/SHM files too, or a plain file-copy restore
+can silently fail to actually restore anything.
+
+
+9. VERIFICATION: EVERY NUMBER FROM A REAL RUN, INCLUDING AN HONESTLY-
+   REPORTED "NOTHING MATCHED" RESULT
+=============================================================
+Static: ruff clean, mypy --strict clean (130 source files), full pytest
+suite 634 passed / 3 deselected. Frontend typecheck/lint/build clean.
+
+Real get_taste_insights, real backend, meal history seeded via the
+actual log_meal function (not raw SQL) with real recipe ids from the
+real corpus: this_month reported total_meals_cooked=7, most_cooked_
+cuisine=Italian, protein_variety_score=0.87, and two real, data-derived
+suggestions naming real cuisines, real counts, and a real minutes
+comparison — not generic advice. One suggestion's own wording ("you
+made one recently" for Mexican) surprised the synthetic seeding script,
+which had assumed a clean slate — the REAL pre-existing 3-meal history
+(untouched by the seed script) actually had a more recent Mexican meal
+than the synthetic one just added, and the system correctly reflected
+the real data rather than the script author's own incomplete mental
+model of it.
+
+Real get_recipe_by_ingredients, real recipes.db: a targeted 8-ingredient
+query demonstrated proportional-use ranking exactly as designed
+(section 3). The SAME tool run against the FULL real pantry (27 items)
+at the documented default threshold (0.6) returned ZERO results —
+reported honestly as the real, expected behavior it is (no single real
+recipe uses 60%+ of an entire real pantry's worth of ingredients), not
+smoothed over as if something had failed.
+
+Screenshots: Profile page's Taste Insights panel in both states
+(insufficient history, via a genuinely cleared meal_history; and
+sufficient history, via the same seeded real data as the API
+verification above) — the real generated suggestions visible directly
+in the rendered panel, not paraphrased. Pantry page's own "What can I
+make?" panel, showing the same real, honestly-empty full-pantry result
+described above.
+
+Insufficient-history path: confirmed across all three time ranges
+against a genuinely, directly cleared meal_history table (DELETE FROM
+meal_history, not a mocked response) — every one of the three ranges
+returned sufficient_history=false, every statistic null, and a message
+naming the real (zero) count and the real configured minimum.
+
+
+10. DECISIONS AND ALTERNATIVES REJECTED
+=============================================================
+A fresh, independently-tuned "frequently wasted" threshold for the
+waste-correlation suggestion versus reusing settings.waste_insight_
+threshold
+    Rejected a second threshold: the underlying question ("has this
+    been wasted enough times to be worth mentioning") is identical to
+    the one phase 9.4's own waste_insight_threshold already answers —
+    inventing a second, separately-tuned number for the same judgment
+    asked from a different module would only risk the two drifting
+    apart over time for no real benefit.
+
+RARELY_COOKED_MAX_MEALS = 0 (never cooked with at all) versus 1 (tried
+at most once)
+    Rejected requiring zero: an ingredient bought once, genuinely tried
+    in one real meal, and then repeatedly wasted afterward is still a
+    real, worth-surfacing pattern ("you tried this once and it hasn't
+    stuck") — requiring literal zero uses would have silently excluded
+    exactly that case.
+
+Reusing meal_planner.py's own _protein_type helper (phase 9.5) for
+get_taste_insights versus reusing scoring.py's derive_protein instead
+    Rejected importing across from the agent layer: get_taste_insights
+    already has recipe_db loaded with full ingredient lists on hand
+    (via load_recipe_ingredient_names, the same batch-load pattern
+    scoring.py/repetition.py already use) — reaching into mealsight.
+    agent.meal_planner for a differently-shaped helper built around
+    match_ingredients' own item buckets would have been backwards, not
+    simpler. The resulting duplication is real and named (section 5),
+    not swept under the rug, but reconciling it was out of this
+    phase's own scope.
+
+Giving the reverse-search tool its own separate ingredient-matching
+implementation versus reusing search.py's canonicalization pipeline
+    Rejected a third implementation: the task's own explicit
+    instruction named this exact risk, and _pantry_overlap_score's own
+    normalize_ingredient + resolve_canonical + synonym_map pipeline was
+    already the established, tested way this project decides "is this
+    the same ingredient" — only the fraction's own denominator needed
+    to differ, not the comparison underneath it.
+
+Restoring a WAL-mode database from backup via a plain file copy alone
+versus also clearing the WAL/SHM files
+    Rejected the plain-copy-only approach once it was caught failing
+    for real: a stale WAL file left behind after killing a database's
+    own connections silently reintroduces newer writes on the next
+    real read, making a "restored" backup not actually restored at
+    all — an addition to this project's own established safe-mutation
+    discipline, not a one-off fix.
+
+
+11. GLOSSARY
+=============================================================
+mealsight.user_intelligence.taste_insights.get_taste_insights
+    time_range in {this_week, this_month, all_time}. Below settings.
+    min_meals_for_insights cooked meals in the window, every statistic
+    is null and message explains why. protein_variety_score is
+    normalized Shannon entropy (0.0 one protein dominates, 1.0 every
+    distinct protein equally often). preferred_cook_time_minutes is the
+    MEDIAN actual cook time of recipes cooked, reported alongside
+    stated_preferred_cook_time_minutes (the profile's own stated value)
+    for direct comparison.
+
+RARELY_COOKED_MAX_MEALS
+    This phase's own new threshold (=1): at most this many meals
+    all-time may have actually used a frequently-wasted ingredient
+    before the waste-correlation suggestion still fires.
+
+mealsight.recipe_engine.reverse_search.get_recipe_by_ingredients
+    match_percentage = (recipe ingredients found in the supplied list)
+    / (the supplied list's own total size) — the deliberate opposite
+    denominator from search.py's own _pantry_overlap_score. Default
+    minimum_match_percentage=0.6 (DEFAULT_MINIMUM_MATCH_PERCENTAGE).
+
+WhatCanIMake / TasteInsightsPanel
+    The two new frontend surfaces — Pantry page and Profile page
+    respectively, both placed per this phase's own explicit "report
+    where it belongs before building it" reasoning, not a default
+    choice.
+
+
+12. INTERVIEW TALKING POINTS
+=============================================================
+Q: Your own verification found get_recipe_by_ingredients returning
+ZERO results against the real, full pantry. Doesn't that mean the
+feature doesn't actually work?
+
+    No — it means the feature is working exactly as documented against
+    a demanding, honestly-set default. minimum_match_percentage=0.6
+    means a recipe has to use 60% of whatever ingredient list it's
+    given; against a real 27-item pantry, that means matching roughly
+    16 ingredients in one single recipe, which essentially no real
+    recipe does — most dishes use a small, specific subset of a full
+    kitchen's inventory. The SAME tool, run against a smaller, targeted
+    list (the 8 ingredients actually relevant to a specific meal idea),
+    correctly ranked real recipes by proportional use. The full-pantry
+    result is a real, informative finding about how this default
+    threshold behaves at that scale, not a failure — and reporting it
+    honestly, rather than quietly re-running with a lower threshold
+    until something looked better, was the more useful thing to hand
+    back.
+
+Q: You found a stale WAL file undid your first restore attempt. How do
+you know your SECOND restore actually worked, rather than just getting
+lucky?
+
+    Because I didn't trust the file copy alone the second time either —
+    I independently queried the restored database directly afterward
+    (SELECT COUNT(*) FROM meal_history) and confirmed it matched the
+    real, original 3-row count, the same "verify with a fresh,
+    independent query" discipline this project already uses for every
+    other database mutation. The first restore attempt looked identical
+    from the outside (the cp command succeeded, no error) — the only
+    way the discrepancy surfaced at all was checking the actual data
+    afterward instead of trusting that a successful copy meant a
+    successful restore.
+
+Q: Why does the protein-variety formula treat a dish with no
+identifiable protein as "absence of a signal" rather than its own
+category (like "vegetarian")?
+
+    Because folding it in as its own protein-like category would
+    quietly change what the score measures. The formula's whole job is
+    to say how evenly someone's ANIMAL-OR-PLANT-PROTEIN-FORWARD cooking
+    is spread across real proteins (chicken, beef, tofu, and so on) —
+    counting "no identifiable protein" as if it were one more entry in
+    that same distribution would reward someone who mostly cooks
+    protein-free dishes with an artificially high variety score, even
+    though they're not actually varying their PROTEIN choices at all,
+    they're just not making many protein-centered choices in the first
+    place. Excluding those meals from the denominator entirely keeps
+    the score honestly measuring what it claims to measure.

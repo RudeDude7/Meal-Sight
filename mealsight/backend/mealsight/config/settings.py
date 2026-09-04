@@ -102,6 +102,15 @@ class Settings(BaseSettings):
     repetition_window_days: int = 7
     max_same_protein_per_week: int = 3
 
+    # --- Taste insights -------------------------------------------------------
+    # Below this many cooked meals in the requested window,
+    # get_taste_insights reports that there isn't enough history rather
+    # than computing statistics over a handful of data points — the
+    # same "a handful" framing waste_insight_threshold-adjacent trend
+    # logic (mealsight.pantry.waste.MIN_ENTRIES_FOR_TREND) already
+    # established at this exact value.
+    min_meals_for_insights: int = 5
+
     # --- Interaction history --------------------------------------------------
     # Every completed recommendation run gets a text-only row (no image/
     # audio bytes — see mealsight.user_intelligence.interaction_history's

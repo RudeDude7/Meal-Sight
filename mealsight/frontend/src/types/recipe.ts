@@ -101,3 +101,26 @@ export interface SubstitutionResult {
   suggestions: SubstitutionSuggestion[]
   excluded_count: number
 }
+
+/**
+ * One GET /api/recipes/by-ingredients result. match_percentage is the
+ * fraction of the SUPPLIED ingredient list this recipe uses — not the
+ * recipe's own ingredient coverage — so a recipe using all 3 supplied
+ * ingredients scores 1.0 regardless of how many other ingredients it
+ * also needs. recipe_ingredient_count is shown for context only.
+ */
+export interface ReverseMatchedRecipe {
+  id: string
+  name: string
+  cuisine: string | null
+  meal_type: string | null
+  cook_time_minutes: number | null
+  match_percentage: number
+  matched_ingredient_names: string[]
+  recipe_ingredient_count: number
+}
+
+export interface ReverseSearchResults {
+  results: ReverseMatchedRecipe[]
+  total_matched: number
+}

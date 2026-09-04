@@ -158,3 +158,42 @@ class ContextSignals(BaseModel):
     temperature_f: float | None = None
     conditions: str | None = None
     mood_suggestion: str | None = None
+
+
+TasteTimeRange = Literal["this_week", "this_month", "all_time"]
+
+
+class TasteInsights(BaseModel):
+    """What get_taste_insights returns. When sufficient_history is
+    False (fewer than settings.min_meals_for_insights meals cooked in
+    time_range), every statistic is null and message explains why —
+    never a real-looking number computed over a handful of meals.
+
+    protein_variety_score is normalized Shannon entropy (Pielou's
+    evenness index) over which protein each cooked meal centered on —
+    0.0 means every meal centered on the same one protein, 1.0 means
+    every distinct protein cooked appeared equally often. Null when
+    sufficient_history is False, or when not one cooked meal in the
+    window had an identifiable protein at all (see mealsight.user_
+    intelligence.scoring.derive_protein).
+
+    preferred_cook_time_minutes is the MEDIAN cook_time_minutes among
+    recipes actually cooked in the window — deliberately not the same
+    thing as stated_preferred_cook_time_minutes (the profile's own
+    stated preference, included alongside for direct comparison),
+    since actual behavior and a stated preference can genuinely
+    diverge."""
+
+    model_config = ConfigDict(frozen=True)
+
+    time_range: TasteTimeRange
+    sufficient_history: bool
+    message: str | None
+    total_meals_cooked: int
+    most_cooked_cuisine: str | None
+    average_rating: float | None
+    protein_variety_score: float | None
+    cooking_frequency_per_week: float | None
+    preferred_cook_time_minutes: float | None
+    stated_preferred_cook_time_minutes: int
+    suggestions: list[str]

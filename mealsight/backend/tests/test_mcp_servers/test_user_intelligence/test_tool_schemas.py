@@ -1,4 +1,4 @@
-"""Confirms the ten user-intelligence tools are all registered,
+"""Confirms the eleven user-intelligence tools are all registered,
 described, and schema'd the way an MCP client (and, later, an agent
 selecting among them) actually needs — using the real FastMCP in-memory
 client, so this exercises the real MCP protocol, not just server.py's
@@ -43,10 +43,11 @@ EXPECTED_TOOLS: dict[str, set[str]] = {
         "final_response",
     },
     "get_interaction_history": {"days_back", "limit"},
+    "get_taste_insights": {"time_range"},
 }
 
 
-async def test_all_ten_tools_are_listed_with_non_empty_descriptions(mcp_client: Client[Any]) -> None:
+async def test_all_eleven_tools_are_listed_with_non_empty_descriptions(mcp_client: Client[Any]) -> None:
     tools = await mcp_client.list_tools()
     names = {t.name for t in tools}
 

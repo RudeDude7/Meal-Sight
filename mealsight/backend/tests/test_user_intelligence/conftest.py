@@ -49,6 +49,23 @@ async def recipe_db(tmp_path: Path) -> AsyncIterator[Database]:
     await db.close()
 
 
+@pytest.fixture
+async def pantry_db(tmp_path: Path) -> AsyncIterator[Database]:
+    """get_taste_insights' own waste-correlation suggestion needs a
+    real (throwaway) pantry.db too — the third physical database this
+    package's tests now reach across, for the same reason recipe_db
+    already does: a cross-database read, loaded into memory, never a
+    SQL join."""
+    db = Database(
+        tmp_path / "pantry_test.db",
+        name="pantry",
+        schema_path=SCHEMA_DIR / "pantry.sql",
+    )
+    await init_database(db, db.schema_path)
+    yield db
+    await db.close()
+
+
 async def insert_recipe(
     recipe_db: Database,
     *,

@@ -35,6 +35,28 @@ export interface UserProfile {
   cuisine_preference_data_points: Record<string, number>
 }
 
+export type TasteInsightsTimeRange = 'this_week' | 'this_month' | 'all_time'
+
+/**
+ * What GET /api/insights returns. When sufficient_history is false,
+ * every statistic is null and message explains why — mealsight.user_
+ * intelligence.taste_insights never computes real-looking numbers over
+ * a handful of meals.
+ */
+export interface TasteInsights {
+  time_range: TasteInsightsTimeRange
+  sufficient_history: boolean
+  message: string | null
+  total_meals_cooked: number
+  most_cooked_cuisine: string | null
+  average_rating: number | null
+  protein_variety_score: number | null
+  cooking_frequency_per_week: number | null
+  preferred_cook_time_minutes: number | null
+  stated_preferred_cook_time_minutes: number
+  suggestions: string[]
+}
+
 /**
  * One meal_history row. rating is null for a meal logged but not yet
  * rated — POST /api/history/{id}/rate is the separate call that fills

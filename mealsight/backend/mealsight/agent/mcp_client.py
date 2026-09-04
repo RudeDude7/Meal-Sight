@@ -63,6 +63,7 @@ EXPECTED_TOOLS: dict[ServerName, frozenset[str]] = {
             "scale_recipe",
             "calculate_nutrition",
             "find_substitutions",
+            "get_recipe_by_ingredients",
         }
     ),
     "pantry_manager": frozenset(
@@ -89,6 +90,7 @@ EXPECTED_TOOLS: dict[ServerName, frozenset[str]] = {
             "get_context_signals",
             "record_interaction",
             "get_interaction_history",
+            "get_taste_insights",
         }
     ),
 }

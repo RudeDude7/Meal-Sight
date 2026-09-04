@@ -1,4 +1,4 @@
-"""Confirms the six recipe-engine tools are all registered, described,
+"""Confirms the seven recipe-engine tools are all registered, described,
 and schema'd the way an MCP client (and, later, an agent selecting among
 them) actually needs — using the real FastMCP in-memory client, so this
 exercises the real MCP protocol, not just server.py's Python functions
@@ -24,10 +24,11 @@ EXPECTED_TOOLS: dict[str, set[str]] = {
     "scale_recipe": {"recipe_id", "target_servings"},
     "calculate_nutrition": {"recipe_id", "servings"},
     "find_substitutions": {"ingredient_name", "reason"},
+    "get_recipe_by_ingredients": {"ingredients", "minimum_match_percentage"},
 }
 
 
-async def test_all_six_tools_are_listed_with_non_empty_descriptions(mcp_client: Client[Any]) -> None:
+async def test_all_seven_tools_are_listed_with_non_empty_descriptions(mcp_client: Client[Any]) -> None:
     tools = await mcp_client.list_tools()
     names = {t.name for t in tools}
 

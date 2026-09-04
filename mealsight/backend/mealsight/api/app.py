@@ -50,6 +50,7 @@ from mealsight.api.routers import (
     grocery,
     health,
     history,
+    insights,
     interactions,
     meal_plan,
     pantry,
@@ -155,6 +156,7 @@ def create_app(
     app.include_router(grocery.router)
     app.include_router(waste.router)
     app.include_router(meal_plan.router)
+    app.include_router(insights.router)
     app.include_router(ws.router)
 
     return app

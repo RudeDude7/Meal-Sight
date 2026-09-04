@@ -185,3 +185,23 @@ async def test_get_interaction_history_empty_on_a_fresh_database(mcp_client: Cli
 
     assert result.data["interactions"] == []
     assert result.data["count"] == 0
+
+
+async def test_get_taste_insights_reports_insufficient_history_on_a_fresh_database(
+    mcp_client: Client[Any],
+) -> None:
+    result = await mcp_client.call_tool("get_taste_insights", {"time_range": "all_time"})
+
+    assert result.data["sufficient_history"] is False
+    assert result.data["message"] is not None
+    assert result.data["suggestions"] == []
+
+
+async def test_get_taste_insights_invalid_time_range_returns_validation_error(
+    mcp_client: Client[Any],
+) -> None:
+    result = await mcp_client.call_tool("get_taste_insights", {"time_range": "bogus"})
+
+    assert result.data["error"] == "validation_error"
+    assert result.data["parameter"] == "time_range"
+    assert set(result.data["accepted_values"]) == {"this_week", "this_month", "all_time"}

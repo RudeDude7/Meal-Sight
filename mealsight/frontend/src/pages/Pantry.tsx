@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/primitives/EmptyState'
 import { Ticket } from '@/components/primitives/Ticket'
 import { AddPantryItemForm } from '@/components/pantry/AddPantryItemForm'
 import { PantryItemRow } from '@/components/pantry/PantryItemRow'
+import { WhatCanIMake } from '@/components/pantry/WhatCanIMake'
 import { isStale } from '@/lib/pantryStatus'
 import type { ExpiringItem, PantryItem, PantryItemInput } from '@/types/pantry'
 
@@ -183,6 +184,10 @@ export function Pantry() {
 
       <div className="mt-8">
         <AddPantryItemForm onAdd={handleAdd} />
+      </div>
+
+      <div className="mt-8">
+        <WhatCanIMake pantryItemNames={(items ?? []).map((item) => item.name)} />
       </div>
     </section>
   )

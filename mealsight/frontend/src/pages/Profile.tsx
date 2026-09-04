@@ -9,6 +9,7 @@ import { Button } from '@/components/primitives/Button'
 import { Well } from '@/components/primitives/Well'
 import { CuisinePreferenceBars } from '@/components/profile/CuisinePreferenceBars'
 import { PreferenceListEditor } from '@/components/profile/PreferenceListEditor'
+import { TasteInsightsPanel } from '@/components/profile/TasteInsightsPanel'
 import type { BudgetSensitivity, CookingSkill, PreferenceType, UserProfile } from '@/types/profile'
 
 const COOKING_SKILLS: CookingSkill[] = ['beginner', 'intermediate', 'advanced']
@@ -286,6 +287,8 @@ export function Profile() {
             </div>
           )}
         </div>
+
+        <TasteInsightsPanel />
       </div>
     </section>
   )

@@ -18,6 +18,7 @@ from mealsight.mcp_servers.errors import internal_error, not_found_error, valida
 from mealsight.recipe_engine.models import (
     NutritionResult,
     RecipeDetail,
+    ReverseSearchResults,
     ScaledRecipe,
     SearchResults,
     SubstitutionResult,
@@ -29,6 +30,7 @@ __all__ = [
     "not_found_error",
     "nutrition_result_to_dict",
     "recipe_detail_to_dict",
+    "reverse_search_results_to_dict",
     "scaled_recipe_to_dict",
     "search_results_to_dict",
     "substitution_result_to_dict",
@@ -83,6 +85,19 @@ def nutrition_result_to_dict(nutrition: NutritionResult) -> dict[str, Any]:
     complete — a result computed from partial ingredient data says so
     explicitly rather than silently looking whole."""
     return nutrition.model_dump(mode="json")
+
+
+def reverse_search_results_to_dict(results: ReverseSearchResults) -> dict[str, Any]:
+    """Shape: {"results": [{"id", "name", "cuisine", "meal_type",
+    "cook_time_minutes", "match_percentage", "matched_ingredient_names",
+    "recipe_ingredient_count"}, ...], "total_matched": int}.
+    match_percentage is the fraction of the SUPPLIED ingredient list
+    this recipe uses, not the recipe's own ingredient coverage — see
+    mealsight.recipe_engine.reverse_search's own module docstring."""
+    return {
+        "results": [entry.model_dump(mode="json") for entry in results.results],
+        "total_matched": results.total_matched,
+    }
 
 
 def substitution_result_to_dict(result: SubstitutionResult) -> dict[str, Any]:

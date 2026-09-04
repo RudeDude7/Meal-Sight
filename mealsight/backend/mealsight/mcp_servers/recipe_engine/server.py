@@ -24,6 +24,7 @@ from mealsight.mcp_servers.recipe_engine.serialization import (
     not_found_error,
     nutrition_result_to_dict,
     recipe_detail_to_dict,
+    reverse_search_results_to_dict,
     scaled_recipe_to_dict,
     search_results_to_dict,
     substitution_result_to_dict,
@@ -32,9 +33,11 @@ from mealsight.mcp_servers.recipe_engine.serialization import (
 from mealsight.recipe_engine import calculate_nutrition as _calculate_nutrition
 from mealsight.recipe_engine import find_substitutions as _find_substitutions
 from mealsight.recipe_engine import get_recipe as _get_recipe
+from mealsight.recipe_engine import get_recipe_by_ingredients as _get_recipe_by_ingredients
 from mealsight.recipe_engine import scale_recipe as _scale_recipe
 from mealsight.recipe_engine import search_recipes as _search_recipes
 from mealsight.recipe_engine.models import SubstitutionReason
+from mealsight.recipe_engine.reverse_search import DEFAULT_MINIMUM_MATCH_PERCENTAGE
 from mealsight.utils.logging import get_logger
 
 logger = get_logger("mealsight.mcp_servers.recipe_engine")
@@ -269,4 +272,46 @@ async def find_substitutions(ingredient_name: str, reason: str = "unavailable") 
         return substitution_result_to_dict(result)
     except Exception:
         logger.error("find_substitutions_failed", exc_info=True, ingredient_name=ingredient_name)
+        return internal_error()
+
+
+@mcp.tool
+async def get_recipe_by_ingredients(
+    ingredients: list[str], minimum_match_percentage: float = DEFAULT_MINIMUM_MATCH_PERCENTAGE
+) -> dict[str, Any]:
+    """Reverse search: given a list of ingredients (typically the
+    pantry), returns recipes ranked by how well they use THAT LIST —
+    the opposite direction from search_recipes (which filters by
+    constraints, then optionally pre-ranks by pantry overlap). Use this
+    for "what can I make with what I have" rather than "show me recipes
+    matching these filters."
+
+    match_percentage is the fraction of ingredients (not the recipe's
+    own ingredient list) that a recipe actually uses — a recipe using
+    3 of 3 supplied ingredients scores 1.0 and ranks above one using
+    those same 3 ingredients out of its own 12, since from the caller's
+    point of view both used everything supplied equally well. Only
+    recipes at or above minimum_match_percentage (default 0.6) are
+    returned at all, ranked highest match_percentage first.
+
+    An empty ingredients list returns an empty result immediately.
+
+    Returns {"results": [{"id", "name", "cuisine", "meal_type",
+    "cook_time_minutes", "match_percentage", "matched_ingredient_names",
+    "recipe_ingredient_count"}, ...], "total_matched": int}.
+
+    Returns a structured {"error": "validation_error", ...} naming
+    minimum_match_percentage if it isn't between 0.0 and 1.0.
+    """
+    if not (0.0 <= minimum_match_percentage <= 1.0):
+        return validation_error(
+            "minimum_match_percentage",
+            f"minimum_match_percentage must be between 0.0 and 1.0, got {minimum_match_percentage}.",
+        )
+    try:
+        db = get_recipe_db()
+        result = await _get_recipe_by_ingredients(db, ingredients, minimum_match_percentage)
+        return reverse_search_results_to_dict(result)
+    except Exception:
+        logger.error("get_recipe_by_ingredients_failed", exc_info=True, ingredient_count=len(ingredients))
         return internal_error()

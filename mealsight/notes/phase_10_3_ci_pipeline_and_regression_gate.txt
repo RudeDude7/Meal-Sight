@@ -1,0 +1,362 @@
+PHASE 10.3 STUDY NOTES: CONTINUOUS INTEGRATION FOR AN LLM PRODUCT WHOSE
+EVALUATION SUITE LEGITIMATELY FAILS
+=====================================================================
+
+AUDIENCE AND PURPOSE. Interview preparation. This phase is small in code
+and large in judgment: it shows I can put a pipeline around a system
+that is nondeterministic, partly external, and honestly "red", without
+making the pipeline either dishonest or useless. Sections: 0 pitch,
+1 what exists, 2 design decisions and why, 3 the story in order,
+4 bugs the CI exercise found in the product, 5 my own mistakes,
+6 principles, 7 numbers, 8 likely questions, 9 what NOT to overclaim.
+
+Companion files: .github/workflows/ci.yml, .github/workflows/eval-nightly.yml,
+backend/eval/compare.py, backend/eval/baseline/baseline.json,
+backend/mealsight/seed/snapshot.py, docs/CI.md, docs/EVALUATION.md.
+
+
+---------------------------------------------------------------------
+0. THE PITCH
+---------------------------------------------------------------------
+
+THIRTY SECONDS.
+"After building a five-dimension evaluation suite, I set up GitHub
+Actions for it. Fast checks (ruff, mypy strict, 950 tests, frontend
+typecheck/lint/build) run on every push with no secrets and no API
+calls. A free, deterministic matcher evaluation gates every PR, and the
+full LLM-backed suite runs nightly. The hard part: the suite
+legitimately fails, so 'fail the build if the suite fails' would be
+permanently red. I built a regression gate against a committed baseline
+instead. And the exercise of running tests on a clean machine exposed
+ten hidden environment dependencies, one of which was a real product
+bug."
+
+TWO MINUTES (add):
+"Three design problems. One: the databases are gitignored and the
+recipe corpus is normally fetched live from TheMealDB, so a fresh CI
+runner has nothing, and my hand-derived matcher expectations depend on
+exact data. I committed a pinned 250-recipe snapshot with a count and
+sha256 check, so the rebuilt data is provably identical. Two: model
+output is nondeterministic. The gate has per-dimension tolerances backed
+by observed run-to-run spread, plus hard invariants (zero allergen
+violations, zero matcher disagreements) that get no tolerance at all.
+Three: a flaky-test policy. I could not reproduce the known timing-
+sensitive WebSocket test failing even under CPU load, so I did not claim
+it was flaky; I removed the timing assumption with event
+synchronisation, and refused to add blanket retries."
+
+ONE-LINE TAKEAWAY: "A gate should enforce what you can actually promise:
+no regressions, not a perfect score."
+
+
+---------------------------------------------------------------------
+1. WHAT EXISTS
+---------------------------------------------------------------------
+
+ci.yml (every push and PR, no secrets), three parallel jobs:
+  backend      uv sync --frozen; ruff check; mypy --strict mealsight eval;
+               pytest (950 passed, 6 skipped).
+  frontend     npm ci; typecheck; lint; build.
+  matcher-gate seed DBs from snapshot (offline); run Dimension 3 (zero
+               API calls, ~1 second); compare to baseline with
+               --strict-data.
+eval-nightly.yml (03:17 UTC + manual dispatch): full five dimensions,
+  ~118 API calls, ~426k tokens; real keys exposed to that one step only;
+  then the regression gate; scorecard uploaded as an artifact (90 days),
+  gate table written to the job summary.
+compare.py + baseline.json: the regression gate (exit 0 pass, 1
+  regression, 2 gate itself broken).
+snapshot.py + recipes_snapshot.json: the deterministic corpus.
+Badges in README: CI, and the eval workflow (whose pass/fail IS the gate).
+dependabot.yml: monthly action-pin updates.
+Security hygiene: permissions: contents: read; concurrency groups; every
+action pinned to a commit SHA (with the version in a comment); fork PRs
+never see secrets; placeholder keys in the PR workflow are labelled as
+non-secret.
+
+
+---------------------------------------------------------------------
+2. DESIGN DECISIONS AND WHY
+---------------------------------------------------------------------
+
+2.1 REGRESSION, NOT ABSOLUTE PASS.
+Dimension 1 (photo ingredient recognition) scores 0.488 against a 0.60
+threshold for a documented external reason: the original vision model
+was retired and the replacement tier is the only one reachable on the
+free plan. Gating on the overall verdict gives a permanently red
+pipeline, and a permanently red pipeline trains everyone to ignore it.
+Rejected alternatives: lowering the threshold (dishonest: moving the
+goalpost to make a number pass), marking the job continue-on-error
+(green regardless: a gate that cannot fail), skipping Dimension 1
+(hides the one place the model can drift).
+What I did: baseline JSON in the repo; the dimension is flagged
+known_failing with its reason; the gate fails only if it falls below the
+known level minus tolerance. If it ever recovers, the gate says
+RECOVERED and asks for a baseline refresh, so improvement is recorded
+rather than silently banked.
+
+2.2 TOLERANCE BASED ON EVIDENCE.
+Dimension 1 moved between 0.485 and 0.492 over five runs, so its band is
+just wider than that spread. Case-count dimensions get one case of
+tolerance. Dimension 3 (deterministic arithmetic) gets zero. A band
+wider than the evidence hides real regressions; narrower produces false
+alarms. Each tolerance is recorded with its noise evidence in the
+baseline.
+
+2.3 INVARIANTS ARE NOT SCORES.
+Some properties must hold exactly: zero hard-constraint (allergy/diet)
+violations, zero matcher disagreements, zero case defects, real
+databases untouched. These are checked as equality, not as a number
+within a band. A safety property averaged into a score can be hidden by
+other cases passing.
+
+2.4 THE GATE PROTECTS ITSELF.
+It fails on: a dimension missing from the scorecard, a changed pass
+threshold (nobody lowers the bar quietly), fewer cases than baseline
+(cases silently dropped), unreadable scorecard or baseline (exit 2, so a
+broken gate never reads as green). Refreshing the baseline preserves
+tolerances, statuses and invariants, so a refresh cannot quietly widen a
+tolerance or relabel a failing dimension. Baseline changes are meant to
+be reviewed in the same diff as whatever moved the numbers.
+
+2.5 DETERMINISTIC DATA FOR A DETERMINISTIC TEST.
+Dimension 3's expected answers were derived by hand against a specific
+recipe corpus. The corpus came from a live API (not reproducible) into a
+gitignored database (absent in CI). Solution: export 250 recipes to a
+committed JSON snapshot with a count and sha256 in its metadata;
+load_snapshot verifies both before inserting; the seeder gained a
+--from-snapshot flag. The gate's --strict-data flag then fails if the
+rebuilt reference data hashes differ from those the baseline was
+recorded on, so "the test data drifted" is caught as a distinct, named
+failure instead of looking like a matcher regression. The snapshot
+reproduced all four recorded data hashes exactly.
+
+2.6 SECRETS AND COST.
+PR workflow uses no secrets at all (also true of fork PRs, which GitHub
+withholds secrets from anyway). The nightly exposes the three keys to
+exactly one step, via step-level env, never echoed. Nightly cost is
+~426k tokens (~12.8M/month). Against the known ministral-8b limit
+(625k tokens/min, 3.13 req/s) a run uses ~4-6% of the per-minute
+budget, because the run spreads over 11-17 minutes. The monthly free-tier
+allowance is not documented in the repo, so real headroom is UNKNOWN; I
+said so, and documented the dial (weekly cron, or Dimension 2 --sampled).
+
+2.7 SHA-PINNED ACTIONS.
+Tags are mutable; a compromised or force-moved tag runs attacker code
+with your secrets. Pinning to the commit SHA with the version in a
+comment, plus Dependabot to keep them current, gives reproducibility
+without staleness.
+
+
+---------------------------------------------------------------------
+3. THE STORY IN ORDER
+---------------------------------------------------------------------
+
+1. Report first. The brief asked me to report repo structure and any
+   existing workflows before writing. Found: git root is the PARENT
+   directory (project lives under mealsight/), so workflows go at the
+   root and use working-directory; no .github existed.
+2. Clean-machine replica. I built a pristine copy containing exactly
+   what a commit would contain (tracked + untracked-not-ignored files)
+   and ran everything there. This is the single most valuable step: CI
+   failures are almost always "works on my machine".
+3. First replica run: 10 failing tests. Three MCP-client tests, two
+   settings tests, five weather tests. Cause: they silently depended on
+   my local .env. Fixed by making tests hermetic (see 4).
+4. Database problem: designed the snapshot (2.5).
+5. Eval runner hung at exit: open database connections kept the process
+   alive. Added close_all() before returning the scorecard. A nightly job
+   that hangs burns runner minutes until timeout.
+6. Wrote the regression gate with 19 unit tests, then a baseline from
+   the final 10.2 scorecard. Proved the gate bites: a fabricated 0.95
+   Dimension 3 score against baseline 1.0 reports REGRESSION.
+7. WebSocket test investigation (section 4.3).
+8. Wrote the workflows, validated YAML, fixed a mistake (an unquoted
+   colon in a step name broke YAML parsing), scoped mypy.
+9. Timed every step in the replica, mirroring ci.yml. Total sequential
+   45 seconds; pytest 30s of it.
+10. Commit and push. First push of workflow files was rejected because
+    the stored personal access token lacked the `workflow` scope. Fixed
+    by issuing a token with it.
+
+
+---------------------------------------------------------------------
+4. WHAT THE CI EXERCISE FOUND
+---------------------------------------------------------------------
+
+4.1 REAL PRODUCT BUG: MCP SUBPROCESS ENVIRONMENT.
+The client launched each MCP server subprocess with only a handful of
+"safe" variables. A server could therefore read an API key from a .env
+file but not from a real environment variable, which is how every CI
+system, Docker container and cloud host supplies secrets. In production
+under those conditions every server would have failed to start. It never
+showed locally because a .env file always existed. Fix: the child
+environment is the parent's environment plus any explicit extras
+(_subprocess_env). Regression test added. Interview value: "CI found a
+deployment bug that local development could not, by simply being a
+different environment."
+
+4.2 TEST HERMETICITY.
+Tests asserting "no key configured" behaviour passed only if the
+developer's .env was absent or present in a specific way. Fixed with
+autouse fixtures that delete the three key variables (settings tests)
+and set a fake key (weather tests). Principle: a test must define its
+own world.
+
+4.3 THE FLAKY WEBSOCKET TEST (test_ws_mid_run_receives_buffered_then_live_messages).
+The brief said it was timing-sensitive and asked whether it flakes in CI
+and to handle it deliberately.
+Honest finding: I could NOT make it fail. Before any change: 0 of 30
+idle runs and 0 of 40 runs on an 8-core machine under 16 busy-loop
+processes. After: same, 0 failures. So I cannot claim to know whether it
+flakes on GitHub's runners.
+What I did anyway: the test used sleeps to guess when the server had
+buffered messages. I rewrote it with threading.Event: the server side
+signals "emitted", the test waits on that event (bounded), asserts the
+live message has NOT been released yet, then releases it and asserts
+delivery order. Now it asserts the actual property (buffered first, then
+live) with no timing assumption.
+Why not retries: a retry on a flaky test hides real races. No automatic
+retries exist anywhere in the pipeline; if something flakes it should be
+visible.
+
+4.4 EVAL PROCESS HANG: see story step 5.
+
+
+---------------------------------------------------------------------
+5. MY OWN MISTAKES (TELL THESE HONESTLY)
+---------------------------------------------------------------------
+
+- Load-test cleanup. To test the flaky test under CPU contention I
+  started busy-loop background processes. The test commands timed out
+  before my cleanup ran, leaving 32 spinner processes and a load average
+  above 300. My first kill did nothing because zsh does not word-split
+  an unquoted variable, so the kill got one long string and failed
+  silently; I then trusted a count that said "1 remaining" without
+  rechecking. A broad pkill was (correctly) blocked by the safety layer,
+  and I switched to killing exact PIDs after confirming each was my
+  spinner and not the user's own busy process. Lessons: cleanup must be
+  guaranteed (trap), verify the outcome after acting, and never use
+  broad kill patterns on a machine with someone else's work on it.
+- Shell portability slips: GNU sed -i vs macOS (needs an empty suffix);
+  no `timeout` binary on macOS.
+- YAML: an unquoted colon inside a step name is a mapping, not text.
+  Caught by parsing the file before committing.
+- Scope slip: I first ran mypy over everything; the tests carry ~17
+  pre-existing strict errors. I scoped CI to mealsight and eval and
+  documented the debt rather than pretending it was clean or silently
+  expanding the task.
+- Verification honesty: no real GitHub Actions run was possible from my
+  environment (CLI not authenticated, nothing pushed at that time), so
+  the "successful run with timing" was from the clean replica and I said
+  so in the report, rather than implying a hosted run.
+
+
+---------------------------------------------------------------------
+6. PRINCIPLES
+---------------------------------------------------------------------
+
+1. A gate should enforce a promise you can keep. "No regressions" is
+   keepable; "everything passes" was not.
+2. A permanently red pipeline is as useless as a permanently green one.
+3. Safety properties are equalities, quality metrics are bands.
+4. Tolerances need evidence, and the evidence lives next to them.
+5. The gate must be able to fail, and must fail when it breaks.
+6. Reproduce on a clean machine before trusting any pipeline.
+7. If you cannot reproduce a flake, say so, remove the fragility you can
+   identify, and do not paper over it with retries.
+8. Least privilege: read-only token, secrets on one step, pinned actions.
+9. Do not lower thresholds to make numbers pass; change the bar only in
+   a reviewed diff with a stated reason.
+10. Report what was not verified.
+
+
+---------------------------------------------------------------------
+7. NUMBERS CHEAT SHEET
+---------------------------------------------------------------------
+
+Tests: 950 passed, 6 skipped, 3 deselected (pytest ~30s).
+Replica timing, sequential: ruff <1s, mypy 1s (cached), pytest 30s,
+  seed 1s, Dimension 3 1s, gate <1s, npm ci 3s, typecheck 3s, lint 2s,
+  build 4s. Total 45s. (Hosted runners will be slower, cold caches; the
+  5-minute budget has wide margin. uv sync cold time was not measured.)
+Snapshot: 250 recipes, ~777KB, count + sha256 verified.
+Baseline: recorded from run_1794032750; Dimension 1 0.488 vs 0.60
+  threshold, band covers observed 0.485-0.492.
+Nightly: ~118 API calls, ~426k tokens, 11-17 min, ~12.8M tokens/month,
+  ~4-6% of the 625k tokens/min limit. Monthly cap unknown.
+Gate tests: 19. WS test: 0/70 failures before, 0/70 after.
+Hidden-dependency failures found on clean machine: 10 (3 MCP, 2
+  settings, 5 weather), one a real product bug.
+
+
+---------------------------------------------------------------------
+8. LIKELY INTERVIEW QUESTIONS
+---------------------------------------------------------------------
+
+Q: Your eval suite fails. How can CI pass?
+A: CI gates on regression versus a committed baseline, not on the
+   absolute verdict. The failing dimension is recorded with its reason
+   and tolerance; it fails the gate only if it gets worse. Safety
+   invariants have zero tolerance.
+
+Q: Isn't that just lowering the bar?
+A: No. The threshold stays 0.60 and the dimension is still reported as
+   failing. What changed is what the pipeline enforces. And the gate
+   fails if anyone changes the threshold, drops cases, or loses a
+   dimension, so the bar cannot move quietly.
+
+Q: How do you handle nondeterministic LLM output in a gate?
+A: Split by determinism. The matcher dimension is pure arithmetic: exact
+   equality, runs on every PR, free. The LLM dimensions get measured
+   tolerance bands and run nightly. Invariants never use bands.
+
+Q: How did you make the DB reproducible?
+A: Pinned snapshot of the corpus with a checksum, verified on load, plus
+   a --strict-data check in the gate so data drift is a named failure.
+
+Q: How did you deal with the flaky test?
+A: I tried to reproduce it, couldn't (70 runs including CPU starvation),
+   said so, removed the sleep-based timing with event synchronisation,
+   and declined retries because they mask races.
+
+Q: What would you do about the monthly API quota?
+A: It's unknown from the repo, so I flagged it instead of guessing:
+   nightly is ~12.8M tokens a month. Dials: weekly schedule or sampled
+   Dimension 2. I'd also check the provider's usage page after the first
+   week.
+
+Q: What did CI teach you about the product?
+A: The MCP servers didn't inherit environment variables, which would
+   have broken every real deployment. Local .env files hid it.
+
+Q: Security of the workflow?
+A: Read-only token permissions, no secrets in PR runs, secrets scoped to
+   one step, SHA-pinned actions with Dependabot, concurrency control.
+
+Q: What would you improve next?
+A: Make tests mypy-clean and add them to the check; run the nightly on
+   a rolling window and alert on trend, not only threshold; cache the
+   eval's model calls for cheaper reruns; add a path filter so docs-only
+   PRs skip the heavy jobs.
+
+
+---------------------------------------------------------------------
+9. WHAT NOT TO OVERCLAIM
+---------------------------------------------------------------------
+
+- I did not observe the WebSocket test flake. Do not say I "fixed a
+  flaky test"; say I removed a timing dependency I could not prove was
+  failing.
+- The first hosted GitHub Actions run had not happened when the work was
+  reported; timings are from a clean local replica, not GitHub runners.
+- The eval-nightly workflow's full-suite path was not exercised before
+  the push; only its gate and seed steps were.
+- Monthly quota headroom is unknown, not "fine".
+- The CI is not "all green": the evaluation still FAILS on Dimension 1;
+  the pipeline passes because it enforces no-regression.
+- Tests are not mypy-strict clean (~17 existing errors); only the
+  source and eval packages are.
+- A large amount of previously uncommitted work, including eval result
+  JSON files that the .gitignore says should be untracked, went into the
+  commit; that is housekeeping debt, not design.

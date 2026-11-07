@@ -81,9 +81,7 @@ async def test_loose_dietary_phrasing_normalizes_to_the_fixed_vocabulary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     audio = FakeAudioProvider(text="No dairy please, and keep it gluten free too.")
-    text = FakeTextProvider(
-        result=RawExtractedConstraints(dietary_restrictions=["no dairy", "gluten free"])
-    )
+    text = FakeTextProvider(result=RawExtractedConstraints(dietary_restrictions=["no dairy", "gluten free"]))
     _patch_providers(monkeypatch, audio, text)
 
     result = await analyze_voice_memo(make_wav_bytes(), synonym_map={})

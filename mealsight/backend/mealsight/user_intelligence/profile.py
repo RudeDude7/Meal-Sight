@@ -12,6 +12,7 @@ from typing import Any
 
 from mealsight.db import get_user_db
 from mealsight.db.connection import Database
+from mealsight.matching.cuisine import collapse_cuisine_scores
 from mealsight.user_intelligence.models import UserProfile
 
 # What get_user_profile returns for any field never written through
@@ -41,7 +42,8 @@ async def _read_cuisine_preferences(user_db: Database) -> tuple[dict[str, float]
     )
     scores = {row["value"]: row["score"] for row in rows}
     data_points = {row["value"]: row["data_points"] for row in rows}
-    return scores, data_points
+    # Canonical keys on the way out too, so rows stored under an older spelling still resolve (no migration).
+    return collapse_cuisine_scores(scores, data_points)
 
 
 async def get_user_profile(user_db: Database | None = None) -> UserProfile:

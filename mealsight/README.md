@@ -1,5 +1,8 @@
 # MealSight
 
+[![CI](https://github.com/RudeDude7/Meal-Sight/actions/workflows/ci.yml/badge.svg)](https://github.com/RudeDude7/Meal-Sight/actions/workflows/ci.yml)
+[![Eval regression gate](https://github.com/RudeDude7/Meal-Sight/actions/workflows/eval-nightly.yml/badge.svg)](https://github.com/RudeDude7/Meal-Sight/actions/workflows/eval-nightly.yml)
+
 MealSight is a multimodal agentic meal recommendation system: it reasons over photos of your pantry, spoken input, and meal history to suggest what to cook next. It combines vision, speech, and language models with real-world recipe and weather data to keep recommendations grounded and current.
 
 Status: pre-development setup

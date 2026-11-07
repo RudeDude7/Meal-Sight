@@ -37,7 +37,12 @@ from typing import Any
 
 from mealsight.agent.mcp_client import MCPClientManager
 from mealsight.config.settings import settings
+from mealsight.matching.avoid import ingredient_hits as avoid_ingredient_hits
+from mealsight.matching.cuisine import lookup_cuisine_score
+from mealsight.matching.diet import split_restrictions, violated_ingredient_restrictions
 from mealsight.matching.normalize import normalize_ingredient
+from mealsight.pantry.expiring import split_usable_and_waste, usable_pantry_names
+from mealsight.perception.dietary import normalize_dietary_restriction
 from mealsight.planning import PlanCandidate, PlanConstraintsUnsatisfiable, build_schedule
 from mealsight.seed.recipe_parsing import PROTEIN_TERMS
 from mealsight.utils.logging import bind_trace_id, get_logger
@@ -85,9 +90,7 @@ def _protein_type(ingredient_names: list[str]) -> str | None:
             # "chicken breast" both count as the same "chicken" for the
             # max_same_protein_per_week cap to mean anything.
             return next(
-                term
-                for term in PROTEIN_TERMS
-                if re.search(rf"\b{re.escape(term)}(?:es|s)?\b", normalized)
+                term for term in PROTEIN_TERMS if re.search(rf"\b{re.escape(term)}(?:es|s)?\b", normalized)
             )
     return None
 
@@ -102,7 +105,9 @@ def _all_ingredient_names(match_data: dict[str, Any]) -> list[str]:
     return names
 
 
-async def _gather_context(manager: MCPClientManager) -> tuple[list[str], set[str], dict[str, float]]:
+async def _gather_context(
+    manager: MCPClientManager,
+) -> tuple[list[str], set[str], dict[str, float], list[str], list[str]]:
     pantry_result, expiring_result, profile_result = await asyncio.gather(
         manager.call_tool("pantry_manager", "get_pantry", {}),
         manager.call_tool("pantry_manager", "flag_expiring", {}),
@@ -111,26 +116,29 @@ async def _gather_context(manager: MCPClientManager) -> tuple[list[str], set[str
 
     pantry_names: list[str] = []
     if pantry_result.success and isinstance(pantry_result.data, dict):
-        pantry_names = [
-            str(item["name"]) for item in pantry_result.data.get("items", []) if item.get("name")
-        ]
+        pantry_names = usable_pantry_names(pantry_result.data.get("items", []))
 
     expiring_names: set[str] = set()
     if expiring_result.success and isinstance(expiring_result.data, dict):
-        expiring_names = {
-            normalize_ingredient(item["name"])
-            for item in expiring_result.data.get("items", [])
-            if item.get("name")
-        }
+        usable_expiring, _waste = split_usable_and_waste(expiring_result.data.get("items", []))
+        expiring_names = {normalize_ingredient(item["name"]) for item in usable_expiring if item.get("name")}
 
     cuisine_preferences: dict[str, float] = {}
     if profile_result.success and isinstance(profile_result.data, dict):
         raw = profile_result.data.get("cuisine_preferences") or {}
-        cuisine_preferences = {
-            str(k).lower(): float(v) for k, v in raw.items() if isinstance(v, (int, float))
-        }
+        cuisine_preferences = {str(k): float(v) for k, v in raw.items() if isinstance(v, (int, float))}
 
-    return pantry_names, expiring_names, cuisine_preferences
+    # The saved profile's restrictions and dislikes apply to a plan exactly as they do to one recommendation.
+    saved_restrictions: list[str] = []
+    disliked: list[str] = []
+    if profile_result.success and isinstance(profile_result.data, dict):
+        for raw_r in profile_result.data.get("dietary_restrictions") or []:
+            norm = normalize_dietary_restriction(str(raw_r)) or str(raw_r).strip().lower().replace("_", "-")
+            if norm and norm not in saved_restrictions:
+                saved_restrictions.append(norm)
+        disliked = [str(d) for d in (profile_result.data.get("disliked_ingredients") or []) if d]
+
+    return pantry_names, expiring_names, cuisine_preferences, saved_restrictions, disliked
 
 
 async def _build_candidates(
@@ -141,6 +149,7 @@ async def _build_candidates(
     pantry_names: list[str],
     expiring_names: set[str],
     cuisine_preferences: dict[str, float],
+    disliked: list[str] | None = None,
 ) -> list[PlanCandidate]:
     # cuisine is deliberately NOT passed as a hard filter here — see
     # this module's own report to the user: hard-filtering to one
@@ -149,6 +158,11 @@ async def _build_candidates(
     # cuisine_score below, exactly the way agent/nodes/match_rank.py
     # already uses a learned cuisine preference as a scoring signal
     # rather than a filter.
+    # Only tag-backed restrictions are search filters; the rest are enforced on ingredient lists
+    # below (mealsight.matching.diet). Nutrition-based ones are not supported by the planner.
+    all_restrictions = [r.lower().replace("_", "-") for r in dietary_restrictions]
+    split = split_restrictions(all_restrictions)
+    dietary_restrictions = split.tag_filters
     search_result = await manager.call_tool(
         "recipe_engine",
         "search_recipes",
@@ -184,7 +198,9 @@ async def _build_candidates(
             {
                 "recipe_id": recipe_id,
                 "available_ingredients": pantry_names,
-                "dietary_restrictions": dietary_restrictions,
+                # ALL restrictions: the matcher judges substitutes against ingredient-enforced ones too.
+                "dietary_restrictions": all_restrictions,
+                "avoid_ingredients": avoid_ingredients,
             },
         )
         if not (match_result.success and isinstance(match_result.data, dict)):
@@ -192,15 +208,17 @@ async def _build_candidates(
         match_data = match_result.data
         all_names = _all_ingredient_names(match_data)
 
-        if avoid_normalized and any(normalize_ingredient(n) in avoid_normalized for n in all_names):
+        if violated_ingredient_restrictions(split.ingredient, all_names):
+            continue
+
+        if avoid_normalized and (
+            any(normalize_ingredient(n) in avoid_normalized for n in all_names)
+            or avoid_ingredient_hits(avoid_ingredients, all_names)
+        ):
             continue
 
         cuisine = recipe.get("cuisine")
-        cuisine_score = (
-            cuisine_preferences.get(cuisine.lower(), NEUTRAL_CUISINE_SCORE)
-            if cuisine
-            else NEUTRAL_CUISINE_SCORE
-        )
+        cuisine_score = lookup_cuisine_score(cuisine_preferences, cuisine, NEUTRAL_CUISINE_SCORE)
         uses_expiring = [n for n in all_names if normalize_ingredient(n) in expiring_names]
         missing_names = [
             item.get("name")
@@ -232,6 +250,12 @@ async def _build_candidates(
         raise PlanConstraintsUnsatisfiable(
             0, "avoid_ingredients excluded every candidate the search itself found."
         )
+
+    if disliked:
+        # A dislike removes a recipe only while enough others remain to plan with.
+        clean = [c for c in candidates if not avoid_ingredient_hits(disliked, c.all_ingredient_names)]
+        if clean:
+            candidates = clean
 
     candidates.sort(key=lambda c: c.match_score, reverse=True)
     tier = candidates[:REPETITION_CHECK_TOP_K]
@@ -320,8 +344,7 @@ def _nutrition_summary(nutrition_by_day: list[dict[str, Any] | None]) -> dict[st
     days_total = len(nutrition_by_day)
     days_covered = len(covered)
     coverage_note = (
-        f"calculated from {days_covered} of {days_total} day(s) — the rest had no nutrition "
-        "data available"
+        f"calculated from {days_covered} of {days_total} day(s) — the rest had no nutrition data available"
         if days_covered < days_total
         else f"calculated from all {days_total} day(s)"
     )
@@ -379,15 +402,25 @@ async def generate_meal_plan(
     avoid_ingredients = avoid_ingredients or []
 
     async def _run(active_manager: MCPClientManager) -> dict[str, Any]:
-        pantry_names, expiring_names, cuisine_preferences = await _gather_context(active_manager)
+        (
+            pantry_names,
+            expiring_names,
+            cuisine_preferences,
+            saved_restrictions,
+            disliked,
+        ) = await _gather_context(active_manager)
+        merged_restrictions = list(
+            dict.fromkeys([*(r.lower().replace("_", "-") for r in dietary_restrictions), *saved_restrictions])
+        )
         candidates = await _build_candidates(
             active_manager,
-            dietary_restrictions,
+            merged_restrictions,
             max_cook_time_minutes,
             avoid_ingredients,
             pantry_names,
             expiring_names,
             cuisine_preferences,
+            disliked,
         )
         schedule = build_schedule(
             candidates,
@@ -424,9 +457,7 @@ async def generate_meal_plan(
             "pantry_manager", "create_grocery_list", {"missing_by_recipe": missing_by_recipe}
         )
         grocery_list = (
-            grocery_result.data
-            if grocery_result.success and isinstance(grocery_result.data, dict)
-            else None
+            grocery_result.data if grocery_result.success and isinstance(grocery_result.data, dict) else None
         )
 
         all_missing = set()

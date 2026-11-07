@@ -167,9 +167,7 @@ def test_overlap_optimization_uses_fewer_distinct_ingredients_than_disabled() ->
     # bonus is what has to close that gap for miso-glazed to win instead.
     candidates = [
         _candidate("miso-soup", cuisine="japanese", match_score=0.90, missing_ingredient_names=["miso"]),
-        _candidate(
-            "miso-glazed", cuisine="korean", match_score=0.50, missing_ingredient_names=["miso"]
-        ),
+        _candidate("miso-glazed", cuisine="korean", match_score=0.50, missing_ingredient_names=["miso"]),
         _candidate("filler-a", cuisine="mexican", match_score=0.65, missing_ingredient_names=["chorizo"]),
         _candidate("filler-b", cuisine="thai", match_score=0.68, missing_ingredient_names=["fish sauce"]),
     ]

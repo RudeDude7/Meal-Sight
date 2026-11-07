@@ -73,8 +73,12 @@ async def load_nutrition(db: Database | None = None) -> int:
             """,
             (
                 ingredient,
-                values["calories"], values["protein"], values["carbs"],
-                values["fat"], values["fiber"], values["sodium"],
+                values["calories"],
+                values["protein"],
+                values["carbs"],
+                values["fat"],
+                values["fiber"],
+                values["sodium"],
                 "usda_fdc_reference",
             ),
         )
@@ -128,16 +132,10 @@ def _build_coverage_report(
     coverage_pct = (covered_count / distinct_total * 100) if distinct_total else 0.0
 
     total_occurrences = sum(canonical_frequencies.values())
-    covered_occurrences = sum(
-        count for name, count in canonical_frequencies.items() if name in covered
-    )
-    weighted_coverage_pct = (
-        (covered_occurrences / total_occurrences * 100) if total_occurrences else 0.0
-    )
+    covered_occurrences = sum(count for name, count in canonical_frequencies.items() if name in covered)
+    weighted_coverage_pct = (covered_occurrences / total_occurrences * 100) if total_occurrences else 0.0
 
-    uncovered = [
-        (name, count) for name, count in canonical_frequencies.items() if name not in covered
-    ]
+    uncovered = [(name, count) for name, count in canonical_frequencies.items() if name not in covered]
     uncovered.sort(key=lambda item: (-item[1], item[0]))
 
     distribution: Counter[str] = Counter()
@@ -257,10 +255,7 @@ async def main() -> None:
         vision_report = await vision_vocabulary_coverage_report(db)
         print_coverage_report(vision_report, label="vision vocabulary")
     else:
-        print(
-            "(skipping vision-vocabulary coverage — no checkpoint at "
-            f"{VISION_BENCHMARK_CHECKPOINT_PATH})"
-        )
+        print(f"(skipping vision-vocabulary coverage — no checkpoint at {VISION_BENCHMARK_CHECKPOINT_PATH})")
 
     await db.close()
 

@@ -322,9 +322,7 @@ async def get_context_signals(
     """
     try:
         db = get_user_db()
-        result = await _get_context_signals(
-            current_time=current_time, day_of_week=day_of_week, user_db=db
-        )
+        result = await _get_context_signals(current_time=current_time, day_of_week=day_of_week, user_db=db)
         return context_signals_to_dict(result)
     except Exception:
         logger.error("get_context_signals_failed", exc_info=True)

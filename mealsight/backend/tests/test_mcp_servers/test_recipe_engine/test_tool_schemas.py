@@ -20,7 +20,7 @@ EXPECTED_TOOLS: dict[str, set[str]] = {
         "pantry_ingredients",
     },
     "get_recipe": {"recipe_id"},
-    "match_ingredients": {"recipe_id", "available_ingredients", "dietary_restrictions"},
+    "match_ingredients": {"recipe_id", "available_ingredients", "dietary_restrictions", "avoid_ingredients"},
     "scale_recipe": {"recipe_id", "target_servings"},
     "calculate_nutrition": {"recipe_id", "servings"},
     "find_substitutions": {"ingredient_name", "reason"},

@@ -26,6 +26,8 @@ from collections.abc import Sequence
 from typing import Any
 
 from mealsight.db.connection import Database
+from mealsight.matching.cuisine import corpus_labels_for
+from mealsight.matching.diet import split_restrictions, violated_ingredient_restrictions
 from mealsight.matching.normalize import normalize_ingredient
 from mealsight.matching.synonyms import load_synonym_map, resolve_canonical
 from mealsight.recipe_engine.models import RecipeDetail, RecipeIngredient, RecipeSummary, SearchResults
@@ -72,7 +74,9 @@ async def search_recipes(
     dietary_filters is a hard constraint applied after the SQL query
     (dietary_tags is stored as JSON, not queryable directly in SQL): a
     recipe is excluded entirely unless it carries every one of the
-    requested tags — never included but ranked lower. When max_cook_time
+    requested tags — never included but ranked lower. Restrictions with no
+    corpus tag are enforced on the ingredient list, or reported in
+    SearchResults.unenforced_restrictions (see mealsight.matching.diet). When max_cook_time
     is given, recipes with no known cook_time_minutes are excluded from
     it, since there's no way to confirm they meet it; when max_cook_time
     is None, cook time isn't filtered on at all, known or unknown.
@@ -105,8 +109,15 @@ async def search_recipes(
         query += " AND cook_time_minutes IS NOT NULL AND cook_time_minutes <= ?"
         params.append(max_cook_time)
     if cuisine is not None:
-        query += " AND cuisine = ?"
-        params.append(cuisine)
+        # Resolve the requested cuisine ("Indian", "french") to the label(s) the
+        # corpus actually uses ("India", "France"); see mealsight.matching.cuisine.
+        stored = await db.fetch_all("SELECT DISTINCT cuisine FROM recipes WHERE cuisine IS NOT NULL")
+        labels = corpus_labels_for(cuisine, [str(r["cuisine"]) for r in stored])
+        if not labels:
+            query += " AND 0"  # an unknown cuisine matches nothing, as an exact match did
+        else:
+            query += f" AND cuisine IN ({','.join('?' for _ in labels)})"
+            params.extend(labels)
     if meal_type is not None:
         if isinstance(meal_type, str):
             query += " AND meal_type = ?"
@@ -129,13 +140,23 @@ async def search_recipes(
             resolve_canonical(normalize_ingredient(name), synonym_map) for name in pantry_ingredients
         }
 
-    required_tags = set(dietary_filters)
+    # dietary_filters accepts any restriction name (hyphen or underscore): tag-backed ones filter on the
+    # corpus tag, ingredient-enforced ones exclude on the ingredient list, and the rest are reported back
+    # as unenforced instead of becoming a tag filter that matches nothing. See mealsight.matching.diet.
+    split = split_restrictions([f.lower().replace("_", "-") for f in dietary_filters])
+    required_tags = set(split.tag_filters)
+    excluded_by_ingredients = 0
     matched: list[RecipeSummary] = []
     overlap_scores: dict[str, float] = {}
     for row in rows:
         tags = _parse_dietary_tags(row["dietary_tags"])
         if not required_tags.issubset(tags):
             continue
+        if split.ingredient:
+            names = [str(item["name"]) for item in json.loads(row["ingredients"])]
+            if violated_ingredient_restrictions(split.ingredient, names):
+                excluded_by_ingredients += 1
+                continue
         matched.append(
             RecipeSummary(
                 id=row["id"],
@@ -157,7 +178,12 @@ async def search_recipes(
         # as a deterministic tiebreak, rather than an arbitrary one.
         matched.sort(key=lambda r: overlap_scores.get(r.id, 0.0), reverse=True)
 
-    return SearchResults(results=matched[:max_results], total_matched=len(matched))
+    return SearchResults(
+        results=matched[:max_results],
+        total_matched=len(matched),
+        unenforced_restrictions=split.unenforced,
+        excluded_by_ingredient_restrictions=excluded_by_ingredients,
+    )
 
 
 async def get_recipe(db: Database, recipe_id: str) -> RecipeDetail:

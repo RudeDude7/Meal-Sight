@@ -64,11 +64,30 @@ SpecificityResult = Literal["full", "partial", "none"]
 CUT_VARIETY_TERMS: frozenset[str] = frozenset(
     {
         # cuts of meat/poultry/fish
-        "thigh", "breast", "wing", "drumstick", "leg", "tenderloin",
-        "chop", "steak", "loin", "rib", "shank", "fillet", "cutlet",
-        "shoulder", "brisket", "flank", "sirloin", "rump", "shin",
+        "thigh",
+        "breast",
+        "wing",
+        "drumstick",
+        "leg",
+        "tenderloin",
+        "chop",
+        "steak",
+        "loin",
+        "rib",
+        "shank",
+        "fillet",
+        "cutlet",
+        "shoulder",
+        "brisket",
+        "flank",
+        "sirloin",
+        "rump",
+        "shin",
         # size/color varieties
-        "red", "yellow", "white", "baby",
+        "red",
+        "yellow",
+        "white",
+        "baby",
     }
 )
 

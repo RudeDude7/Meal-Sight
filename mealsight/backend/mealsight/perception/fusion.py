@@ -8,12 +8,11 @@ arriving at this module has already been canonicalized once, inside
 analyze_fridge_photo / analyze_voice_memo / analyze_text_input
 themselves) — the one place this module still needs to compare names
 across modalities (matching an audio/text-mentioned protein against
-what vision actually saw) uses mealsight.matching.normalize_ingredient
+what vision actually saw) used mealsight.matching.normalize_ingredient
 alone, which is pure Python with no I/O, deliberately stopping short of
-resolve_canonical's synonym-table lookup. A synonym pair that differs
-only across modalities (vision says "green onion", audio says
-"scallion") would not cross-match here — a real, named limitation this
-module's own DB-free constraint creates, not an oversight.
+resolve_canonical's synonym-table lookup. A wanted protein is no longer
+treated as an on-hand ingredient at all (see _build_available_ingredients),
+so that comparison no longer exists.
 
 Synchronous and pure: nothing in this module awaits anything or reaches
 a database, by design.
@@ -22,6 +21,7 @@ a database, by design.
 from __future__ import annotations
 
 from mealsight.matching.normalize import normalize_ingredient
+from mealsight.perception.dietary import normalize_dietary_restriction
 from mealsight.perception.models import (
     AudioPerception,
     AvailableIngredient,
@@ -94,11 +94,32 @@ def _dietary_conflict_note(
     return None
 
 
+def profile_dietary_restrictions(user_profile: UserProfile | None) -> list[str]:
+    """The restrictions saved on the profile, in the same normalized vocabulary a stated restriction ends up
+    in. A phrase the vocabulary does not recognize is kept (hyphenated), never dropped: downstream it is
+    classified as unenforced and disclosed, exactly like a stated one."""
+    if user_profile is None:
+        return []
+    out: list[str] = []
+    for raw in user_profile.dietary_restrictions:
+        normalized = normalize_dietary_restriction(raw) or raw.strip().lower().replace("_", "-").replace(
+            " ", "-"
+        )
+        if normalized and normalized not in out:
+            out.append(normalized)
+    return out
+
+
 def _build_available_ingredients(
-    vision: VisionPerception | None, audio: AudioPerception | None, text: TextPerception | None
+    vision: VisionPerception | None,
+    audio: AudioPerception | None,
+    text: TextPerception | None,
+    saved_restrictions: list[str] | None = None,
 ) -> tuple[list[AvailableIngredient], list[FreshnessAlert], list[str]]:
     dietary_restrictions = _union_preserving_order(
-        audio.dietary_restrictions if audio else [], text.dietary_restrictions if text else []
+        audio.dietary_restrictions if audio else [],
+        text.dietary_restrictions if text else [],
+        saved_restrictions or [],
     )
 
     available: list[AvailableIngredient] = []
@@ -125,32 +146,33 @@ def _build_available_ingredients(
             if item.freshness is not None and item.freshness.strip().lower() != _CLEAN_FRESHNESS:
                 freshness_alerts.append(FreshnessAlert(name=item.name, freshness=item.freshness))
 
-    # protein_preference is the one field either audio or text uses to
-    # name a specific ingredient the user says they have — see this
-    # module's own docstring on why a database-free match here is only
-    # ever a best-effort one.
+    # What the speaker says they HAVE (ingredients_on_hand) is evidence about
+    # the pantry, so it reaches matching, marked unverified: mentioned, not
+    # seen. protein_preference is what they WANT and is deliberately never
+    # added here: doing so made "anything with chicken" put chicken in the
+    # pantry and every chicken recipe cookable.
     mentionable_sources: tuple[
         tuple[ModalityName, AudioPerception | None], tuple[ModalityName, TextPerception | None]
     ] = (("audio", audio), ("text", text))
     for source, perception in mentionable_sources:
-        if perception is None or perception.protein_preference is None:
+        if perception is None:
             continue
-        candidate = perception.protein_preference
-        normalized_candidate = normalize_ingredient(candidate)
-        if not normalized_candidate or normalized_candidate in vision_names_normalized:
-            continue
-        vision_names_normalized.add(normalized_candidate)
-        available.append(
-            AvailableIngredient(
-                name=normalized_candidate,
-                verified=False,
-                source=source,
-                note=(
-                    f"Mentioned by {source} but not seen in the photo — "
-                    "the user may know about something off-camera."
-                ),
+        for mentioned in perception.ingredients_on_hand:
+            normalized_candidate = normalize_ingredient(mentioned)
+            if not normalized_candidate or normalized_candidate in vision_names_normalized:
+                continue
+            vision_names_normalized.add(normalized_candidate)
+            available.append(
+                AvailableIngredient(
+                    name=normalized_candidate,
+                    verified=False,
+                    source=source,
+                    note=(
+                        f"Mentioned by {source} but not seen in the photo — "
+                        "the user may know about something off-camera."
+                    ),
+                )
             )
-        )
 
     return available, freshness_alerts, dietary_restrictions
 
@@ -219,18 +241,20 @@ def merge_perceptions(
 
     Merge rules, in full:
       - available_ingredients comes from vision alone, PLUS any
-        protein_preference audio or text named that vision never saw —
-        added flagged verified=False with an explanatory note, never
-        silently dropped and never silently treated as confirmed.
-      - dietary_restrictions and avoid_ingredients/avoid_dishes union
-        across audio and text, deduplicated (both are already
+        ingredients_on_hand audio or text said they have that vision never
+        saw — added flagged verified=False with an explanatory note, never
+        silently dropped and never silently treated as confirmed. A wanted
+        protein (protein_preference) is NOT added: it is not possession.
+      - dietary_restrictions union across audio, text AND the saved profile;
+        avoid_ingredients/avoid_dishes union across audio and text, deduplicated (both are already
         canonicalized/normalized by the time they reach this module).
       - servings and max_cook_time_minutes: when audio and text both
         state a value and they differ, the LOWER (more restrictive)
         one wins, and the collision is recorded in conflicts_detected
         with both original values. Unspecified by both falls back to
         user_profile.household_size / .preferred_cook_time_minutes
-        when a profile was given, otherwise stays null.
+        when a profile was given, otherwise stays null. A protein stated by
+        neither falls back to user_profile.protein_preference.
       - cuisine_preference, protein_preference, occasion, and mood_or_
         preference are non-orderable strings: a collision between
         audio and text prefers text (typed input is more deliberate
@@ -249,8 +273,12 @@ def merge_perceptions(
     if text is not None:
         modalities_received.append("text")
 
+    # A restriction saved on the profile is a restriction like any other: it is unioned with what this
+    # request states, before anything downstream (search, ingredient rules, substitutes, the explanation)
+    # looks at it. (Until it was, a saved nut-free allergy was stored correctly and then never applied.)
+    saved_restrictions = profile_dietary_restrictions(user_profile)
     available_ingredients, freshness_alerts, dietary_restrictions = _build_available_ingredients(
-        vision, audio, text
+        vision, audio, text, saved_restrictions
     )
 
     avoid_ingredients = _union_preserving_order(
@@ -274,8 +302,10 @@ def merge_perceptions(
 
     if servings is None and user_profile is not None:
         servings = user_profile.household_size
+    max_cook_time_is_default = False
     if max_cook_time_minutes is None and user_profile is not None:
         max_cook_time_minutes = user_profile.preferred_cook_time_minutes
+        max_cook_time_is_default = True
 
     cuisine_preference = _merge_text_preferred_string(
         "cuisine_preference",
@@ -289,6 +319,11 @@ def merge_perceptions(
         text.protein_preference if text else None,
         conflicts,
     )
+    protein_preference_is_default = False
+    if protein_preference is None and user_profile is not None and user_profile.protein_preference:
+        # Reaches ranking through the same path as a stated protein; a stated one always wins.
+        protein_preference = user_profile.protein_preference
+        protein_preference_is_default = True
     occasion = _merge_text_preferred_string(
         "occasion", audio.occasion if audio else None, text.occasion if text else None, conflicts
     )
@@ -304,6 +339,9 @@ def merge_perceptions(
         freshness_alerts=freshness_alerts,
         servings=servings,
         max_cook_time_minutes=max_cook_time_minutes,
+        max_cook_time_is_default=max_cook_time_is_default,
+        protein_preference_is_default=protein_preference_is_default,
+        restrictions_from_profile=[r for r in saved_restrictions if r in dietary_restrictions],
         dietary_restrictions=dietary_restrictions,
         cuisine_preference=cuisine_preference,
         avoid_ingredients=avoid_ingredients,

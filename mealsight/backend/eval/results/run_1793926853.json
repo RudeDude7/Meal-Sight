@@ -1,0 +1,2928 @@
+{
+  "run_id": "run_1793926853",
+  "timestamp": "2026-11-06T01:00:53.775206+00:00",
+  "git_commit": "b200bbb632335be6abd6468916937875cef7921f",
+  "model_ids": {
+    "vision_model": "ministral-8b-2512",
+    "reasoning_model": "ministral-8b-2512",
+    "extraction_model": "ministral-8b-2512"
+  },
+  "prompt_versions": {
+    "vision_perception_prompt": "29437d278060",
+    "reasoning_prompt": "9dba200a64ef"
+  },
+  "dimensions": [
+    {
+      "name": "dimension1_ingredient_recognition",
+      "pass_threshold": 0.6,
+      "score": 0.4921734048773271,
+      "passed": false,
+      "metrics": {
+        "precision": 0.5505603012685056,
+        "recall_raw": 0.4443126910057184,
+        "recall_adjusted": 0.4471973063903338,
+        "f1_raw": 0.4906919233958456,
+        "f1_adjusted": 0.4921734048773271,
+        "vision_model": "ministral-8b-2512",
+        "prompt_char_len": 1457,
+        "images_scored": 30,
+        "images_total": 30
+      },
+      "case_count": 30,
+      "api_calls": 30,
+      "total_tokens": 95543,
+      "wall_clock_seconds": 231.38004808407277,
+      "image_results": [
+        {
+          "photo_id": "photo_01",
+          "predicted_items": [
+            "sugar beet sugar",
+            "milk substitute half fat almond based",
+            "sweet potato",
+            "chavroux cheese",
+            "onion",
+            "banana",
+            "apple",
+            "blueberry",
+            "lime",
+            "meat look like ham or pork",
+            "dog food or pet grain",
+            "orange juice",
+            "sauce or condiment orange label",
+            "yogurt or dairy product red"
+          ],
+          "ground_truth_items": [
+            "banana",
+            "beef",
+            "blueberries",
+            "butter",
+            "corn",
+            "flour",
+            "goat cheese",
+            "ham",
+            "heavy cream",
+            "lime",
+            "milk",
+            "onion",
+            "potato",
+            "shrimp",
+            "sugar",
+            "sweet potato"
+          ],
+          "precision": 0.42857142857142855,
+          "recall_raw": 0.375,
+          "recall_adjusted": 0.46153846153846156,
+          "f1_raw": 0.39999999999999997,
+          "f1_adjusted": 0.4444444444444445,
+          "error": null
+        },
+        {
+          "photo_id": "photo_02",
+          "predicted_items": [
+            "sweet potato",
+            "onion",
+            "banana",
+            "apple",
+            "blueberry",
+            "lime",
+            "meat unspecified type",
+            "granola",
+            "sugar",
+            "heavy cream",
+            "butter chavroux",
+            "orange juice",
+            "sugar substitute",
+            "sauce or condiment"
+          ],
+          "ground_truth_items": [
+            "banana",
+            "beef",
+            "blueberries",
+            "corn",
+            "flour",
+            "goat cheese",
+            "ham",
+            "heavy cream",
+            "lime",
+            "milk",
+            "onion",
+            "potato",
+            "shrimp",
+            "sugar",
+            "sweet potato"
+          ],
+          "precision": 0.5714285714285714,
+          "recall_raw": 0.5333333333333333,
+          "recall_adjusted": 0.5333333333333333,
+          "f1_raw": 0.5517241379310344,
+          "f1_adjusted": 0.5517241379310344,
+          "error": null
+        },
+        {
+          "photo_id": "photo_03",
+          "predicted_items": [
+            "tomato",
+            "strawberry",
+            "carrot",
+            "banana",
+            "potato",
+            "sweet potato",
+            "onion",
+            "green bean",
+            "lettuce",
+            "tomato",
+            "mixed vegetable",
+            "butter"
+          ],
+          "ground_truth_items": [
+            "banana",
+            "butter",
+            "carrot",
+            "cheese",
+            "corn",
+            "goat cheese",
+            "green beans",
+            "heavy cream",
+            "onion",
+            "potato",
+            "shrimp",
+            "spinach",
+            "strawberries",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.75,
+          "recall_raw": 0.6,
+          "recall_adjusted": 0.6,
+          "f1_raw": 0.6666666666666665,
+          "f1_adjusted": 0.6666666666666665,
+          "error": null
+        },
+        {
+          "photo_id": "photo_04",
+          "predicted_items": [
+            "tomato",
+            "strawberry",
+            "carrot",
+            "banana",
+            "potato",
+            "sweet potato",
+            "salad greens",
+            "cream cheese or similar dairy product",
+            "milk demi cr m",
+            "food peas or similar",
+            "or roasted snack",
+            "green onion or leek",
+            "yogurt"
+          ],
+          "ground_truth_items": [
+            "banana",
+            "butter",
+            "carrot",
+            "cheese",
+            "corn",
+            "goat cheese",
+            "green beans",
+            "heavy cream",
+            "milk",
+            "potato",
+            "shrimp",
+            "spinach",
+            "strawberries",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.46153846153846156,
+          "recall_raw": 0.4,
+          "recall_adjusted": 0.4,
+          "f1_raw": 0.42857142857142855,
+          "f1_adjusted": 0.42857142857142855,
+          "error": null
+        },
+        {
+          "photo_id": "photo_05",
+          "predicted_items": [
+            "lettuce",
+            "tomato",
+            "strawberry",
+            "carrot",
+            "onion",
+            "chicken",
+            "potato",
+            "sweet potato",
+            "banana",
+            "blueberry",
+            "sugar crystal in",
+            "sauce green",
+            "milk demi ecr me",
+            "yogurt or cream white"
+          ],
+          "ground_truth_items": [
+            "banana",
+            "blueberries",
+            "butter",
+            "carrot",
+            "chicken",
+            "corn",
+            "flour",
+            "goat cheese",
+            "green beans",
+            "heavy cream",
+            "milk",
+            "onion",
+            "potato",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.6428571428571429,
+          "recall_raw": 0.5,
+          "recall_adjusted": 0.5,
+          "f1_raw": 0.5625000000000001,
+          "f1_adjusted": 0.5625000000000001,
+          "error": null
+        },
+        {
+          "photo_id": "photo_06",
+          "predicted_items": [
+            "apple",
+            "strawberry",
+            "carrot",
+            "lettuce",
+            "celery",
+            "onion",
+            "chicken",
+            "potato",
+            "sweet potato",
+            "pre meat possibly beef or lamb",
+            "blueberry",
+            "banana",
+            "milk",
+            "heavy cream",
+            "sugar granulated",
+            "salt",
+            "cucumber"
+          ],
+          "ground_truth_items": [
+            "apple",
+            "banana",
+            "beef",
+            "blueberries",
+            "butter",
+            "carrot",
+            "chicken",
+            "corn",
+            "flour",
+            "goat cheese",
+            "green beans",
+            "heavy cream",
+            "milk",
+            "onion",
+            "potato",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "sweet potato"
+          ],
+          "precision": 0.6470588235294118,
+          "recall_raw": 0.5789473684210527,
+          "recall_adjusted": 0.5789473684210527,
+          "f1_raw": 0.6111111111111113,
+          "f1_adjusted": 0.6111111111111113,
+          "error": null
+        },
+        {
+          "photo_id": "photo_07",
+          "predicted_items": [
+            "apple",
+            "tomato",
+            "lettuce",
+            "carrot",
+            "strawberry",
+            "chicken",
+            "potato",
+            "red onion",
+            "blueberry",
+            "banana",
+            "milk",
+            "heavy cream",
+            "cheese chamrousse",
+            "salt"
+          ],
+          "ground_truth_items": [
+            "apple",
+            "banana",
+            "beef",
+            "blueberries",
+            "butter",
+            "carrot",
+            "chicken",
+            "corn",
+            "flour",
+            "goat cheese",
+            "green beans",
+            "heavy cream",
+            "milk",
+            "onion",
+            "potato",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.7857142857142857,
+          "recall_raw": 0.55,
+          "recall_adjusted": 0.55,
+          "f1_raw": 0.6470588235294117,
+          "f1_adjusted": 0.6470588235294117,
+          "error": null
+        },
+        {
+          "photo_id": "photo_08",
+          "predicted_items": [
+            "apple",
+            "blueberry",
+            "strawberry",
+            "carrot",
+            "lettuce",
+            "celery",
+            "tomato",
+            "green lime",
+            "potato",
+            "sweet potato",
+            "chicken breast",
+            "onion",
+            "banana",
+            "salad greens",
+            "cream demi ecr me",
+            "milk",
+            "yogurt or sour cream"
+          ],
+          "ground_truth_items": [
+            "apple",
+            "banana",
+            "beef",
+            "blueberries",
+            "butter",
+            "carrot",
+            "chicken",
+            "corn",
+            "flour",
+            "goat cheese",
+            "green beans",
+            "ground beef",
+            "heavy cream",
+            "lime",
+            "milk",
+            "onion",
+            "potato",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.6470588235294118,
+          "recall_raw": 0.5,
+          "recall_adjusted": 0.5,
+          "f1_raw": 0.5641025641025642,
+          "f1_adjusted": 0.5641025641025642,
+          "error": null
+        },
+        {
+          "photo_id": "photo_09",
+          "predicted_items": [
+            "apple",
+            "red bell pepper",
+            "green onion",
+            "onion",
+            "carrot",
+            "lettuce",
+            "strawberry",
+            "blueberry",
+            "chicken",
+            "potato",
+            "beef slice",
+            "sausage",
+            "banana",
+            "cream demi ecr me",
+            "yogurt",
+            "butter"
+          ],
+          "ground_truth_items": [
+            "apple",
+            "banana",
+            "beef",
+            "blueberries",
+            "butter",
+            "carrot",
+            "chicken",
+            "corn",
+            "flour",
+            "goat cheese",
+            "green beans",
+            "ground beef",
+            "ham",
+            "heavy cream",
+            "lime",
+            "milk",
+            "onion",
+            "potato",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.5625,
+          "recall_raw": 0.391304347826087,
+          "recall_adjusted": 0.391304347826087,
+          "f1_raw": 0.46153846153846156,
+          "f1_adjusted": 0.46153846153846156,
+          "error": null
+        },
+        {
+          "photo_id": "photo_10",
+          "predicted_items": [
+            "avocado",
+            "apple",
+            "blueberry",
+            "strawberry",
+            "carrot",
+            "mushroom",
+            "chicken",
+            "potato",
+            "or product unclear type",
+            "meat unclear type",
+            "banana",
+            "lime",
+            "red onion",
+            "lettuce",
+            "celery",
+            "tomato",
+            "cream or milk product demi ecr me",
+            "yogurt"
+          ],
+          "ground_truth_items": [
+            "apple",
+            "banana",
+            "blueberries",
+            "butter",
+            "carrot",
+            "chicken",
+            "corn",
+            "flour",
+            "goat cheese",
+            "green beans",
+            "ground beef",
+            "heavy cream",
+            "lime",
+            "milk",
+            "mushrooms",
+            "onion",
+            "potato",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.6111111111111112,
+          "recall_raw": 0.5,
+          "recall_adjusted": 0.5,
+          "f1_raw": 0.55,
+          "f1_adjusted": 0.55,
+          "error": null
+        },
+        {
+          "photo_id": "photo_11",
+          "predicted_items": [
+            "avocado",
+            "apple",
+            "banana",
+            "lime",
+            "strawberry",
+            "carrot",
+            "celery",
+            "mushroom",
+            "potato",
+            "onion",
+            "tomato",
+            "lettuce",
+            "chicken",
+            "meat",
+            "cream cheese or similar dairy product",
+            "milk",
+            "butter"
+          ],
+          "ground_truth_items": [
+            "apple",
+            "banana",
+            "butter",
+            "carrot",
+            "cheese",
+            "chicken",
+            "corn",
+            "flour",
+            "goat cheese",
+            "green beans",
+            "ground beef",
+            "ham",
+            "heavy cream",
+            "lime",
+            "milk",
+            "mushrooms",
+            "onion",
+            "potato",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.7647058823529411,
+          "recall_raw": 0.5652173913043478,
+          "recall_adjusted": 0.5652173913043478,
+          "f1_raw": 0.65,
+          "f1_adjusted": 0.65,
+          "error": null
+        },
+        {
+          "photo_id": "photo_12",
+          "predicted_items": [
+            "avocado",
+            "apple",
+            "banana",
+            "lime",
+            "strawberry",
+            "carrot",
+            "celery",
+            "mushroom",
+            "potato",
+            "tomato",
+            "onion",
+            "blueberry",
+            "cracker or bread roll",
+            "demi cr me whipped cream",
+            "milk",
+            "butter or margarine",
+            "meat likely beef or pork",
+            "bean or lentil"
+          ],
+          "ground_truth_items": [
+            "apple",
+            "banana",
+            "blueberries",
+            "butter",
+            "carrot",
+            "cheese",
+            "corn",
+            "flour",
+            "goat cheese",
+            "green beans",
+            "ground beef",
+            "heavy cream",
+            "lime",
+            "milk",
+            "mushrooms",
+            "onion",
+            "potato",
+            "shrimp",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.6111111111111112,
+          "recall_raw": 0.4782608695652174,
+          "recall_adjusted": 0.4782608695652174,
+          "f1_raw": 0.5365853658536586,
+          "f1_adjusted": 0.5365853658536586,
+          "error": null
+        },
+        {
+          "photo_id": "photo_13",
+          "predicted_items": [
+            "avocado",
+            "tomato",
+            "onion",
+            "carrot",
+            "green onion or scallion",
+            "strawberry",
+            "mushroom",
+            "potato",
+            "lime",
+            "blueberry",
+            "meat look like pork or beef",
+            "meat",
+            "butternut squash or similar squash",
+            "apple",
+            "yellow pear",
+            "cabbage",
+            "dairy product yogurt or similar",
+            "dill pickle"
+          ],
+          "ground_truth_items": [
+            "apple",
+            "blueberries",
+            "butter",
+            "carrot",
+            "cheese",
+            "corn",
+            "flour",
+            "goat cheese",
+            "green beans",
+            "ground beef",
+            "ham",
+            "heavy cream",
+            "lime",
+            "mushrooms",
+            "onion",
+            "potato",
+            "shrimp",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.5555555555555556,
+          "recall_raw": 0.45454545454545453,
+          "recall_adjusted": 0.45454545454545453,
+          "f1_raw": 0.5,
+          "f1_adjusted": 0.5,
+          "error": null
+        },
+        {
+          "photo_id": "photo_14",
+          "predicted_items": [
+            "avocado",
+            "tomato",
+            "onion",
+            "apple",
+            "pear",
+            "carrot",
+            "strawberry",
+            "garlic",
+            "mushroom",
+            "banana",
+            "lime",
+            "blueberry",
+            "potato",
+            "milk half and half",
+            "buttermilk or sour cream",
+            "meat unidentified",
+            "sauce unidentified",
+            "nut peanut or similar",
+            "lettuce",
+            "celery"
+          ],
+          "ground_truth_items": [
+            "apple",
+            "banana",
+            "beef",
+            "blueberries",
+            "butter",
+            "carrot",
+            "cheese",
+            "corn",
+            "flour",
+            "goat cheese",
+            "green beans",
+            "ham",
+            "heavy cream",
+            "lime",
+            "milk",
+            "mushrooms",
+            "onion",
+            "potato",
+            "shrimp",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.5,
+          "recall_raw": 0.4166666666666667,
+          "recall_adjusted": 0.4166666666666667,
+          "f1_raw": 0.45454545454545453,
+          "f1_adjusted": 0.45454545454545453,
+          "error": null
+        },
+        {
+          "photo_id": "photo_15",
+          "predicted_items": [
+            "avocado",
+            "lettuce",
+            "tomato",
+            "onion",
+            "carrot",
+            "apple",
+            "potato",
+            "strawberry",
+            "mushroom",
+            "banana",
+            "lime",
+            "blueberry",
+            "meat likely pork or beef",
+            "chicken or turkey",
+            "milk half fat",
+            "yogurt",
+            "butter or margarine",
+            "nut",
+            "salad greens"
+          ],
+          "ground_truth_items": [
+            "apple",
+            "banana",
+            "blueberries",
+            "butter",
+            "carrot",
+            "cheese",
+            "chicken",
+            "corn",
+            "flour",
+            "goat cheese",
+            "green beans",
+            "ham",
+            "heavy cream",
+            "lime",
+            "milk",
+            "mushrooms",
+            "onion",
+            "potato",
+            "shrimp",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.5263157894736842,
+          "recall_raw": 0.4166666666666667,
+          "recall_adjusted": 0.4166666666666667,
+          "f1_raw": 0.46511627906976744,
+          "f1_adjusted": 0.46511627906976744,
+          "error": null
+        },
+        {
+          "photo_id": "photo_16",
+          "predicted_items": [
+            "apple",
+            "pear",
+            "tomato",
+            "strawberry",
+            "blueberry",
+            "mushroom",
+            "banana",
+            "baked good possibly pastry",
+            "milk",
+            "yogurt",
+            "cheese",
+            "nut",
+            "onion"
+          ],
+          "ground_truth_items": [
+            "apple",
+            "banana",
+            "blueberries",
+            "butter",
+            "carrot",
+            "cheese",
+            "chicken",
+            "flour",
+            "goat cheese",
+            "milk",
+            "mushrooms",
+            "onion",
+            "potato",
+            "shrimp",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "tomato"
+          ],
+          "precision": 0.6923076923076923,
+          "recall_raw": 0.5,
+          "recall_adjusted": 0.5,
+          "f1_raw": 0.5806451612903226,
+          "f1_adjusted": 0.5806451612903226,
+          "error": null
+        },
+        {
+          "photo_id": "photo_17",
+          "predicted_items": [
+            "apple",
+            "tomato",
+            "strawberry",
+            "blueberry",
+            "garlic",
+            "cheese",
+            "milk",
+            "heavy cream",
+            "banana",
+            "cheese",
+            "doughnut",
+            "greens lettuce or cabbage",
+            "onion",
+            "pork"
+          ],
+          "ground_truth_items": [
+            "apple",
+            "banana",
+            "blueberries",
+            "butter",
+            "carrot",
+            "cheese",
+            "chicken",
+            "goat cheese",
+            "green beans",
+            "milk",
+            "mushrooms",
+            "onion",
+            "potato",
+            "shrimp",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "tomato"
+          ],
+          "precision": 0.5714285714285714,
+          "recall_raw": 0.4444444444444444,
+          "recall_adjusted": 0.4444444444444444,
+          "f1_raw": 0.5,
+          "f1_adjusted": 0.5,
+          "error": null
+        },
+        {
+          "photo_id": "photo_18",
+          "predicted_items": [
+            "green onion",
+            "tomato",
+            "apple",
+            "strawberry",
+            "blueberry",
+            "garlic",
+            "cheese",
+            "yogurt",
+            "milk",
+            "meat",
+            "dog food",
+            "bagel",
+            "onion",
+            "cream cheese or similar spread"
+          ],
+          "ground_truth_items": [
+            "banana",
+            "blueberries",
+            "butter",
+            "carrot",
+            "cheese",
+            "goat cheese",
+            "green beans",
+            "ham",
+            "milk",
+            "mushrooms",
+            "onion",
+            "potato",
+            "shrimp",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "tomato"
+          ],
+          "precision": 0.5,
+          "recall_raw": 0.4117647058823529,
+          "recall_adjusted": 0.4117647058823529,
+          "f1_raw": 0.45161290322580644,
+          "f1_adjusted": 0.45161290322580644,
+          "error": null
+        },
+        {
+          "photo_id": "photo_19",
+          "predicted_items": [
+            "banana",
+            "tomato",
+            "cheese wedge",
+            "carrot",
+            "onion",
+            "chicken",
+            "meat",
+            "butter planta",
+            "baguette or bread roll",
+            "green pepper",
+            "salad greens",
+            "good possibly nut or seed",
+            "mayonnaise chamoy",
+            "milk"
+          ],
+          "ground_truth_items": [
+            "banana",
+            "butter",
+            "carrot",
+            "cheese",
+            "chicken",
+            "corn",
+            "goat cheese",
+            "ground beef",
+            "heavy cream",
+            "lime",
+            "onion",
+            "potato",
+            "shrimp",
+            "spinach",
+            "sugar",
+            "tomato"
+          ],
+          "precision": 0.35714285714285715,
+          "recall_raw": 0.3125,
+          "recall_adjusted": 0.3125,
+          "f1_raw": 0.3333333333333333,
+          "f1_adjusted": 0.3333333333333333,
+          "error": null
+        },
+        {
+          "photo_id": "photo_20",
+          "predicted_items": [
+            "banana",
+            "tomato",
+            "carrot",
+            "onion",
+            "chicken",
+            "cheese",
+            "cheese wedge",
+            "butter planta",
+            "tomato or bean",
+            "green onion or scallion",
+            "meat",
+            "avocado",
+            "browny or bread roll",
+            "milk",
+            "green leafy vegetable",
+            "pepper"
+          ],
+          "ground_truth_items": [
+            "banana",
+            "butter",
+            "carrot",
+            "cheese",
+            "chicken",
+            "corn",
+            "goat cheese",
+            "ham",
+            "heavy cream",
+            "lime",
+            "onion",
+            "potato",
+            "shrimp",
+            "spinach",
+            "sugar",
+            "tomato"
+          ],
+          "precision": 0.4375,
+          "recall_raw": 0.4375,
+          "recall_adjusted": 0.4375,
+          "f1_raw": 0.4375,
+          "f1_adjusted": 0.4375,
+          "error": null
+        },
+        {
+          "photo_id": "photo_21",
+          "predicted_items": [
+            "banana",
+            "tomato",
+            "chicken",
+            "strawberry",
+            "onion",
+            "carrot",
+            "baguette or bread roll",
+            "salad greens",
+            "cheese block",
+            "green pepper",
+            "meat loin or steak",
+            "milk",
+            "yogurt",
+            "good raisin or similar",
+            "butter"
+          ],
+          "ground_truth_items": [
+            "banana",
+            "carrot",
+            "cheese",
+            "chicken",
+            "corn",
+            "goat cheese",
+            "green beans",
+            "ham",
+            "heavy cream",
+            "lime",
+            "onion",
+            "potato",
+            "shrimp",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.4,
+          "recall_raw": 0.35294117647058826,
+          "recall_adjusted": 0.35294117647058826,
+          "f1_raw": 0.37500000000000006,
+          "f1_adjusted": 0.37500000000000006,
+          "error": null
+        },
+        {
+          "photo_id": "photo_22",
+          "predicted_items": [
+            "banana",
+            "tomato",
+            "strawberry",
+            "onion",
+            "potato",
+            "lettuce",
+            "green bean",
+            "cheese",
+            "mushroom",
+            "muffin",
+            "meat",
+            "bean",
+            "milk",
+            "yogurt"
+          ],
+          "ground_truth_items": [
+            "banana",
+            "cheese",
+            "chicken",
+            "corn",
+            "goat cheese",
+            "green beans",
+            "ham",
+            "heavy cream",
+            "lime",
+            "onion",
+            "potato",
+            "shrimp",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.5714285714285714,
+          "recall_raw": 0.47058823529411764,
+          "recall_adjusted": 0.47058823529411764,
+          "f1_raw": 0.5161290322580646,
+          "f1_adjusted": 0.5161290322580646,
+          "error": null
+        },
+        {
+          "photo_id": "photo_23",
+          "predicted_items": [
+            "banana",
+            "tomato",
+            "strawberry",
+            "onion",
+            "red onion",
+            "mushroom",
+            "baguette or bread roll",
+            "meat",
+            "chamomile tea",
+            "nut in",
+            "cheese",
+            "green onion or leek",
+            "lettuce",
+            "milk",
+            "yogurt or cream",
+            "red with liquid possibly tomato sauce or jam"
+          ],
+          "ground_truth_items": [
+            "banana",
+            "butter",
+            "cheese",
+            "chicken",
+            "corn",
+            "goat cheese",
+            "green beans",
+            "ham",
+            "heavy cream",
+            "lime",
+            "onion",
+            "potato",
+            "shrimp",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.375,
+          "recall_raw": 0.35294117647058826,
+          "recall_adjusted": 0.35294117647058826,
+          "f1_raw": 0.3636363636363636,
+          "f1_adjusted": 0.3636363636363636,
+          "error": null
+        },
+        {
+          "photo_id": "photo_24",
+          "predicted_items": [
+            "banana",
+            "tomato",
+            "strawberry",
+            "baguette or bread roll",
+            "onion",
+            "meat look like pork or beef",
+            "onion in",
+            "cheese block",
+            "lettuce",
+            "green pepper in",
+            "milk in glass",
+            "red plastic possibly yogurt or sauce",
+            "food possibly bean or tomato"
+          ],
+          "ground_truth_items": [
+            "banana",
+            "butter",
+            "cheese",
+            "chicken",
+            "corn",
+            "goat cheese",
+            "green beans",
+            "ham",
+            "heavy cream",
+            "lime",
+            "onion",
+            "potato",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.3076923076923077,
+          "recall_raw": 0.25,
+          "recall_adjusted": 0.25,
+          "f1_raw": 0.27586206896551724,
+          "f1_adjusted": 0.27586206896551724,
+          "error": null
+        },
+        {
+          "photo_id": "photo_25",
+          "predicted_items": [
+            "sweet potato",
+            "carrot",
+            "banana",
+            "tomato",
+            "onion",
+            "potato",
+            "strawberry",
+            "tomato puree",
+            "cheese wedge",
+            "green pepper",
+            "lettuce",
+            "tomato puree"
+          ],
+          "ground_truth_items": [
+            "banana",
+            "beef",
+            "butter",
+            "carrot",
+            "cheese",
+            "chicken",
+            "corn",
+            "goat cheese",
+            "green beans",
+            "heavy cream",
+            "lime",
+            "onion",
+            "potato",
+            "strawberries",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.5833333333333334,
+          "recall_raw": 0.4375,
+          "recall_adjusted": 0.4375,
+          "f1_raw": 0.5,
+          "f1_adjusted": 0.5,
+          "error": null
+        },
+        {
+          "photo_id": "photo_26",
+          "predicted_items": [
+            "tomato",
+            "carrot",
+            "strawberry",
+            "potato",
+            "sweet potato",
+            "chicken breast",
+            "lettuce",
+            "celery",
+            "banana",
+            "onion",
+            "milk semi skimmed",
+            "cream denim ecreme",
+            "yogurt",
+            "sugar",
+            "tomato paste"
+          ],
+          "ground_truth_items": [
+            "banana",
+            "butter",
+            "carrot",
+            "chicken",
+            "flour",
+            "goat cheese",
+            "green beans",
+            "heavy cream",
+            "milk",
+            "onion",
+            "potato",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.5333333333333333,
+          "recall_raw": 0.5,
+          "recall_adjusted": 0.5,
+          "f1_raw": 0.5161290322580646,
+          "f1_adjusted": 0.5161290322580646,
+          "error": null
+        },
+        {
+          "photo_id": "photo_27",
+          "predicted_items": [
+            "apple",
+            "blueberry",
+            "strawberry",
+            "carrot",
+            "lettuce",
+            "celery",
+            "mushroom",
+            "chicken",
+            "potato",
+            "sweet potato",
+            "red bell pepper",
+            "green lime",
+            "banana",
+            "onion",
+            "tomato"
+          ],
+          "ground_truth_items": [
+            "apple",
+            "banana",
+            "beef",
+            "blueberries",
+            "butter",
+            "carrot",
+            "chicken",
+            "corn",
+            "flour",
+            "goat cheese",
+            "green beans",
+            "heavy cream",
+            "lime",
+            "milk",
+            "mushrooms",
+            "onion",
+            "potato",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.8,
+          "recall_raw": 0.5454545454545454,
+          "recall_adjusted": 0.5454545454545454,
+          "f1_raw": 0.6486486486486486,
+          "f1_adjusted": 0.6486486486486486,
+          "error": null
+        },
+        {
+          "photo_id": "photo_28",
+          "predicted_items": [
+            "tomato",
+            "onion",
+            "apple",
+            "carrot",
+            "strawberry",
+            "mushroom",
+            "celery",
+            "potato",
+            "lime",
+            "half volle milk beni",
+            "soya milk alpro",
+            "yogurt chamrousse",
+            "butternut squash or sweet potato",
+            "meat look like beef or pork",
+            "pickled onion or gherkin",
+            "nut or seed"
+          ],
+          "ground_truth_items": [
+            "apple",
+            "butter",
+            "carrot",
+            "cheese",
+            "corn",
+            "flour",
+            "goat cheese",
+            "green beans",
+            "ground beef",
+            "heavy cream",
+            "lime",
+            "milk",
+            "mushrooms",
+            "potato",
+            "shrimp",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.4375,
+          "recall_raw": 0.35,
+          "recall_adjusted": 0.35,
+          "f1_raw": 0.38888888888888884,
+          "f1_adjusted": 0.38888888888888884,
+          "error": null
+        },
+        {
+          "photo_id": "photo_29",
+          "predicted_items": [
+            "avocado",
+            "tomato",
+            "onion",
+            "apple",
+            "banana",
+            "strawberry",
+            "carrot",
+            "mushroom",
+            "meat look like pork or beef",
+            "cheese",
+            "yogurt",
+            "milk",
+            "butter or margarine",
+            "nut",
+            "salad greens",
+            "bread or roll",
+            "lime",
+            "cream or sour cream"
+          ],
+          "ground_truth_items": [
+            "apple",
+            "banana",
+            "blueberries",
+            "butter",
+            "carrot",
+            "cheese",
+            "chicken",
+            "corn",
+            "flour",
+            "goat cheese",
+            "green beans",
+            "ham",
+            "heavy cream",
+            "lime",
+            "milk",
+            "mushrooms",
+            "potato",
+            "shrimp",
+            "spinach",
+            "strawberries",
+            "sugar",
+            "sweet potato",
+            "tomato"
+          ],
+          "precision": 0.5,
+          "recall_raw": 0.391304347826087,
+          "recall_adjusted": 0.391304347826087,
+          "f1_raw": 0.4390243902439025,
+          "f1_adjusted": 0.4390243902439025,
+          "error": null
+        },
+        {
+          "photo_id": "photo_30",
+          "predicted_items": [
+            "chicken",
+            "carrot",
+            "green onion or scallion",
+            "cheese wedge or block",
+            "garlic",
+            "milk",
+            "apple",
+            "lemon",
+            "blueberry",
+            "tomato",
+            "yogurt or cream",
+            "greens or herb",
+            "nut or seed"
+          ],
+          "ground_truth_items": [
+            "apple",
+            "banana",
+            "blueberries",
+            "butter",
+            "carrot",
+            "cheese",
+            "chicken",
+            "green beans",
+            "ham",
+            "milk",
+            "mushrooms",
+            "onion",
+            "shrimp",
+            "spinach",
+            "strawberries",
+            "sugar"
+          ],
+          "precision": 0.38461538461538464,
+          "recall_raw": 0.3125,
+          "recall_adjusted": 0.3125,
+          "f1_raw": 0.3448275862068966,
+          "f1_adjusted": 0.3448275862068966,
+          "error": null
+        }
+      ],
+      "case_results": []
+    },
+    {
+      "name": "dimension2_constraint_satisfaction",
+      "pass_threshold": 1.0,
+      "score": 0.6666666666666666,
+      "passed": false,
+      "metrics": {
+        "cases_passed": 20,
+        "cases_total": 30,
+        "total_violations": 0,
+        "refusal_cases_expected": 3,
+        "refusal_cases_actual": 13,
+        "hard_constraint_violations_by_kind": {},
+        "correct_refusals": [
+          "d2_06",
+          "d2_10",
+          "d2_15"
+        ],
+        "wrongly_refused_satisfiable": [
+          "d2_02",
+          "d2_04",
+          "d2_07",
+          "d2_08",
+          "d2_09",
+          "d2_11",
+          "d2_12",
+          "d2_28",
+          "d2_29",
+          "d2_30"
+        ],
+        "soft_cuisine_score": null,
+        "soft_cases_scored": 0,
+        "soft_threshold": 0.5,
+        "soft_passed": null,
+        "soft_protein_cases": 0,
+        "soft_note": "cuisine is soft-scored only on cases that were not refused; no case in the 30 sets a protein preference, so protein is unmeasured here",
+        "reasoning_model": "ministral-8b-2512",
+        "sampled": false
+      },
+      "case_count": 30,
+      "api_calls": 30,
+      "total_tokens": 92023,
+      "wall_clock_seconds": 78.0877711251378,
+      "image_results": [],
+      "case_results": [
+        {
+          "case_id": "d2_01",
+          "description": "single restriction: vegetarian",
+          "text_input": "I need a vegetarian dinner for tonight.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "vegetarian"
+            ],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegetarian"
+              ],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_02",
+          "description": "single restriction: vegan",
+          "text_input": "Give me a vegan recipe.",
+          "expect_refusal": false,
+          "actual_refusal": true,
+          "passed": false,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": null,
+          "recipe_name": null,
+          "notes": "refused a request the eval expected to be satisfiable",
+          "constraints_checked": {
+            "dietary": [
+              "vegan"
+            ],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegan"
+              ],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {}
+        },
+        {
+          "case_id": "d2_03",
+          "description": "single restriction: gluten-free",
+          "text_input": "I need something gluten-free to cook.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "gluten_free"
+            ],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "gluten-free"
+              ],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_04",
+          "description": "single restriction: dairy-free",
+          "text_input": "Find me a dairy-free recipe.",
+          "expect_refusal": false,
+          "actual_refusal": true,
+          "passed": false,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": null,
+          "recipe_name": null,
+          "notes": "refused a request the eval expected to be satisfiable",
+          "constraints_checked": {
+            "dietary": [
+              "dairy_free"
+            ],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "dairy-free"
+              ],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {}
+        },
+        {
+          "case_id": "d2_05",
+          "description": "single restriction: nut-free",
+          "text_input": "I need a nut-free meal, someone here has a nut allergy.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52940",
+          "recipe_name": "Brown Stew Chicken",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "nut_free"
+            ],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [
+              "nut"
+            ],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [
+                "nut"
+              ],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "nut_free"
+            ],
+            "cook_time_minutes": 30,
+            "cuisine": "Jamaican",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "allspice",
+              "carrot",
+              "chicken",
+              "coconut milk",
+              "cornstarch",
+              "garlic clove",
+              "lime",
+              "onion",
+              "red pepper",
+              "soy sauce",
+              "thyme",
+              "tomato",
+              "vegetable oil"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_06",
+          "description": "single restriction: keto (unsupported by corpus tags)",
+          "text_input": "I need a keto recipe.",
+          "expect_refusal": true,
+          "actual_refusal": true,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": null,
+          "recipe_name": null,
+          "notes": "correctly refused an unsatisfiable request",
+          "constraints_checked": {
+            "dietary": [
+              "keto"
+            ],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "keto"
+              ],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {}
+        },
+        {
+          "case_id": "d2_07",
+          "description": "vegan + gluten-free",
+          "text_input": "I need something vegan and gluten-free.",
+          "expect_refusal": false,
+          "actual_refusal": true,
+          "passed": false,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": null,
+          "recipe_name": null,
+          "notes": "refused a request the eval expected to be satisfiable",
+          "constraints_checked": {
+            "dietary": [
+              "gluten_free",
+              "vegan"
+            ],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegan",
+                "gluten-free"
+              ],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {}
+        },
+        {
+          "case_id": "d2_08",
+          "description": "vegetarian + dairy-free",
+          "text_input": "Vegetarian and dairy-free please, no dairy at all.",
+          "expect_refusal": false,
+          "actual_refusal": true,
+          "passed": false,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": null,
+          "recipe_name": null,
+          "notes": "refused a request the eval expected to be satisfiable",
+          "constraints_checked": {
+            "dietary": [
+              "dairy_free",
+              "vegetarian"
+            ],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegetarian",
+                "dairy-free"
+              ],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {}
+        },
+        {
+          "case_id": "d2_09",
+          "description": "vegan + nut-free",
+          "text_input": "I need a vegan recipe with no nuts, nut allergy in the house.",
+          "expect_refusal": false,
+          "actual_refusal": true,
+          "passed": false,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": null,
+          "recipe_name": null,
+          "notes": "refused a request the eval expected to be satisfiable",
+          "constraints_checked": {
+            "dietary": [
+              "nut_free",
+              "vegan"
+            ],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [
+              "nut"
+            ],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegan"
+              ],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [
+                "nut"
+              ],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {}
+        },
+        {
+          "case_id": "d2_10",
+          "description": "vegan + gluten-free + nut-free (unsatisfiable combo)",
+          "text_input": "I need something vegan, gluten-free, and nut-free.",
+          "expect_refusal": true,
+          "actual_refusal": true,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": null,
+          "recipe_name": null,
+          "notes": "correctly refused an unsatisfiable request",
+          "constraints_checked": {
+            "dietary": [
+              "gluten_free",
+              "nut_free",
+              "vegan"
+            ],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegan",
+                "gluten-free",
+                "nut-free"
+              ],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {}
+        },
+        {
+          "case_id": "d2_11",
+          "description": "gluten-free + dairy-free",
+          "text_input": "I need a gluten-free and dairy-free dinner.",
+          "expect_refusal": false,
+          "actual_refusal": true,
+          "passed": false,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": null,
+          "recipe_name": null,
+          "notes": "refused a request the eval expected to be satisfiable",
+          "constraints_checked": {
+            "dietary": [
+              "dairy_free",
+              "gluten_free"
+            ],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "gluten-free",
+                "dairy-free"
+              ],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {}
+        },
+        {
+          "case_id": "d2_12",
+          "description": "15 minute limit",
+          "text_input": "I only have 15 minutes, what can I make?",
+          "expect_refusal": false,
+          "actual_refusal": true,
+          "passed": false,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": null,
+          "recipe_name": null,
+          "notes": "refused a request the eval expected to be satisfiable",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 15,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 15,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {}
+        },
+        {
+          "case_id": "d2_13",
+          "description": "20 minute limit",
+          "text_input": "Something quick, 20 minutes max.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52795",
+          "recipe_name": "Chicken Handi",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 20,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 20,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free"
+            ],
+            "cook_time_minutes": 20,
+            "cuisine": "India",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "chicken",
+              "chili powder",
+              "coriander seed",
+              "cumin seed",
+              "fenugreek",
+              "garam masala",
+              "garlic",
+              "ginger paste",
+              "green chilli",
+              "heavy cream",
+              "onion",
+              "salt",
+              "tomato",
+              "turmeric powder",
+              "vegetable oil",
+              "yogurt"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_14",
+          "description": "30 minute limit",
+          "text_input": "I need dinner in 30 minutes or less.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_15",
+          "description": "10 minute limit stacked with vegan + gluten-free + nut-free (unsatisfiable)",
+          "text_input": "I need something vegan, gluten-free, and nut-free, ready in 10 minutes.",
+          "expect_refusal": true,
+          "actual_refusal": true,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": null,
+          "recipe_name": null,
+          "notes": "correctly refused an unsatisfiable request",
+          "constraints_checked": {
+            "dietary": [
+              "gluten_free",
+              "nut_free",
+              "vegan"
+            ],
+            "max_minutes": 10,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegan",
+                "gluten-free",
+                "nut-free"
+              ],
+              "max_minutes": 10,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {}
+        },
+        {
+          "case_id": "d2_16",
+          "description": "45 minute limit",
+          "text_input": "I have 45 minutes for dinner tonight.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 45,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 45,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_17",
+          "description": "servings: 2",
+          "text_input": "I need a recipe for 2 people.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 30,
+            "servings": 2,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 30,
+              "servings": 2,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 2,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_18",
+          "description": "servings: 4",
+          "text_input": "Cooking for 4 people tonight.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 30,
+            "servings": 4,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 30,
+              "servings": 4,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 4,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_19",
+          "description": "servings: 6",
+          "text_input": "I need to feed 6 people.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 30,
+            "servings": 6,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 30,
+              "servings": 6,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 6,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_20",
+          "description": "servings: 1",
+          "text_input": "Just cooking for myself, 1 serving.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_21",
+          "description": "avoid single ingredient: cilantro",
+          "text_input": "I need a recipe but please avoid cilantro, I hate it.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52940",
+          "recipe_name": "Brown Stew Chicken",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [
+              "cilantro"
+            ],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [
+                "cilantro"
+              ],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "nut_free"
+            ],
+            "cook_time_minutes": 30,
+            "cuisine": "Jamaican",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "allspice",
+              "carrot",
+              "chicken",
+              "coconut milk",
+              "cornstarch",
+              "garlic clove",
+              "lime",
+              "onion",
+              "red pepper",
+              "soy sauce",
+              "thyme",
+              "tomato",
+              "vegetable oil"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_22",
+          "description": "avoid multiple ingredients: mushrooms and olives",
+          "text_input": "Find me something to cook, but avoid mushrooms and olives.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52940",
+          "recipe_name": "Brown Stew Chicken",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [
+              "mushrooms",
+              "olives",
+              "mushroom",
+              "olive"
+            ],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [
+                "mushroom",
+                "olive"
+              ],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "nut_free"
+            ],
+            "cook_time_minutes": 30,
+            "cuisine": "Jamaican",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "allspice",
+              "carrot",
+              "chicken",
+              "coconut milk",
+              "cornstarch",
+              "garlic clove",
+              "lime",
+              "onion",
+              "red pepper",
+              "soy sauce",
+              "thyme",
+              "tomato",
+              "vegetable oil"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_23",
+          "description": "avoid ingredient: shellfish (allergy)",
+          "text_input": "I have a shellfish allergy, avoid shellfish entirely.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52940",
+          "recipe_name": "Brown Stew Chicken",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [
+              "shellfish"
+            ],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [
+                "shellfish"
+              ],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "nut_free"
+            ],
+            "cook_time_minutes": 30,
+            "cuisine": "Jamaican",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "allspice",
+              "carrot",
+              "chicken",
+              "coconut milk",
+              "cornstarch",
+              "garlic clove",
+              "lime",
+              "onion",
+              "red pepper",
+              "soy sauce",
+              "thyme",
+              "tomato",
+              "vegetable oil"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_24",
+          "description": "avoid ingredient: peanuts, stacked with vegetarian",
+          "text_input": "I need a vegetarian recipe, and please avoid peanuts, allergy.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "vegetarian"
+            ],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [
+              "peanuts",
+              "peanut"
+            ],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegetarian"
+              ],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [
+                "peanut"
+              ],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_25",
+          "description": "avoid dish: salad",
+          "text_input": "I want dinner tonight but not a salad, I'm tired of salads.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52940",
+          "recipe_name": "Brown Stew Chicken",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [
+              "salad"
+            ],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [
+                "salad"
+              ],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "nut_free"
+            ],
+            "cook_time_minutes": 30,
+            "cuisine": "Jamaican",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "allspice",
+              "carrot",
+              "chicken",
+              "coconut milk",
+              "cornstarch",
+              "garlic clove",
+              "lime",
+              "onion",
+              "red pepper",
+              "soy sauce",
+              "thyme",
+              "tomato",
+              "vegetable oil"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_26",
+          "description": "avoid dish: soup",
+          "text_input": "Anything but soup for dinner please.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52940",
+          "recipe_name": "Brown Stew Chicken",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [
+              "soup"
+            ],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [
+                "soup"
+              ],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "nut_free"
+            ],
+            "cook_time_minutes": 30,
+            "cuisine": "Jamaican",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "allspice",
+              "carrot",
+              "chicken",
+              "coconut milk",
+              "cornstarch",
+              "garlic clove",
+              "lime",
+              "onion",
+              "red pepper",
+              "soy sauce",
+              "thyme",
+              "tomato",
+              "vegetable oil"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_27",
+          "description": "avoid dish: stir fry, stacked with 20 minute limit",
+          "text_input": "I need something in 20 minutes, but not a stir fry.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52795",
+          "recipe_name": "Chicken Handi",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 20,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [
+              "stir fry"
+            ],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 20,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [
+                "stir fry"
+              ],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free"
+            ],
+            "cook_time_minutes": 20,
+            "cuisine": "India",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "chicken",
+              "chili powder",
+              "coriander seed",
+              "cumin seed",
+              "fenugreek",
+              "garam masala",
+              "garlic",
+              "ginger paste",
+              "green chilli",
+              "heavy cream",
+              "onion",
+              "salt",
+              "tomato",
+              "turmeric powder",
+              "vegetable oil",
+              "yogurt"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_28",
+          "description": "cuisine preference (soft) + vegetarian (hard)",
+          "text_input": "I'd like an Italian vegetarian dinner.",
+          "expect_refusal": false,
+          "actual_refusal": true,
+          "passed": false,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": null,
+          "recipe_name": null,
+          "notes": "refused a request the eval expected to be satisfiable",
+          "constraints_checked": {
+            "dietary": [
+              "vegetarian"
+            ],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": "italian",
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegetarian"
+              ],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": "Italian",
+              "protein": null
+            }
+          },
+          "recipe_facts": {}
+        },
+        {
+          "case_id": "d2_29",
+          "description": "cuisine preference (soft) + 30 minute limit + servings 4",
+          "text_input": "I want Mexican food, 30 minutes or less, for 4 people.",
+          "expect_refusal": false,
+          "actual_refusal": true,
+          "passed": false,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": null,
+          "recipe_name": null,
+          "notes": "refused a request the eval expected to be satisfiable",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 30,
+            "servings": 4,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": "mexican",
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 30,
+              "servings": 4,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": "Mexican",
+              "protein": null
+            }
+          },
+          "recipe_facts": {}
+        },
+        {
+          "case_id": "d2_30",
+          "description": "full combination: vegan, dairy-free, avoid mushrooms, 30 minutes, 2 servings",
+          "text_input": "I need something vegan and dairy-free, no mushrooms, ready in 30 minutes, for 2 people.",
+          "expect_refusal": false,
+          "actual_refusal": true,
+          "passed": false,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": null,
+          "recipe_name": null,
+          "notes": "refused a request the eval expected to be satisfiable",
+          "constraints_checked": {
+            "dietary": [
+              "dairy_free",
+              "vegan"
+            ],
+            "max_minutes": 30,
+            "servings": 2,
+            "avoid_ingredients": [
+              "mushrooms",
+              "mushroom"
+            ],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegan",
+                "dairy-free"
+              ],
+              "max_minutes": 30,
+              "servings": 2,
+              "avoid_ingredients": [
+                "mushroom"
+              ],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {}
+        }
+      ]
+    }
+  ],
+  "passed": false,
+  "pantry": {
+    "fixture": "demo_pantry.json",
+    "fixture_sha256": "756090ab287f",
+    "photo_sources": {
+      "photo_05": 15,
+      "photo_09": 18,
+      "photo_12": 18,
+      "photo_15": 20,
+      "photo_22": 14,
+      "photo_29": 20
+    },
+    "photo_items_note": "raw analyze_fridge_photo output, uncurated; duplicates across photos collapse to one row",
+    "staples_added_by_hand": [
+      "olive oil",
+      "vegetable oil",
+      "salt",
+      "black pepper",
+      "all purpose flour",
+      "sugar",
+      "paprika",
+      "ground cumin",
+      "dried oregano",
+      "chili powder",
+      "cinnamon",
+      "garlic powder",
+      "onion powder",
+      "dried thyme"
+    ],
+    "staples_note": "oil, salt, pepper, flour, sugar and common dried spices; no eggs, rice, pasta or proteins were added",
+    "rows_at_run_start": 64,
+    "pantry_content_sha256": "c975c014058a"
+  },
+  "notes": [
+    "Dimension 1 baseline SUPERSEDES the earlier F1 0.64 (mistral-medium-2505) and 0.55 (ministral-8b-2512) figures. Two scorer corrections make those numbers non-comparable, and both can only lower a score: (1) a photo where the model identified nothing now counts as a zero instead of being dropped from the mean; (2) 'green onion' no longer matches ground-truth 'onion' (a scallion is not a bulb onion). A lower number than 0.55 is therefore not by itself a model regression.",
+    "Dimension 2 now enforces hand-authored constraints (eval/cases.py) in addition to what the pipeline extracted, whole-word avoid matching, and a dimension verdict that requires every case to pass."
+  ],
+  "git_dirty": true,
+  "git_diff_sha256": "a879162fd0db"
+}

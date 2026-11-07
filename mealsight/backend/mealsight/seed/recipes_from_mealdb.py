@@ -215,10 +215,20 @@ async def upsert_recipe(db: Database, row: dict[str, Any]) -> None:
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            row["id"], row["name"], row["cuisine"], row["meal_type"],
-            row["cook_time_minutes"], row["cook_time_source"], row["prep_time_minutes"],
-            row["difficulty"], row["servings_base"], row["dietary_tags"],
-            row["ingredients"], row["steps"], row["image_url"], row["source"],
+            row["id"],
+            row["name"],
+            row["cuisine"],
+            row["meal_type"],
+            row["cook_time_minutes"],
+            row["cook_time_source"],
+            row["prep_time_minutes"],
+            row["difficulty"],
+            row["servings_base"],
+            row["dietary_tags"],
+            row["ingredients"],
+            row["steps"],
+            row["image_url"],
+            row["source"],
         ),
     )
 

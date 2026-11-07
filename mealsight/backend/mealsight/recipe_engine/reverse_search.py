@@ -86,9 +86,7 @@ async def get_recipe_by_ingredients(
         for item in recipe_ingredients:
             name = item.get("name")
             if name:
-                recipe_canonical_by_name[name] = resolve_canonical(
-                    normalize_ingredient(name), synonym_map
-                )
+                recipe_canonical_by_name[name] = resolve_canonical(normalize_ingredient(name), synonym_map)
 
         recipe_canonical_set = set(recipe_canonical_by_name.values())
         matched_canonical = supplied_canonical & recipe_canonical_set

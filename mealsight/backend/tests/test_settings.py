@@ -10,6 +10,14 @@ import pytest
 from mealsight.config.settings import DEFAULT_ENV_FILE, RateLimitSpec, load_settings
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests assert where a value comes FROM (a file, or a real variable). They must not be at the mercy
+    of keys that happen to be exported in the environment running them (a developer shell, or CI)."""
+    for name in ("MISTRAL_API_KEY", "GROQ_API_KEY", "OPENWEATHER_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+
 def test_settings_loads_from_monkeypatched_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MISTRAL_API_KEY", "test-mistral-key")
     monkeypatch.setenv("GROQ_API_KEY", "test-groq-key")
@@ -115,11 +123,12 @@ def test_rate_limit_specs_retrievable_per_model(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("GROQ_API_KEY", "test-groq-key")
     settings = load_settings(env_file=None)
 
-    medium = settings.get_rate_limit("mistral-medium-2505")
-    assert medium == RateLimitSpec(rps=0.42, tpm=375_000)
-
     extraction = settings.get_rate_limit("ministral-8b-2512")
     assert extraction == RateLimitSpec(rps=3.13, tpm=625_000)
+
+    # Retired by Mistral (2026-10); deliberately no longer configured.
+    with pytest.raises(KeyError, match="mistral-medium-2505"):
+        settings.get_rate_limit("mistral-medium-2505")
 
     with pytest.raises(KeyError, match="unknown-model-xyz"):
         settings.get_rate_limit("unknown-model-xyz")

@@ -63,6 +63,11 @@ CHECKPOINT_PATH = CACHE_DIR / "vision_benchmark_checkpoint.jsonl"
 REPORT_PATH = REPO_ROOT / "docs" / "vision_benchmark_report.md"
 VISIBILITY_EXCLUSIONS_CSV = REPO_ROOT / "test_data" / "eval_cases" / "visibility_exclusions.csv"
 
+# The original 2026-08 grid, kept as-is so the checkpointed results still
+# re-score and the published report stays reproducible. mistral-medium-2505
+# was retired by Mistral (2026-10) and can no longer be called; the
+# replacement models (ministral-14b-2512, ministral-8b-2512) were measured
+# separately — see docs/vision_benchmark_report.md.
 MODELS = ["mistral-medium-2505", "pixtral-12b-latest", "ministral-8b-2512"]
 PROMPTS = [
     ("A-current", PROMPT_CURRENT),
@@ -276,6 +281,10 @@ def append_checkpoint(record: CallRecord) -> None:
 # --------------------------------------------------------------------------
 
 PUNCTUATION_RE = re.compile(r"[^\w\s]")
+# A parenthetical is a qualifier ("potatoes (peeled)", "milk (carton labeled
+# ...)"), never part of the item's identity — stripped before matching. An
+# unclosed "(" (the model truncated the closing paren) strips to end of string.
+PARENTHETICAL_RE = re.compile(r"\([^)]*(?:\)|$)")
 
 CONTAINER_WORDS = frozenset(
     {"carton", "jar", "bottle", "container", "tub", "packet", "package", "packaged", "bag", "box", "can", "canned", "of", "a"}
@@ -353,8 +362,9 @@ def singularize(word: str) -> str:
     return word
 
 
-def normalize_words(phrase: str) -> list[str]:
-    text = phrase.lower().replace("-", " ")
+def normalize_words(phrase: str, strip_qualifiers: bool = True) -> list[str]:
+    lowered = phrase.lower()
+    text = (PARENTHETICAL_RE.sub(" ", lowered) if strip_qualifiers else lowered).replace("-", " ")
     text = PUNCTUATION_RE.sub("", text)
     return [singularize(w) for w in text.split() if w]
 
@@ -381,14 +391,18 @@ def canonical_forms(raw: str) -> set[str]:
         forms.add(canon)
         _synonym_hit_counts[literal] += 1
 
-    n = len(words)
+    # Brand names are matched against the phrase WITH its parentheticals:
+    # "Butter (Chavroux brand)" carries the brand only inside the parens,
+    # which the literal reading above deliberately drops.
+    brand_words = strip_containers(normalize_words(raw, strip_qualifiers=False))
+    n = len(brand_words)
     for key, canon in BRAND_SYNONYMS.items():
         key_words = tuple(key.split())
         k = len(key_words)
         if k == 0 or k > n:
             continue
         for start in range(n - k + 1):
-            if tuple(words[start : start + k]) == key_words:
+            if tuple(brand_words[start : start + k]) == key_words:
                 forms.add(canon)
                 _synonym_hit_counts[key] += 1
                 break

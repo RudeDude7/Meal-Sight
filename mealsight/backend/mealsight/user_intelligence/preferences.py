@@ -89,9 +89,7 @@ def _validate_scalar(preference_type: str, value: Any) -> Any:
     return value
 
 
-async def _canonicalize_dislikes(
-    values: list[str], synonym_map: Mapping[str, str] | None
-) -> list[str]:
+async def _canonicalize_dislikes(values: list[str], synonym_map: Mapping[str, str] | None) -> list[str]:
     if synonym_map is None:
         synonym_map = await load_synonym_map(get_recipe_db())
     return [resolve_canonical(normalize_ingredient(v), synonym_map) for v in values]

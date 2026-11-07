@@ -14,8 +14,18 @@ from mealsight.seed.load_substitutions import load_substitution_entries
 # that legitimately contain a dairy-sounding word without being dairy.
 _DAIRY_TERMS = ("milk", "butter", "cheese", "cream", "yogurt", "yoghurt", "ghee", "whey", "casein", "custard")
 _NON_DAIRY_QUALIFIERS = (
-    "coconut", "cashew", "almond", "oat", "soy", "rice milk", "vegan",
-    "cocoa", "shea", "peanut", "hemp", "nutritional yeast",
+    "coconut",
+    "cashew",
+    "almond",
+    "oat",
+    "soy",
+    "rice milk",
+    "vegan",
+    "cocoa",
+    "shea",
+    "peanut",
+    "hemp",
+    "nutritional yeast",
 )
 
 

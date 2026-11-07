@@ -1,0 +1,971 @@
+{
+ "_about": "Demo pantry fixture. 'photos' holds raw, uncurated analyze_fridge_photo output for real photos in test_data/images (vision noise such as 'meat look like ham or pork' is deliberately kept). 'staples' are hand-added pantry staples. Applied by scripts/reset_demo_pantry.py. Regenerating 'photos' needs live API calls and is not deterministic; the script itself needs none.",
+ "photos": {
+  "photo_05": [
+   {
+    "name": "tomato",
+    "quantity": 6.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "strawberry",
+    "quantity": 10.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "carrot",
+    "quantity": 6.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "lettuce",
+    "quantity": null,
+    "unit": null,
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "cabbage",
+    "quantity": null,
+    "unit": null,
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "onion",
+    "quantity": 3.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "chicken",
+    "quantity": 1.0,
+    "unit": "whole",
+    "category": "protein",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "potato",
+    "quantity": 6.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "sweet potato",
+    "quantity": 2.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "blueberry",
+    "quantity": null,
+    "unit": null,
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "banana",
+    "quantity": 3.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "sugar granulated",
+    "quantity": null,
+    "unit": null,
+    "category": "other",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "cream semi skimmed",
+    "quantity": 1.0,
+    "unit": "carton",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "yogurt",
+    "quantity": 1.0,
+    "unit": "jar",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "tomato sauce",
+    "quantity": 1.0,
+    "unit": "bottle",
+    "category": "condiment",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   }
+  ],
+  "photo_09": [
+   {
+    "name": "apple",
+    "quantity": 2.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "lettuce",
+    "quantity": null,
+    "unit": null,
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "red tomato",
+    "quantity": 2.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "green onion",
+    "quantity": null,
+    "unit": null,
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "strawberry",
+    "quantity": 6.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "carrot",
+    "quantity": 5.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "blueberry",
+    "quantity": 10.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "chicken",
+    "quantity": 2.0,
+    "unit": "pieces",
+    "category": "protein",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "meat look like ham or pork",
+    "quantity": 1.0,
+    "unit": "package",
+    "category": "protein",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "potato",
+    "quantity": 5.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "sweet potato",
+    "quantity": 2.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "banana",
+    "quantity": 3.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "cream demi ecr me",
+    "quantity": 1.0,
+    "unit": "carton",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "yogurt or dairy product champlain",
+    "quantity": 1.0,
+    "unit": "container",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "milk",
+    "quantity": 1.0,
+    "unit": "carton",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "onion",
+    "quantity": 2.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "salad greens",
+    "quantity": 1.0,
+    "unit": "container",
+    "category": "other",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "strawberry in",
+    "quantity": 1.0,
+    "unit": "container",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   }
+  ],
+  "photo_12": [
+   {
+    "name": "avocado",
+    "quantity": 2.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "apple",
+    "quantity": 2.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "banana",
+    "quantity": 3.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "lime",
+    "quantity": 3.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "strawberry",
+    "quantity": null,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "carrot",
+    "quantity": 6.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "mushroom",
+    "quantity": null,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "wheat bread roll",
+    "quantity": 4.0,
+    "unit": "count",
+    "category": "grain",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "blueberry",
+    "quantity": null,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "or corn",
+    "quantity": null,
+    "unit": null,
+    "category": "other",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "milk",
+    "quantity": 1.0,
+    "unit": "carton",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "cream or demi cr me",
+    "quantity": 1.0,
+    "unit": "jar",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "tomato",
+    "quantity": 3.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "onion",
+    "quantity": 3.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "cabbage",
+    "quantity": 1.0,
+    "unit": "head",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "celery",
+    "quantity": 1.0,
+    "unit": "bunch",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "lettuce",
+    "quantity": 1.0,
+    "unit": "head",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "pre cut melon or fruit salad",
+    "quantity": 1.0,
+    "unit": "container",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   }
+  ],
+  "photo_15": [
+   {
+    "name": "avocado",
+    "quantity": 1.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "tomato",
+    "quantity": 3.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "onion",
+    "quantity": 3.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "apple",
+    "quantity": 2.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "carrot",
+    "quantity": 4.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "strawberry",
+    "quantity": 10.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "mushroom",
+    "quantity": 15.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "banana",
+    "quantity": 4.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "lime",
+    "quantity": 3.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "pear",
+    "quantity": 1.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "potato",
+    "quantity": 4.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "milk",
+    "quantity": 1.0,
+    "unit": "carton",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "butter",
+    "quantity": 1.0,
+    "unit": "container",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "yogurt",
+    "quantity": 1.0,
+    "unit": "container",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "meat unspecified type",
+    "quantity": 1.0,
+    "unit": "package",
+    "category": "other",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "chicken",
+    "quantity": 1.0,
+    "unit": "count",
+    "category": "protein",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "green onion",
+    "quantity": 1.0,
+    "unit": "bunch",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "lettuce",
+    "quantity": 1.0,
+    "unit": "head",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "cabbage",
+    "quantity": 1.0,
+    "unit": "head",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "nut unspecified type",
+    "quantity": null,
+    "unit": "small container",
+    "category": "other",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   }
+  ],
+  "photo_22": [
+   {
+    "name": "banana",
+    "quantity": 3.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "tomato",
+    "quantity": 3.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "strawberry",
+    "quantity": 10.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "onion",
+    "quantity": 4.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "potato",
+    "quantity": 1.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "lettuce",
+    "quantity": 2.0,
+    "unit": "bags",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "mushroom",
+    "quantity": null,
+    "unit": null,
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "baguette or bread roll",
+    "quantity": 3.0,
+    "unit": "count",
+    "category": "grain",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "meat look like pork or beef",
+    "quantity": 1.0,
+    "unit": "package",
+    "category": "protein",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "green pepper",
+    "quantity": 2.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "tomato puree",
+    "quantity": 1.0,
+    "unit": "can",
+    "category": "condiment",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "milk",
+    "quantity": null,
+    "unit": "bottle",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "cheese block",
+    "quantity": 1.0,
+    "unit": "block",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "yogurt or cream",
+    "quantity": 1.0,
+    "unit": "container",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   }
+  ],
+  "photo_29": [
+   {
+    "name": "avocado",
+    "quantity": 2.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "tomato",
+    "quantity": 3.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "onion",
+    "quantity": 4.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "apple",
+    "quantity": 2.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "pineapple",
+    "quantity": 1.0,
+    "unit": "slice",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "strawberry",
+    "quantity": 10.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "carrot",
+    "quantity": 5.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "mushroom",
+    "quantity": 15.0,
+    "unit": "count",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "cheese",
+    "quantity": 1.0,
+    "unit": "container",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "yogurt",
+    "quantity": 1.0,
+    "unit": "container",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "milk",
+    "quantity": 1.0,
+    "unit": "carton",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "heavy cream",
+    "quantity": 1.0,
+    "unit": "jar",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "butter",
+    "quantity": 1.0,
+    "unit": "pack",
+    "category": "dairy",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "bread roll",
+    "quantity": 6.0,
+    "unit": "count",
+    "category": "grain",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "banana",
+    "quantity": 4.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "lime",
+    "quantity": 3.0,
+    "unit": "count",
+    "category": "fruit",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "meat",
+    "quantity": 1.0,
+    "unit": "package",
+    "category": "other",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "meat likely pork",
+    "quantity": 1.0,
+    "unit": "package",
+    "category": "protein",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   },
+   {
+    "name": "green onion or leek",
+    "quantity": 1.0,
+    "unit": "bunch",
+    "category": "vegetable",
+    "freshness_status": "fresh",
+    "freshness_observed": true
+   },
+   {
+    "name": "nut",
+    "quantity": 1.0,
+    "unit": "container",
+    "category": "other",
+    "freshness_status": "fresh",
+    "freshness_observed": false
+   }
+  ]
+ },
+ "staples": [
+  {
+   "name": "olive oil",
+   "quantity": 1,
+   "unit": "bottle",
+   "category": "condiment",
+   "freshness_status": "fresh",
+   "freshness_observed": false
+  },
+  {
+   "name": "vegetable oil",
+   "quantity": 1,
+   "unit": "bottle",
+   "category": "condiment",
+   "freshness_status": "fresh",
+   "freshness_observed": false
+  },
+  {
+   "name": "salt",
+   "quantity": 1,
+   "unit": "container",
+   "category": "condiment",
+   "freshness_status": "fresh",
+   "freshness_observed": false
+  },
+  {
+   "name": "black pepper",
+   "quantity": 1,
+   "unit": "container",
+   "category": "condiment",
+   "freshness_status": "fresh",
+   "freshness_observed": false
+  },
+  {
+   "name": "all purpose flour",
+   "quantity": 1,
+   "unit": "bag",
+   "category": "grain",
+   "freshness_status": "fresh",
+   "freshness_observed": false
+  },
+  {
+   "name": "sugar",
+   "quantity": 1,
+   "unit": "bag",
+   "category": "grain",
+   "freshness_status": "fresh",
+   "freshness_observed": false
+  },
+  {
+   "name": "paprika",
+   "quantity": 1,
+   "unit": "jar",
+   "category": "condiment",
+   "freshness_status": "fresh",
+   "freshness_observed": false
+  },
+  {
+   "name": "ground cumin",
+   "quantity": 1,
+   "unit": "jar",
+   "category": "condiment",
+   "freshness_status": "fresh",
+   "freshness_observed": false
+  },
+  {
+   "name": "dried oregano",
+   "quantity": 1,
+   "unit": "jar",
+   "category": "condiment",
+   "freshness_status": "fresh",
+   "freshness_observed": false
+  },
+  {
+   "name": "chili powder",
+   "quantity": 1,
+   "unit": "jar",
+   "category": "condiment",
+   "freshness_status": "fresh",
+   "freshness_observed": false
+  },
+  {
+   "name": "cinnamon",
+   "quantity": 1,
+   "unit": "jar",
+   "category": "condiment",
+   "freshness_status": "fresh",
+   "freshness_observed": false
+  },
+  {
+   "name": "garlic powder",
+   "quantity": 1,
+   "unit": "jar",
+   "category": "condiment",
+   "freshness_status": "fresh",
+   "freshness_observed": false
+  },
+  {
+   "name": "onion powder",
+   "quantity": 1,
+   "unit": "jar",
+   "category": "condiment",
+   "freshness_status": "fresh",
+   "freshness_observed": false
+  },
+  {
+   "name": "dried thyme",
+   "quantity": 1,
+   "unit": "jar",
+   "category": "condiment",
+   "freshness_status": "fresh",
+   "freshness_observed": false
+  }
+ ]
+}

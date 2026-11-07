@@ -22,9 +22,11 @@ export interface RecommendationAccepted {
 export interface DimensionReasoning {
   applies: boolean
   reasoning: string
+  /** Every dimension is composed from the pipeline's own data, so it cannot misstate it. */
+  source?: 'data'
 }
 
-/** The reasoning model's own structured decision (reason.py's RecipeDecision). */
+/** The six dimensions shown to the user (reason.py's _build_reasoning): all six rendered from data; the model's judgment reaches the user only as overall_summary, a sentence built from its verified priorities. */
 export interface RecipeDecisionReasoning {
   chosen_recipe_id: string
   ingredient_match_reasoning: DimensionReasoning
@@ -53,6 +55,19 @@ export interface TopRecommendation {
   invalid_choice_reason?: string
   overrode_uncookable_choice?: boolean
   model_chosen_recipe_id?: string
+}
+
+export interface WasteCandidate {
+  name: string
+  days_overdue: number
+  quantity: number | null
+  unit: string | null
+  log_waste_args: {
+    item_name: string
+    quantity_wasted: number | null
+    unit: string | null
+    reason: 'expired'
+  }
 }
 
 /** One ingredient the frontend can show before a user confirms cooking. */
@@ -110,6 +125,14 @@ export interface RecommendationResult {
    * (5) for why this can be a strict subset of every missing ingredient.
    */
   substitutions?: SubstitutionResult[]
+
+  /**
+   * Pantry items well past their estimated shelf life (more than
+   * settings.expired_grace_days). Waste, not ingredients to use up; each
+   * carries log_waste_args, the arguments for POST /waste. Never logged
+   * automatically because logging deducts from the pantry.
+   */
+  waste_candidates?: WasteCandidate[]
   /** Flattened from top_recommendation.recipe_id when available. */
   recipe_id?: string
 }

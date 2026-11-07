@@ -88,3 +88,83 @@ async def test_item_just_updated_is_never_flagged_stale_even_if_it_was_before(pa
 
     flagged_names = {item.name for item in result.flagged_items}
     assert "garlic" not in flagged_names
+
+
+async def _backdate(pantry_db: Database, name: str, days: int) -> None:
+    await pantry_db.execute(
+        "UPDATE pantry SET added_date = datetime('now', ?) WHERE name = ?", (f"-{days} days", name)
+    )
+
+
+async def _days_remaining(pantry_db: Database, name: str) -> int:
+    from mealsight.pantry.query import get_pantry
+
+    items = await get_pantry(freshness_filter="all", pantry_db=pantry_db)
+    days = next(i.days_remaining for i in items if i.name == name)
+    assert days is not None
+    return days
+
+
+def _seen(name: str, quantity: float, freshness: str) -> PantryItemInput:
+    return PantryItemInput(
+        name=name,
+        quantity=quantity,
+        unit="count",
+        category="vegetable",
+        freshness_status=freshness,
+        freshness_observed=True,
+    )
+
+
+async def test_rephotographed_expired_item_seen_fresh_becomes_fresh_again(pantry_db: Database) -> None:
+    await update_pantry([_item("spinach", 1.0)], pantry_db=pantry_db, synonym_map={})
+    await _backdate(pantry_db, "spinach", 30)
+    assert await _days_remaining(pantry_db, "spinach") < -2  # long expired, as in the stale demo pantry
+
+    await update_pantry([_seen("spinach", 1.0, "fresh")], pantry_db=pantry_db, synonym_map={})
+
+    assert await _days_remaining(pantry_db, "spinach") >= 0
+    row = await pantry_db.fetch_one("SELECT quantity FROM pantry WHERE name = 'spinach'")
+    assert row is not None
+    assert row["quantity"] == 1.0  # replaced, not 2.0: the old batch was past its life
+
+
+async def test_expired_item_with_no_freshness_observation_stays_expired(pantry_db: Database) -> None:
+    await update_pantry([_item("spinach", 1.0)], pantry_db=pantry_db, synonym_map={})
+    await _backdate(pantry_db, "spinach", 30)
+
+    # _item() leaves freshness unobserved: the "fresh" default is not evidence.
+    await update_pantry([_item("spinach", 1.0)], pantry_db=pantry_db, synonym_map={})
+
+    assert await _days_remaining(pantry_db, "spinach") < -2
+
+
+async def test_expired_item_seen_wilted_stays_expired(pantry_db: Database) -> None:
+    await update_pantry([_item("spinach", 1.0)], pantry_db=pantry_db, synonym_map={})
+    await _backdate(pantry_db, "spinach", 30)
+
+    await update_pantry([_seen("spinach", 1.0, "wilted")], pantry_db=pantry_db, synonym_map={})
+
+    assert await _days_remaining(pantry_db, "spinach") < -2
+
+
+async def test_unexpired_item_seen_fresh_keeps_its_original_age(pantry_db: Database) -> None:
+    await update_pantry([_item("spinach", 1.0)], pantry_db=pantry_db, synonym_map={})
+    await _backdate(pantry_db, "spinach", 2)
+    before = await _days_remaining(pantry_db, "spinach")
+
+    await update_pantry([_seen("spinach", 1.0, "fresh")], pantry_db=pantry_db, synonym_map={})
+
+    assert await _days_remaining(pantry_db, "spinach") == before
+    row = await pantry_db.fetch_one("SELECT quantity FROM pantry WHERE name = 'spinach'")
+    assert row is not None
+    assert row["quantity"] == 2.0
+
+
+async def test_unobserved_sighting_keeps_a_recorded_freshness_status(pantry_db: Database) -> None:
+    await update_pantry([_seen("spinach", 1.0, "wilted")], pantry_db=pantry_db, synonym_map={})
+    await update_pantry([_item("spinach", 1.0)], pantry_db=pantry_db, synonym_map={})
+
+    row = await pantry_db.fetch_one("SELECT freshness_status FROM pantry WHERE name = 'spinach'")
+    assert row is not None
+    assert row["freshness_status"] == "wilted"

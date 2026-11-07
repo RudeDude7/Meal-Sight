@@ -8,6 +8,8 @@ this module only filters, sorts, and decides what to suggest.
 
 from __future__ import annotations
 
+from typing import Any
+
 from mealsight.config.settings import settings
 from mealsight.db.connection import Database
 from mealsight.pantry.models import ExpiringItem
@@ -68,3 +70,64 @@ async def flag_expiring(
 
     results.sort(key=lambda item: item.days_remaining)
     return results
+
+
+def split_usable_and_waste(
+    items: list[dict[str, Any]], grace_days: int | None = None
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Separates flag_expiring's items (as dicts, the shape the agent
+    receives over MCP) into those still worth planning a meal around and
+    those that are simply waste.
+
+    An item at or within settings.expired_grace_days past its estimated
+    shelf life is still a freshness opportunity. Anything further past it
+    is returned as a waste candidate instead: it must not earn a freshness
+    bonus or be presented as "expiring", and each candidate carries the
+    exact arguments the existing log_waste tool takes, so acting on it is
+    one confirmed call (log_waste deducts from the pantry, so nothing here
+    logs it automatically).
+    """
+    grace = settings.expired_grace_days if grace_days is None else grace_days
+    usable: list[dict[str, Any]] = []
+    waste: list[dict[str, Any]] = []
+    for item in items:
+        days = item.get("days_remaining")
+        if isinstance(days, int | float) and days < -grace:
+            quantity = item.get("quantity")
+            waste.append(
+                {
+                    **item,
+                    "days_overdue": abs(int(days)),
+                    "log_waste_args": {
+                        "item_name": item.get("name"),
+                        "quantity_wasted": quantity,
+                        "unit": item.get("unit"),
+                        "reason": "expired",
+                    },
+                }
+            )
+        else:
+            usable.append(item)
+    return usable, waste
+
+
+def is_long_expired(item: dict[str, Any], grace_days: int | None = None) -> bool:
+    """True when a pantry row (as a dict) is further past its estimated
+    shelf life than settings.expired_grace_days: the one cutoff shared by
+    the freshness bonus (split_usable_and_waste) and by ingredient matching
+    (usable_pantry_names), so the two can never disagree about whether an
+    item is food or waste."""
+    grace = settings.expired_grace_days if grace_days is None else grace_days
+    days = item.get("days_remaining")
+    return isinstance(days, int | float) and days < -grace
+
+
+def usable_pantry_names(pantry_items: list[dict[str, Any]], grace_days: int | None = None) -> list[str]:
+    """The pantry names that count as available ingredients: everything
+    except items long past their shelf life. A recipe that depends on one
+    of those therefore reports it as missing, and can_cook follows."""
+    return [
+        str(item["name"])
+        for item in pantry_items
+        if item.get("name") and not is_long_expired(item, grace_days)
+    ]

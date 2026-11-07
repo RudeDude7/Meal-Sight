@@ -188,7 +188,8 @@ async def test_find_substitutions_invalid_reason_returns_validation_error_naming
 
 async def test_get_recipe_by_ingredients_ranks_by_proportional_use(mcp_client: Client[Any]) -> None:
     await insert_recipe(
-        recipe_id="small", name="Small",
+        recipe_id="small",
+        name="Small",
         ingredients=[
             {"name": "egg", "quantity": 1.0, "unit": None, "importance": "important", "raw_measure": "1"},
         ],

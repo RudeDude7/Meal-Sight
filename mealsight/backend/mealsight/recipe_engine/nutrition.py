@@ -76,7 +76,17 @@ def _quantity_to_grams(quantity: float | None, unit: str | None) -> float | None
 
 
 async def calculate_nutrition(db: Database, recipe_id: str, servings: int) -> NutritionResult:
-    """Sums per-ingredient nutrition for one recipe, divided by servings.
+    """Per-serving nutrition for one recipe at the requested servings.
+
+    A recipe's stored ingredient quantities are for its own servings_base.
+    This scales them to the requested servings first (the same scaling
+    scale_recipe applies), sums the nutrition of the scaled quantities,
+    then divides by the requested servings. The result is that per-serving
+    values do NOT depend on how many servings were requested: Pierogi
+    (servings_base 4) is the same ~1,860 kcal per serving at 1, 2 or 4.
+    The requested servings is what the result reports (NutritionResult.
+    servings) and what the whole-dish totals are scaled to.
+
     Raises ValueError if no recipe with that id exists, or servings isn't
     a positive integer."""
     if servings <= 0:
@@ -112,7 +122,10 @@ async def calculate_nutrition(db: Database, recipe_id: str, servings: int) -> Nu
         totals["fiber"] += (row["fiber_per_100g"] or 0.0) * factor
         totals["sodium"] += (row["sodium_per_100g"] or 0.0) * factor
 
-    per_serving = {field: value / servings for field, value in totals.items()}
+    # Scale the base-quantity totals to the requested servings, then divide
+    # by the requested servings (algebraically totals / servings_base).
+    scale_factor = servings / recipe.servings_base if recipe.servings_base > 0 else 1.0
+    per_serving = {field: value * scale_factor / servings for field, value in totals.items()}
     coverage_pct = (covered / total_ingredients * 100) if total_ingredients else 0.0
 
     tags: list[str] = []

@@ -54,9 +54,7 @@ async def test_recipe_corpus_section_coverage_stays_above_90_percent() -> None:
                 if normalized:
                     distinct.add(resolve_canonical(normalized, synonym_map))
 
-        uncategorized = sorted(
-            name for name in distinct if resolve_category(name, shelf_life_map) == "other"
-        )
+        uncategorized = sorted(name for name in distinct if resolve_category(name, shelf_life_map) == "other")
         categorized_count = len(distinct) - len(uncategorized)
         coverage_pct = (categorized_count / len(distinct) * 100) if distinct else 0.0
 

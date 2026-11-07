@@ -33,7 +33,6 @@ class RateLimitSpec(BaseModel):
 # Sourced from the Mistral console (and Groq, for Whisper) for this account.
 # These are real limits, not placeholders — the rate limiter must respect them.
 MODEL_RATE_LIMITS: dict[str, RateLimitSpec] = {
-    "mistral-medium-2505": RateLimitSpec(rps=0.42, tpm=375_000),
     "ministral-8b-2512": RateLimitSpec(rps=3.13, tpm=625_000),
     "whisper-large-v3-turbo": RateLimitSpec(rps=20 / 60, tpm=0),
 }
@@ -67,15 +66,33 @@ class Settings(BaseSettings):
     # Field names are ALL_CAPS by design, matching the Phase 1.1 spec exactly
     # (VISION_MODEL / EXTRACTION_MODEL / REASONING_MODEL / AUDIO_MODEL) — later
     # phases reference these names directly, so they need to be stable.
-    VISION_MODEL: str = "mistral-medium-2505"  # F1 0.64 on aicook eval set; best of 3 tested
+    # VISION_MODEL / REASONING_MODEL migrated 2026-10-16: mistral-medium-2505
+    # (the original pick, F1 0.64) was retired by Mistral and the medium tier
+    # is unavailable on this account's free plan (0 req/min on every medium,
+    # small and magistral model). ministral-8b-2512 is the best reachable
+    # replacement: B-conservative prompt, photo_01-05, 3 reps, temperature 0,
+    # corrected scorer: mean F1 0.545 (stddev 0.075) under the benchmark
+    # script's methodology, 0.529 (stddev 0.103) through the production
+    # analyze_fridge_photo path. ministral-14b-2512 ties it (0.551 / 0.535).
+    # 625,000 TPM / 3.13 RPS. The model returns a stray trailing ``` fence
+    # after its JSON; providers.mistral.strip_code_fences handles it (it did
+    # not before 2026-10-16, which silently emptied every vision result).
+    # Full history in docs/VISION_FINDINGS.md.
+    VISION_MODEL: str = "ministral-8b-2512"
     EXTRACTION_MODEL: str = "ministral-8b-2512"  # 3.13 RPS, sufficient for structured extraction
-    REASONING_MODEL: str = "mistral-medium-2505"
+    # Same model as VISION_MODEL, so both roles share one rate-limit bucket
+    # (625,000 TPM / 3.13 RPS). 2026-10-16: end-to-end runs validated
+    # against RecipeDecision with no repair retry or fallback; the reasoning
+    # text was separately checked for faithfulness (docs/VISION_FINDINGS.md).
+    REASONING_MODEL: str = "ministral-8b-2512"
     AUDIO_MODEL: str = "whisper-large-v3-turbo"
 
-    # Images are sent at native resolution. The benchmark showed F1 dropping
-    # from 0.67 to 0.43 when the same photo was downscaled to 25% — do not
-    # "optimize" this to save bandwidth/tokens without re-running that
-    # benchmark, it directly costs recommendation accuracy.
+    # Images are sent at native resolution. A single-sample check on photo_01
+    # showed F1 dropping from 0.58 (native) to 0.41 (50%) and 0.43 (25%) under
+    # the benchmark matcher (0.67 -> 0.52 -> 0.43 under the diagnostic script's
+    # laxer scorer): the direction holds, the exact figures are n=1 and
+    # non-monotonic. Do not "optimize" this to save bandwidth/tokens without
+    # re-running a multi-sample benchmark.
     downscale_images: bool = False
 
     # --- Matching thresholds ------------------------------------------------
@@ -85,6 +102,12 @@ class Settings(BaseSettings):
 
     # --- Freshness ------------------------------------------------------------
     expiring_soon_days: int = 3
+    # How far past its estimated shelf life an item can be and still count as
+    # a "use it up" opportunity. Shelf lives here are integer-day category
+    # estimates, so a day or two of slack is inside their own error (and
+    # mirrors the look-ahead above); beyond it the item is waste, surfaced
+    # via the waste-tracking feature instead of earning a freshness bonus.
+    expired_grace_days: int = 2
     stale_pantry_item_days: int = 14
 
     # --- Waste --------------------------------------------------------------

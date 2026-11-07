@@ -1,0 +1,1000 @@
+PHASE 10.1 + 10.2 STUDY NOTES: BUILDING A FIVE-DIMENSION EVALUATION SUITE
+FOR AN LLM-POWERED MEAL RECOMMENDER, AND THE SIXTEEN-PLUS REAL BUGS IT
+FOUND IN CODE THAT ALREADY HAD PASSING UNIT TESTS
+=====================================================================
+
+AUDIENCE AND PURPOSE. These notes are written for me, for interview
+preparation. Recruiters and interviewers will probe this phase hardest,
+because it is the part of the project that shows engineering judgment
+rather than feature-building. Every section is written so I can lift a
+story, a number or a decision straight out of it. Section 0 is the
+30-second and 2-minute pitch. Sections 1-3 are what exists and why.
+Section 4 is the chronological story, including everything that failed.
+Section 5 is the bug catalogue. Section 6 is my own mistakes (the most
+persuasive part in an interview, if told honestly). Section 7 is the
+principles. Section 8 is a numbers cheat sheet. Section 9 is likely
+interview questions with answers. Section 10 is what NOT to overclaim.
+
+Companion documents: docs/EVALUATION.md (the standing record of the
+final result), backend/eval/README.md (the running log of every run and
+correction), backend/eval/results/*.json (every scorecard).
+
+
+---------------------------------------------------------------------
+0. THE PITCH
+---------------------------------------------------------------------
+
+THIRTY SECONDS.
+"MealSight is a multimodal meal recommender: a photo of your fridge, a
+voice memo or typed text goes in, and an agent pipeline over three MCP
+servers recommends something you can actually cook. In phases 10.1 and
+10.2 I built a five-dimension evaluation suite for it, 150 cases, and
+used it to find and fix real defects. It found about sixteen, several of
+them safety-relevant: a saved nut allergy that was stored correctly and
+never applied, avoid-lists that only existed as prompt text, and
+cuisine-preference learning that had never worked outside tests. Every
+one of those had passing unit tests, because the code was correct and
+was simply never called correctly."
+
+TWO MINUTES (add this):
+"The interesting part was making the evaluation trustworthy. I derived
+the expected answers by hand before running the system, so the tests
+could not be tautological. I separated 'the system failed' from 'my test
+case was badly designed' and reported both honestly. I ran mutation
+tests on my own test cases and found one that could not fail, and
+replaced it. I isolated the stateful dimensions onto throwaway databases
+and fingerprinted the real ones to prove they were never touched. And I
+never lowered a threshold: the suite's final verdict is FAIL, because
+ingredient recognition from photos scores 0.49 against 0.60 after the
+original vision model was retired and the replacement model tier is the
+only one reachable on the free plan. I would rather ship a suite that
+says FAIL and explains why than one that says PASS."
+
+ONE-LINE TAKEAWAY: "I built the measurement first, trusted it only after
+attacking it, and let it tell me where the product was wrong."
+
+
+---------------------------------------------------------------------
+1. WHAT THE SYSTEM IS (SO THE EVALUATION MAKES SENSE)
+---------------------------------------------------------------------
+
+Pipeline (LangGraph, 11 nodes): validate_input -> perceive (vision /
+audio / text, via Mistral) -> merge (fusion of the modalities plus the
+saved user profile) -> update_pantry -> get_context -> search_recipes ->
+match_rank -> reason (an LLM chooses one recipe from a shortlist and
+explains) -> generate_output -> record_outcome -> present.
+
+Three MCP servers (FastMCP, stdio subprocesses): recipe_engine (search,
+ingredient matching, scaling, nutrition, substitutions), pantry_manager
+(pantry, expiry, grocery lists, waste), user_intelligence (profile,
+meal history, preference learning, repetition, context).
+
+Data: SQLite, three databases. 250 recipes (TheMealDB-derived), a
+147-row synonym table (now 154), a 57-row substitution table, a
+nutrition reference table. Models: ministral-8b-2512 for vision,
+reasoning and extraction (the free-tier-reachable replacement for a
+retired model).
+
+Why this matters for the evaluation: the system is a mix of
+DETERMINISTIC code (matching, ranking, filtering, scoring) and an LLM
+(perception and the final choice). A good evaluation has to test both
+and, crucially, tell them apart when something goes wrong. A large part
+of what I found was a deterministic layer being correct but fed wrong
+inputs, or the LLM overriding a correct deterministic ranking.
+
+
+---------------------------------------------------------------------
+2. THE FIVE DIMENSIONS
+---------------------------------------------------------------------
+
+D1 INGREDIENT RECOGNITION (30 photos, F1, threshold 0.60).
+   From a photo, does vision name what is there? Hand-labelled ground
+   truth, a deliberately strict matcher (scallion != onion; sweet
+   potato != potato), visibility-adjusted recall. FINAL: 0.488 FAIL.
+
+D2 CONSTRAINT SATISFACTION (55 cases; hard 1.0, soft 0.5).
+   Does the system ever break what the user asked? Dietary restrictions
+   (alone and stacked), cook time, servings, avoid-ingredient and
+   avoid-dish lists, cuisine preference, and requests that should be
+   honestly refused. Hard constraints are binary, no partial credit,
+   because a dietary violation is a real harm and not a quality miss. A
+   satisfiable request wrongly refused FAILS; a correct refusal PASSES.
+   FINAL: 55/55, 0 violations. Soft cuisine 1.000 over the 9 cases where
+   a hit was possible (0.60 pooled over all 15 cuisine cases).
+
+D3 MATCH ACCURACY (32 hand-derived cases, threshold 1.0, no API calls).
+   When the matcher reports a score, is the arithmetic right? Scores
+   TWO things separately: the numeric score and the per-ingredient
+   classification (matched / substitutable / partial / missing). A case
+   where the score is right but two ingredients are misclassified FAILS.
+   FINAL: 32/32.
+
+D4 FRESHNESS PRIORITIZATION (15 cases, threshold 0.80).
+   When something is near expiry, does the recommendation use it? FINAL:
+   14/15 (the one failure, d4_13, is the LLM overriding a correct
+   ranking).
+
+D5 PERSONALIZATION (18 cases, threshold 0.80).
+   After seeding a profile, do recommendations align with it? Cuisine
+   learned from ratings, disliked ingredients, protein preference,
+   household size, cook time as a soft default, repetition avoidance,
+   saved dietary restrictions. FINAL: 18/18.
+
+COMBINED FINAL (run_1794032750): 150 cases, 118 model calls, 425,642
+tokens, 680 s. Overall FAIL because D1 fails. Four of five dimensions
+pass.
+
+
+---------------------------------------------------------------------
+3. THE METHODOLOGY (THE PART THAT MAKES IT CREDIBLE)
+---------------------------------------------------------------------
+
+3.1 HAND-DERIVED EXPECTATIONS, NOT GENERATED BY RUNNING THE SYSTEM.
+If you compute the expected answer by running the code under test, the
+test is a tautology: it can only ever confirm the code agrees with
+itself. For D3 I worked every expected classification and score out by
+hand from the real recipe rows, the full synonym and substitution
+tables, and the matcher's documented rules, BEFORE running it. I
+recorded a hash of the case file before the first run, and wrote a test
+that applies the documented formula (not the matcher) to each case's own
+expected buckets to catch my arithmetic slips.
+   Interview line: "A test whose oracle is the implementation can't
+   fail. So I made the oracle independent: hand derivation for the
+   matcher, and a separate literal copy of the ranking weights for the
+   ranking checks."
+
+3.2 SYSTEM FAILURE vs CASE DEFECT.
+Each case states the situation it claims to create. The harness
+independently computes the situation the pantry actually produces. If
+they differ, the case is reported as a CASE DEFECT, never counted as a
+system failure. This caught real mistakes of mine (section 6).
+
+3.3 FAIRNESS: JUDGE AGAINST WHAT WAS POSSIBLE.
+Before judging what the system did, the suite computes what it COULD
+have done: it runs the matcher over all 250 recipes for the case's
+pantry to find the cookable set. An expiring ingredient no cookable
+recipe uses is not a failure. A preferred cuisine nothing cookable
+belongs to is not a failure. A far better recipe beating a marginal one
+that uses the expiring item is CORRECT deprioritization (the freshness
+bonus is 0.15 against 0.60 for ingredient match, so a match advantage
+over 0.25 outweighs it). Only "a cookable option honouring the signal
+existed, and the system neither used it nor was correctly out-scored"
+fails.
+
+3.4 ISOLATION FOR STATEFUL DIMENSIONS.
+D4 and D5 must put the system in an exact state per case (a pantry with
+one item expiring tomorrow; a profile with ten five-star Italian
+ratings). Doing that to the real databases would destroy the seeded demo
+pantry and real history. So each case runs against throwaway SQLite
+files in a temp directory; the three MCP servers are pointed at them via
+a new MCPClientManager(env=...) option. Between cases the files are
+deleted and recreated from the real schema and the row count of every
+table is ASSERTED zero (the reset raises otherwise). Seeded state is read
+back through the servers' own read functions and compared with what the
+case asked for. The real pantry/user/recipe databases are content-hashed
+before and after each dimension and must be unchanged.
+
+3.5 MUTATION TESTING MY OWN TEST CASES.
+Passing is cheap. To check the D3 cases really exercise the paths they
+claim, I mutated the matcher 13 ways (no protected terms, substitute
+weight 1.0, ignore dietary restrictions on substitutes, no critical
+penalty, longer expiry grace, a higher threshold, no specificity
+matching, no synonyms, avoid filter off, can_cook ignoring critical,
+...) and required each mutation to make cases fail. One did not:
+removing the entire protected-term list changed nothing. That exposed a
+weak case (details in section 4.8).
+
+3.6 PRE-REGISTERED THRESHOLDS, NEVER ADJUSTED.
+Thresholds were fixed before the first run of each dimension: 1.0 for D2
+hard and D3, 0.5 for soft cuisine, 0.60 for D1, 0.80 for D4 and D5. I
+did not change any to make a result pass. D1 fails and the document says
+so.
+
+3.7 FULL PROVENANCE ON EVERY SCORECARD.
+Model ids; hashes of the three prompts (vision, reasoning, extraction);
+hashes of lexicons and rule sets in code (diet groups, protein lexicon,
+cuisine families, avoid groups, restriction patterns, matcher
+normalization, thresholds, ranking weights); hashes of reference data
+read at run time (recipe corpus, synonym, substitution, nutrition
+tables); the pantry fixture and a content hash; git commit, dirty flag
+and a diff hash. KNOWN LIMIT: the component hashes cover lexicons,
+prompts and data, not code LOGIC; a change in how match_rank uses a
+lexicon moves only the git diff hash.
+
+3.8 REPORTING DISCIPLINE.
+Every disagreement reported in full with my judgment of which side is
+right. Re-baselines labelled as such. Corrections recorded in the case
+files with the original values kept. Wall-clock reported as measured,
+not retried until fast.
+
+
+---------------------------------------------------------------------
+4. THE CHRONOLOGICAL STORY (INCLUDING EVERYTHING THAT FAILED)
+---------------------------------------------------------------------
+
+STAGE 1: GROUNDWORK (FIXES THAT MADE THE EVALUATION POSSIBLE)
+-----------------------------------------------------------
+Before an evaluation means anything the system under test has to be in a
+known state. Early work in this phase:
+
+* Long-expired pantry items were still being offered to the matcher. An
+  item far past its shelf life is waste, not an ingredient. Fixed: items
+  more than expired_grace_days (2) past shelf life are excluded from
+  matching entirely, through one shared cutoff function used by both the
+  freshness bonus and the matcher so the two can never disagree about
+  whether something is food or waste.
+
+* Pantry freshness decay bug. Re-photographing an item reset its clock
+  in a way that made fresh items look old (or vice versa). Fix:
+  added_date is KEPT on re-sighting; it resets only if the row's age has
+  reached the shelf life AND the photo explicitly observed "fresh". An
+  unobserved default of "fresh" is NOT evidence. I tested a re-
+  photographed item becoming fresh, and wrote a factual verifier that
+  checks the system's explanation claims against the data (0 discrepancies
+  after the fix).
+
+* Seeded a REPRODUCIBLE demo pantry. A script
+  (scripts/reset_demo_pantry.py) rebuilds it from a fixture (test_data/
+  demo_pantry.json): the raw vision output of 6 real photos plus 14
+  hand-added staples (oil, salt, pepper, flour, sugar, common spices; no
+  eggs, rice, pasta or proteins). It makes no API calls, refuses to run if
+  the servers are up, backs up the old database with a checksum, and
+  collapses duplicates. Result: 64 rows; 22 of 250 recipes cookable; mean
+  match 0.195 (before: 4 cookable, mean 0.050). Fixture hash 756090ab287f.
+
+* Protein preference ranking was missing. A user asking for "salmon" or
+  "something with shrimp" got no ranking lift. I diagnosed it BEFORE
+  fixing it and reported the diagnosis. Fix: a shared protein lexicon
+  (fish, shellfish, seafood, poultry, red meat, "meat"), whole-word
+  matching (so "egg" never matches "eggplant"), flavouring words
+  (stock, broth, sauce, paste, oil...) excluded because a vegetable soup
+  with chicken stock is not a chicken dish; a ranking term of 0.15 that
+  applies ONLY to recipes that have the protein AND are cookable, so an
+  uncookable seafood dish can never outrank a cookable chicken one; and
+  an honest explanation ("your pantry has no X") when it cannot be met.
+  A related decoupling fix: fusion used to add a WANTED protein to the
+  pantry as if it were possessed, so "anything with chicken" made every
+  chicken recipe cookable. Removed.
+
+* Restored the spoken-ingredient path properly. The extraction model now
+  distinguishes WANT ("I want salmon") from HAVE ("I have salmon"); only
+  "have" reaches matching, flagged unverified. Measured before keeping:
+  0 wrong of 60 possession probes; extraction accuracy 69/70 text and
+  137/140 voice with 0 polarity inversions.
+
+* Prompt comparison, not guessing. Three vision-prompt variants on the
+  replacement model, photos 1-5, 3 reps, temperature 0: A 0.478 +/- 0.083,
+  B 0.540 +/- 0.052, C 0.536 +/- 0.069. B was kept because no variant
+  measurably beat it. Rule I set in advance: adopt another only if it
+  measurably beats B; no wording iteration.
+
+* Verified the scorers themselves. 48 known-answer fixtures (a dietary
+  violation must fail; a correct refusal must pass; and so on) and 12
+  defects in my own scorers fixed, including: a photo where the model
+  identified nothing used to be silently DROPPED from the mean (now a
+  zero, which can only lower the score); "green onion" matching "onion";
+  a Python 3.11 argparse crash on an empty positional list.
+
+D1 re-baseline: F1 0.485 (precision 0.538, recall 0.443), recorded as
+superseding earlier figures that used a more lenient scorer.
+
+
+STAGE 2: DIMENSION 2, FIRST FULL RUN: 20/30, ZERO VIOLATIONS, TEN REFUSALS
+--------------------------------------------------------------------------
+Result: not a single dietary violation (good), but 10 satisfiable
+requests were wrongly refused (bad). All 10 failures were refusals, not
+violations. I diagnosed before changing anything and found three
+independent causes.
+
+CAUSE A: A PROFILE DEFAULT WAS ENFORCED AS A HARD CAP.
+The profile's preferred_cook_time_minutes (30) is not something the user
+ever set; it is DEFAULT_PROFILE_VALUES. Fusion copied it into the
+request, and search applied it as a SQL filter. Boulangere Potatoes (60
+min) satisfied vegan + gluten-free + dairy-free + nut-free and was
+cookable, and it was excluded by a limit the user never stated.
+   Fix: provenance. UnifiedMealRequest.max_cook_time_is_default.
+   Only a STATED limit filters search; a defaulted one only nudges
+   ranking and is described to the model as "a default, not a limit".
+
+CAUSE B: RELAXATION KEYED ON "EMPTY", NOT ON "NOTHING COOKABLE".
+search_recipes relaxed its filters (meal-type guess, cook time, cuisine)
+only when it found zero recipes. For "Italian vegetarian dinner" it found
+three Italian vegetarian recipes, none cookable from the pantry, so it
+never relaxed, and the reasoning layer refused. To the user, a non-empty
+set of uncookable recipes is the same as no answer.
+   Fix: after searching, probe whether any candidate is actually cookable
+   (and respects avoid lists and restrictions); if not, loosen the meal-
+   type guess then the soft cuisine preference. Dietary restrictions and
+   a user-stated cook time never loosen on that path.
+
+CAUSE C: THREE OF MY OWN EXPECTATIONS WERE WRONG.
+d2_10 ("vegan, gluten-free, nut-free") I had authored as unsatisfiable;
+Boulangere satisfies all three. It had "passed" as a correct refusal for
+the WRONG reason (the 30-minute default excluded it). d2_12 (15 minutes):
+no cookable recipe is under 20 minutes, so the refusal was correct and my
+expectation was wrong. d2_30: the only vegan + dairy-free recipe takes 60
+minutes against a stated 30. I corrected all three in the case file with
+dated notes and kept the original values; the first run's scorecard keeps
+the originals.
+   Honest caveat I carry forever: this makes D2's move from 20/30 to
+   55/55 a post-hoc re-baseline, not a blind result.
+
+Then the nudge. With the hard cap removed, plain requests like "a recipe
+for 4 people" returned a 60-minute recipe for a user whose preference is
+30. I had set the ranking nudge to 0.05 without measuring. I swept 0.0,
+0.05, 0.15, 0.25 over 14 no-time requests with a SELECTION RULE FIXED
+BEFORE RUNNING (smallest weight at which at least 80% of top-ranked
+recipes fall within the preference, with no more than 0.25 match score
+given up and every pick cookable). Two things went wrong and are worth
+telling:
+   (1) BUG IN MY OWN EARLIER CHANGE: the repetition re-score of the top
+       candidates rebuilt the composite WITHOUT the time term, so the
+       nudge silently vanished for exactly the recipes that mattered. The
+       0.05 had never worked as described.
+   (2) BUG IN MY SWEEP SCRIPT: I patched the constant on a name that
+       resolved to the FUNCTION (the package re-exports the function
+       under the module's name), not the module, so the weight never
+       changed. My first sweep showed "no weight changes anything", which
+       was my harness, not the system. I added an assertion that the
+       patched value is the one in effect.
+   Result after fixing both: top-ranked recipe within preference 0/14 at
+   0.0, 1/14 at 0.05, 13/14 at 0.15, 13/14 at 0.25. Chosen: 0.15
+   (smallest that meets the rule; 0.25 adds nothing; equals the cuisine
+   and protein weights).
+   A discovery that mattered: the weight controls RANKING, not the final
+   recommendation. The reasoning LLM made the final pick and followed the
+   ranking only partly (final pick within preference ~50-57%). I tried
+   adding soft cook-time wording to the reasoning prompt (15/28 over two
+   reps, no gain) and REVERTED it, because a change with no measured
+   benefit should not ship. Making the default govern the final pick
+   would mean choosing in code and using the model only to explain: an
+   architecture decision I flagged, not made.
+
+
+STAGE 3: THE EXTRACTION-INSTABILITY SAFETY INVESTIGATION
+--------------------------------------------------------
+Observation: for "vegan, gluten-free, and nut-free", one run extracted
+all three restrictions and another extracted only two, at temperature 0.
+A silently dropped dietary restriction is a safety failure (a nut allergy
+sufferer served a nut dish). D2 only caught it because my hand-authored
+constraints were unioned in, meaning the eval would have passed while the
+system was unsafe.
+
+I QUANTIFIED BEFORE FIXING: every dietary phrasing in the D2 cases, 10
+repetitions each at temperature 0. Nut-free appeared in
+dietary_restrictions 0/10 (nut allergy phrasing), 0/10 (vegan, no nuts),
+3/10 (vegan, gluten-free, nut-free) and 10/10 (same sentence plus "ready
+in 10 minutes"). Every other restriction was 10/10 in every case.
+   Cause: NOT omission. The model filed "nut-free" under
+   avoid_ingredients as ["nut"] instead of dietary_restrictions. My own
+   extraction prompt told it that "a named allergen or category of food"
+   belongs in avoid_ingredients, so both fields were legitimate. It
+   correlated with phrasing ("allergy" shifted it 100% of the time), not
+   with the number or position of restrictions (the two three-restriction
+   sentences differed only by a trailing time clause and scored 3/10 vs
+   10/10).
+
+AND THEN THE WORSE DISCOVERY UNDERNEATH IT: nothing in the single-
+recommendation pipeline ENFORCED avoid_ingredients. They reached the
+reasoning prompt as text. The multi-day planner matched exact normalized
+names only, so "nut" never connected to "almonds". So a nut allergy that
+the model put in the "wrong" field excluded nothing in code. D2 had
+passed because the model happened to pick clean recipes.
+
+TWO-LAYER FIX that does not depend on the model choosing a field:
+   (1) mealsight/matching/avoid.py: code-level exclusion of recipes
+       containing an avoided ingredient or named as an avoided dish.
+       Whole-word matching (nut != coconut, egg != eggplant) with
+       allergen groups (nut, shellfish, seafood, dairy) and the
+       cilantro/coriander pair. Wired into match_rank and the planner.
+   (2) mealsight/perception/restrictions.py: a deterministic detector
+       that reads the user's OWN WORDS with fixed patterns and unions
+       the result with the model's, so a stated restriction cannot be
+       lost to the model's field choice. It stands down on
+       self-correction cues ("oh wait", "actually") so it cannot re-add
+       a restriction the speaker just retracted.
+   After the fix nut-free was present 10/10 in every case, and
+   extraction accuracy did not regress (69/70 text, 137/140 voice,
+   0 polarity inversions).
+   The guarantee, stated plainly: a restriction in the covered
+   vocabulary stated in the covered phrasings can no longer be lost to
+   the model's field choice. A paraphrase outside the patterns still
+   depends on the model (and is additionally caught by the avoid
+   filter). I wrote the limits down rather than overclaiming.
+
+
+STAGE 4: CUISINE CASES AND THE "INDIAN VS INDIA" LABEL BUG
+-----------------------------------------------------------
+The soft cuisine score rested on TWO cases (one hit of two = 0.5), which
+is not a measurement. I added 10 cuisine cases (6 attainable with this
+pantry, 4 not) labelled BEFORE running, so both the hit path and the
+honest-miss path were exercised. Result: headline 0.857 (6 of 7). But
+one "miss" and one "hit" were both wrong in an informative way:
+   d2_31 ("Indian food tonight"): the system recommended a tomato soup
+   and told the user "None of the candidates is Indian cuisine, so that
+   request could not be met" while Chicken Handi
+   (cuisine "India") was cookable. A confident claim contradicted by the
+   system's own data.
+   d2_33 ("French food"): a "hit", but by luck. The corpus labels are
+   "France" and "India" (country names) mixed with "Italian", "Jamaican"
+   (demonyms). Search matched cuisine by exact string, so "French" and
+   "Indian" matched NOTHING, cuisine was dropped, and the pick happened to
+   be a France recipe. The true attainable rate was 5/7 = 0.714, not
+   0.857.
+   Fix: ONE shared place (mealsight/matching/cuisine.py) with a family
+   for each of the 24 corpus labels (label, country, demonym, variants),
+   matched case-insensitively in both directions, used by search, the
+   soft scorer and every reasoning fact. Built from the real label list
+   (the corpus's distinct cuisine values with counts), with a real-corpus
+   test that fails if a seeded label has no family. Three more cases
+   (American, Dutch, "from Ireland") for the name forms still untested.
+   Result: soft cuisine 1.0 over 9 attainable cases.
+   The false-claim guard: the "none of the candidates is X" sentence now
+   fires only when no shortlisted candidate matches X by family.
+
+
+STAGE 5: THE TWELVE DEAD FILTERS (A SAFETY-RELEVANT DESIGN BUG)
+----------------------------------------------------------------
+Audit prompted by the cuisine bug: where else does exact-string matching
+silently match nothing? I compared the extraction vocabulary (17
+restrictions) to the tags the corpus actually carries (5: vegetarian,
+vegan, dairy_free, gluten_free, nut_free). TWELVE restrictions had zero
+corpus tags (pescatarian, peanut-free, shellfish-free, soy-free, egg-
+free, low-sodium, low-carb, low-fat, keto, paleo, halal, kosher), and
+search applied EVERY restriction as a hard tag filter. So a request
+carrying any of those got zero recipes and a REFUSAL, not protection. A
+voice memo in my own extraction corpus says "nothing with peanuts, my
+daughter's allergic" and the pipeline refused it.
+   Fix: mealsight/matching/diet.py is the ONE place that classifies every
+   restriction into exactly one of four groups: tag-backed (5, still tag
+   filters), ingredient-enforced (peanut-free, shellfish-free, soy-free,
+   egg-free, pescatarian, halal, kosher, checked against ingredient lists
+   with the avoid matcher and the protein lexicon), or unenforced
+   (low-sodium, low-fat, low-carb, keto, paleo, disclosed to the user as
+   "NOT ENFORCED", never silently ignored). An import-time assertion
+   fails the application if the extraction vocabulary and these groups
+   ever differ, so a restriction added later can never quietly become a
+   dead filter again.
+   DECISIONS I made and can defend:
+   * halal and kosher are PARTIAL: pork, alcohol (halal) and pork,
+     shellfish, meat-mixed-with-dairy (kosher) are excluded; the answer
+     says slaughter/certification cannot be verified from a recipe. I did
+     not claim certification.
+   * The nutritional restrictions were DECLINED, not filtered. I measured
+     first: calculate_nutrition has over 80% ingredient coverage for 189
+     of 250 recipes, but the figures come from rough unit-to-gram
+     conversions and are wrong even there: a baked-potato dish (Kumpir)
+     estimated at 13 g carbs per serving and tagged low_carb; a tomato
+     soup at 241 g; sodium from 6 to 33,192 mg per serving; median fat
+     60 g per serving. A filter on that returns confidently wrong
+     recipes. I had implemented a post-ranking filter FIRST, looked at
+     the data, and REMOVED it. The honest behaviour is a recommendation
+     plus an explicit "NOT ENFORCED: low-carb" statement.
+   * keto: its D2 case was a correct refusal (d2_06) under the dead
+     filter; under the new design it is a recommendation that MUST
+     disclose non-enforcement. The scorer fails the case if the
+     disclosure is missing. Recorded as a correction caused by a design
+     change, not chosen to improve a result.
+   Result: 12 new cases, all labelled against the cookable list before
+   running, including cases where a cookable violating recipe exists so
+   the exclusion is genuinely exercised (soy, egg, pescatarian: 13
+   cookable violators), not passing by absence. D2: 55/55.
+
+Side tasks in this stage: made GET /api/recipes/search use the same groups
+(it still had the dead-filter bug, and its list query parameter was a
+latent FastAPI bug: an optional list without Query() is read as a request
+BODY on a GET). Audited formatting churn from over-broad `ruff format`
+runs: 48 files were AST-identical to HEAD (formatting only), 10 mixed
+real changes with formatting, and I PROVED the formatter changed no
+semantics by showing ruff's reformat of each HEAD file left its syntax
+tree unchanged. Confirmed prompt hashes unchanged.
+
+
+STAGE 6: DIMENSION 3 (MATCH ACCURACY)
+-------------------------------------
+Built 30 cases (later 32) from real recipes with small ingredient lists,
+expected values derived by hand, as in 3.1. Result of the first run:
+27/30, three disagreements, and the interesting thing is who was right.
+
+* d3_13 and d3_19: MY ERROR. I wrote the matched name as "chicken stock"
+  and the matcher produced "chicken stock cube". I had assumed "cube" is
+  a stripped container word; it is not in the list. The score was right,
+  the label was mine. I corrected the expectations with notes and kept
+  the first-run result on record.
+
+* d3_28: A REAL MATCHER DEFECT. "Garlic Clove" with garlic in the pantry
+  was reported MISSING, because "clove" is not a container, prep or
+  cut/variety word and there was no synonym. 25 of 250 recipes (10%) list
+  "Garlic Clove". Fix: a synonym, NOT stripping "clove" (which would
+  break the spice "cloves"). I then audited all 495 distinct normalized
+  ingredient names for the same shape (a quantity or form word fused into
+  the name). Made synonyms: garlic clove, basil leaf, tarragon leaf,
+  fennel bulb, mozzarella ball, chicken/vegetable stock cube. Deliberately
+  NOT collapsed (genuinely different): bay leaf, cinnamon stick, lemon
+  juice/zest, orange zest, gelatine leaf. Pinned both lists with tests.
+
+* The "untested gap" I had spotted: recipe "chicken stock cube" vs
+  pantry "chicken stock". I added two cases (both directions) BEFORE
+  fixing. Result: both wrong; one meant a pantry holding stock cubes could
+  not cook a recipe whose critical ingredient is chicken stock
+  (can_cook=false). Fixed via the synonyms above.
+
+* The mutation-test result (section 3.5): removing PROTECTED_TERMS changed
+  nothing. Analysis: the other layers (the cut/variety rule and the
+  synonym table) already guard "sweet potato vs potato" and "cream vs
+  cream cheese". The only protected term whose protection can change an
+  outcome is "hot sauce" (because "hot" is stripped as a prep word). I
+  replaced the weakest case with a real-recipe case (Kapsalon) that FAILS
+  when protection is removed, and documented the swap in the case file. I
+  also stated that the cream-cheese case stays insensitive even then,
+  because "cream" resolves to heavy cream by synonym.
+
+* THE FOURTH "CORRECT CODE NEVER CALLED CORRECTLY" INSTANCE. While
+  deriving the substitution-rejection case I noticed match_rank called
+  the matcher without the user's dietary restrictions, so the matcher's
+  dietary rejection of substitutes never ran in production. A dairy-free
+  user with Greek yogurt in the pantry was offered it as a mayonnaise
+  substitute. I AUDITED EVERY matcher call site (match_rank, the search
+  viability probe, the meal planner, the MCP tool, the cook endpoint, the
+  public API, search pre-ranking) rather than patching one. Passing the
+  restrictions blindly would have made it WORSE: the matcher compared
+  restrictions against tags, so "peanut-free" (no tag) would have rejected
+  every substitute. I extended the matcher so tag-backed restrictions use
+  tags, ingredient-enforced ones use the ingredient rules, and
+  unverifiable ones never veto a substitute; avoid lists also block
+  substitutes. Verified with a real request (before: Greek yogurt offered;
+  after: not offered; control with no restriction: still offered).
+  D3: 32/32.
+
+
+STAGE 7: DIMENSIONS 4 AND 5, AND THE ISOLATION LAYER
+-----------------------------------------------------
+Needed: exact pantry and profile states per case without touching real
+data (section 3.4). I added an env option to the MCP client manager,
+built the IsolatedWorld harness, and smoke-tested it end to end (reset
+counts all zero, seeded state read back, pipeline sees the isolated
+state, real DB fingerprints unchanged) before building cases on it.
+
+D4 DESIGN. 15 cases covering a single expiring item, many users of an
+item, two expiring items, an item no recipe uses, a long-expired item
+(waste, not an opportunity), the grace boundary (-2 usable, -3 waste),
+the threshold edge (3 days counts, 4 does not), an expiring item whose
+only recipe is uncookable, a specificity case (expiring "chicken thigh"
+vs recipe "chicken"), and two "justified deprioritization" cases built by
+searching for an expiring item used only by a marginal recipe (cabbage,
+lemon). Verdicts: no_opportunity / used / justified_deprioritization /
+failed_to_prioritize.
+
+D4 RESULTS AND WHAT IT TAUGHT:
+   * First run 12/15. One was MY bug: asking for butter to expire left it
+     fresh because butter is also a staple in my helper. The case-defect
+     check caught it ("designed as must_prioritize but the pantry produces
+     no_opportunity"). Fixed the helper, added a regression test.
+   * Real failures (d4_06, d4_09, later d4_13): I diagnosed by printing
+     the system's OWN ranking. match_rank ranked the expiring-item recipe
+     FIRST with a composite equal to my hand value to the digit (0.705,
+     0.552, 0.775). Then the reasoning LLM overrode it, choosing Kumpir
+     "for its cook time" or Pancakes as "the best available match". So:
+     the deterministic ranking was right; the LLM stage overrode it. This
+     is a recurring theme.
+   * One real MECHANISM bug that did not change an outcome: the
+     freshness flag compared the RAW pantry name to the RECIPE's canonical
+     name, so an expiring "chicken thigh" used by a recipe line "chicken"
+     earned no bonus. Flag accuracy 54/55 until fixed.
+
+D5 DESIGN. Pairs of recipes that TIE EXACTLY under default scoring
+(both 1.0 matches, same cook-time class, neutral cuisine), so only the
+profile can break the tie, and the SAME pair run with OPPOSITE profiles
+(Italian loved vs Japanese loved) so a system that ignores the profile
+cannot pass both by luck. For dislikes, the disliked ingredient sits in
+the recipe default scoring would pick. Cuisine preferences are seeded
+through the real learning path (log meals with ratings), 10 ratings per
+cuisine (a confident preference; scores 0.885 and 0.115 under the
+shrink-toward-neutral prior of 3), and a 1-rating control.
+
+D5 RESULTS: first run 9/15, corrected harness 11/15, FAIL against 0.80.
+   * d5_01, d5_03 (cuisine): learned cuisine preference had NO effect.
+     Root cause confirmed directly: _cuisine_score looked up the
+     lower-cased cuisine, but profile keys keep the capitalization the
+     meal was logged with ("Italian"). I demonstrated it in one line:
+     {'Italian': 0.885} scores 0.5; {'italian': 0.885} scores 0.885. The
+     product logs the corpus label with its capital, so cuisine learning
+     had NEVER worked outside tests.
+   * d5_07 (protein): the profile's protein_preference was neither merged
+     into the request nor shown to the model, so the protein ranking term
+     (added in stage 1) worked for a stated protein and was unreachable
+     from the profile.
+   * d5_06 (dislike): stored dislikes were enforced only by the model
+     reading one prompt line. d5_04 and d5_05 passed, d5_06 did not.
+     That is precisely "obeys it sometimes".
+   * Two passes were LUCK (d5_02, d5_08): the system's own ranking tied
+     and they happened to be ordered right. Their opposite-profile
+     partners failed, which is exactly what the paired design is for. I
+     added a metric (passed_without_scoring_support) so lucky passes are
+     visible.
+   * The finding I rate most important: a PROBE (unscored) with a saved
+     profile restriction "vegetarian" recommended a salmon dish. Fusion
+     read only servings and cook time from the profile. A saved nut
+     allergy would have been dropped identically.
+
+D5 FIXES (after auditing EVERY profile field, not patching one):
+   * Saved dietary_restrictions: unioned with the request in fusion so a
+     saved restriction takes the identical path as a stated one (tag
+     filters, ingredient rules, substitutes, explanation), in the
+     recommendation pipeline AND the multi-day planner. An unrecognized
+     saved phrase is kept and disclosed, never dropped.
+   * Saved dislikes: enforced in code in match_rank. DECISION: a dislike
+     is weaker than an allergy. A recipe containing one is left out only
+     while at least one other cookable option remains; if every cookable
+     option contains it, they are kept, flagged and disclosed rather than
+     recommending nothing. Why not a ranking penalty alone: the evaluation
+     had just shown the LLM picks from the list without reliably
+     following the ranking, so a penalty would not hold. Why not a hard
+     exclusion: it could leave the user with nothing.
+   * Cuisine: fixed at the BOUNDARY, not with one .lower(): scores are
+     keyed by canonical cuisine label where they are WRITTEN (scoring) and
+     READ (profile), and every consumer looks up by cuisine FAMILY.
+     Migration: none needed. Legacy rows are re-keyed on read and merged
+     as a data-point-weighted mean, and the scoring step rewrites the
+     whole cuisine dimension from meal history on every rating; the real
+     database held one row already in canonical form.
+   * Protein preference: merged as a default a stated protein overrides,
+     through the same path as the restrictions.
+   * Freshness flag: compare canonical forms and honour specificity.
+   * Added d5_16 (saved vegetarian), d5_17 (saved peanut-free,
+     ingredient-enforced), d5_18 (a dislike with no alternative must
+     still be recommended, not refused). The original 15 are untouched
+     and the addition is recorded in the case file.
+   RESULTS: D5 18/18 with the system's own ranking matching my hand
+   ranking 14/14 (no lucky passes). D4 14/15 on three consecutive runs
+   (previously it varied 12-14 because of model nondeterminism).
+
+A FALSE ALARM IN MY OWN INTEGRITY CHECK (good story). One D5 scorecard
+said real_data_untouched=false and FAIL despite 18/18. I did not wave it
+away. The real pantry's row-level content hash was identical to the
+seeded fixture's; only the FILE BYTES had changed, because I had run the
+full test suite while the evaluation was in progress and opening a SQLite
+database in WAL mode checkpoints the file without changing a row. My byte
+hash was too fragile. I changed the check to a hash of every table's
+rows and added a test that proves it ignores a checkpoint but catches a
+real row change. I also corrected a diagnostic metric twice (it wrongly
+flagged exclusion-type cases because I compared against a ranking that
+included the excluded recipes).
+
+
+STAGE 8: THE FINAL COMBINED RUN
+-------------------------------
+One pass of all five dimensions (run_1794032750): D1 0.488 FAIL, D2
+1.000, D3 1.000, D4 0.933, D5 1.000. OVERALL FAIL, by design: I did not
+adjust a threshold. I explained which scores moved since the previous
+combined run and why (D5 0.733 -> 1.000 because four failures were fixed
+in code and three cases added; D1 0.489 -> 0.488 is model noise; D4's
+score is unchanged but flag accuracy rose 98.2% -> 100%). The provenance
+hashes were IDENTICAL to the previous run, which is correct and which I
+reported plainly because the hashes do not cover code logic. Wall-clock
+reported as measured (680 s; the previous run took 999 s; latency on the
+free tier is a real operating characteristic).
+
+Why D1 fails (verified in the repo's own findings document): the original
+vision model, mistral-medium-2505 (F1 0.64, the basis for the 0.60
+threshold), was retired by Mistral and every medium-and-above model
+returns 0 requests/minute on this account's free plan. The best reachable
+replacement is ministral-8b-2512. Two scorer corrections made since the
+0.64 figure can only lower a score, so 0.64 vs 0.49 is not like-for-like.
+The prompt comparison showed the gap is the model tier, not the wording.
+
+
+---------------------------------------------------------------------
+5. THE BUG CATALOGUE (WHAT THE SUITE FOUND)
+---------------------------------------------------------------------
+Common thread: in nearly every case the individual functions were
+correct and unit-tested. The defect was in the SEAMS: data not passed,
+passed in the wrong form, or never wired. Unit tests of a function cannot
+see a missing call.
+
+ #  BUG                                                    FOUND BY / HOW
+ 1  avoid_ingredients/avoid_dishes unenforced in the       D2 investigation of
+    single-request pipeline (prompt text only)              extraction instability
+ 2  match_rank discarded dietary restrictions; the          D3 case design
+    matcher's substitute rejection never ran
+ 3  12 of 17 restrictions had no corpus tag, applied        D2 audit after the
+    as hard tag filters => zero results and refusals        cuisine bug
+ 4  Profile dietary restrictions ignored entirely           D5 probe
+    (saved nut allergy would be dropped)
+ 5  Cuisine learning dead in production (case-sensitive     D5
+    key lookup)
+ 6  Nutrition ~4x too high (per-serving values were not     evaluation work
+    scaled to the requested servings)                       (confirmed in the diff)
+ 7  "Garlic clove" did not match garlic (10% of recipes)    D3
+ 8  Stock cube did not match stock (critical ingredient     D3 gap case
+    => can_cook false)
+ 9  Profile default cook time (30 min, never user-set)      D2 first run
+    enforced as a hard filter
+10  Search relaxed only on EMPTY results, not on            D2 first run
+    "nothing cookable"
+11  "Indian"/"French" never matched corpus labels           D2 cuisine cases
+    "India"/"France"; false "no Indian recipe" claim
+12  Extraction filed nut-free under avoid_ingredients       D2 repeated runs
+    (nondeterministically)
+13  Time-fit nudge dropped by the repetition re-score       D2 nudge sweep
+    for exactly the top candidates
+14  Stored dislikes enforced only by an LLM reading         D5
+    one prompt line
+15  Stored protein preference unreachable from profile      D5
+16  Freshness bonus missed specificity matches              D4
+17  (Earlier phases) pantry freshness decay on re-sighting; long-expired items
+    offered to the matcher; protein ranking gap; wanted protein treated as
+    possessed ("phantom ingredient")
+18  A latent FastAPI bug: optional list param without       D3-era API fix
+    Query() read as a body on a GET
+ +  12 defects in the evaluation scorers themselves, found while
+    verifying them with known-answer fixtures
+
+Not fixed, deliberately documented: the reasoning step overriding a
+correct freshness ranking (d4_13); cooking_skill / budget_sensitivity
+have no code effect; nutritional restrictions disclosed, not enforced.
+
+
+---------------------------------------------------------------------
+6. MY OWN MISTAKES (TELL THESE HONESTLY, THEY BUILD TRUST)
+---------------------------------------------------------------------
+An interviewer who hears only successes is suspicious. These are real,
+and each one was caught by a mechanism I had built, which is the point.
+
+1. Wrong expectations authored in D2 (d2_10, d2_12, d2_30). Caught by
+   examining the cookable list. Lesson: verify an authored "this should
+   be refused" against the data, and a case that passes for the wrong
+   reason is the most dangerous kind.
+2. A case-construction bug (butter is a staple, so "expiring butter" was
+   fresh). Caught by the case-defect check. Lesson: the harness must
+   validate its own cases.
+3. The nudge weight: I picked 0.05 unmeasured; it was also silently
+   disabled for the top candidates by my own re-score code; and my first
+   sweep patched the wrong object so it reported "no effect". Lesson:
+   assert that the thing you changed is the thing in effect; pre-register
+   the selection rule.
+4. D3: I mis-derived two expected labels ("cube" is not a container
+   word). Lesson: hand derivation can be wrong too; keep the first-run
+   result on record and annotate corrections.
+5. D3 test quality: the first protected-term cases could not fail. Found
+   only because I mutation-tested my own tests.
+6. A byte-level database fingerprint produced a false alarm. Lesson:
+   choose the invariant that actually means "untouched" (rows, not bytes).
+7. A diagnostic metric flagged the wrong cases (twice).
+8. Tooling slips: a helper function called with the wrong number of
+   arguments silently skipped an edit and I started a run without the
+   notes I intended; a stray `cat` waiting on stdin hung a command; an
+   over-broad `ruff format` produced 48 formatting-only file changes
+   which I then audited and proved semantically empty; an over-broad
+   process-kill pattern was (rightly) blocked, so I killed by PID.
+   Lesson: scope shell commands tightly; verify an edit actually applied.
+9. A new test hung because it did not close its database connection (its
+   neighbours did).
+
+
+---------------------------------------------------------------------
+7. THE PRINCIPLES (WHAT I CAN GENERALIZE)
+---------------------------------------------------------------------
+1. MEASURE BEFORE YOU FIX. Diagnose and report first; change after. I
+   quantified the extraction drop rate (10 reps x every phrasing) before
+   touching the prompt, swept the nudge weight before choosing it, and
+   measured nutrition across all 250 recipes before deciding not to
+   filter on it.
+2. AN ORACLE MUST BE INDEPENDENT OF WHAT IT TESTS. Hand-derived values;
+   a separate literal copy of the ranking weights; the scorer's own copy
+   of the restriction term lists (so it checks production, not mirrors
+   it).
+3. SEPARATE "SYSTEM WRONG" FROM "TEST WRONG". Case-defect checks;
+   first-run results kept alongside corrections.
+4. JUDGE AGAINST WHAT WAS POSSIBLE. Compute the cookable set first.
+5. TEST YOUR TESTS. Mutation testing; known-answer scorer fixtures;
+   a test that the integrity check itself ignores noise and catches real
+   change.
+6. FIND THE SEAM, NOT THE FUNCTION. Four times the right code was never
+   called correctly. When it happened, I AUDITED every call site and
+   every profile field instead of patching one.
+7. PRE-REGISTER AND NEVER MOVE A THRESHOLD. A suite that adjusts its bar
+   to pass is not a suite.
+8. DISCLOSE WHAT YOU CANNOT ENFORCE. Nutritional restrictions are
+   declined with an explicit statement. The system must never imply a
+   restriction is satisfied when it cannot verify it.
+9. FIX AT THE BOUNDARY. Cuisine keys canonicalized where they are stored
+   and read, via shared families, not a .lower() at one call site.
+10. PROVENANCE OR IT DIDN'T HAPPEN. Every scorecard is traceable; I also
+    wrote down where provenance falls short (logic is not hashed).
+11. HONEST FRAMING OF NONDETERMINISM. The final pick is an LLM choice;
+    I ran D4 three times and reported the spread, distinguished
+    outcome-pass from scoring-supported-pass, and did not retry until a
+    run looked good.
+
+
+---------------------------------------------------------------------
+8. NUMBERS CHEAT SHEET
+---------------------------------------------------------------------
+Suite: 5 dimensions, 150 cases (30 photos, 55, 32, 15, 18). 118 model
+calls, ~426k tokens, ~11 minutes per full pass. Tests: 786 at the start
+of this work to 936 at the end (all passing; ruff clean; mypy --strict
+clean over 153 files).
+
+Corpus: 250 recipes; 24 cuisines; 22 cookable from the seeded pantry
+(64 rows, fixture 756090ab287f).
+
+D1: F1 0.64 (retired model, lenient scorer) -> 0.485/0.492/0.489/0.488
+    (replacement model, corrected scorer); threshold 0.60; FAIL.
+    Prompt comparison A 0.478, B 0.540, C 0.536.
+D2: run history 20/30 -> 30/30 -> 40/40 -> 43/43 -> 55/55; 0 hard
+    violations in every run; soft cuisine 0.5 (2 cases) -> 0.857 (with a
+    lucky hit) -> 1.0 over 9 attainable cases.
+D3: 27/30 first run -> 29/30 -> 32/32. 13 mutations used to test the
+    cases.
+D4: 12/15 (one case defect) -> 13/15 -> 14/15 x3. Threshold 0.80.
+D5: 9/15 -> 11/15 (harness fix) -> 18/18. Threshold 0.80.
+Extraction stability: nut-free present in dietary_restrictions 0/10,
+    0/10, 3/10, 10/10 in the four phrasings before the fix; 10/10 after.
+Nudge weight: 0/14, 1/14, 13/14, 13/14 top-ranked within preference at
+    0.0, 0.05, 0.15, 0.25; chosen 0.15.
+Dead filters: 12 of 17 restrictions had no corpus tag.
+Nutrition reliability: coverage >80% for 189/250 recipes, yet Kumpir
+    (baked potato) = 13 g carbs, tomato soup = 241 g, sodium 6-33,192 mg.
+Garlic clove: 25 of 250 recipes (10%).
+Formatting audit: 89 tracked files differ from HEAD; 48 formatting-only
+    (AST-identical), 10 mixed, 31 real-only.
+D5 cuisine scores: 10 five-star ratings -> 0.885; 10 one-star -> 0.115;
+    1 five-star -> 0.625 (prior weight 3).
+
+
+---------------------------------------------------------------------
+9. LIKELY INTERVIEW QUESTIONS AND HOW I WOULD ANSWER
+---------------------------------------------------------------------
+
+Q1. "Tell me about a technically hard problem you solved."
+A. The safety-relevant one: a saved dietary restriction was stored
+   correctly and never applied. I found it with an unscored probe after
+   my personalization suite flagged that cuisine and protein profile
+   signals did nothing. The fix was not one line: I audited every field
+   on the profile and every consumer, found four profile fields not
+   reaching the pipeline, and fixed them at the seam (fusion unions saved
+   restrictions with the request so they take the identical path as
+   stated ones). I added scored cases and verified with a real request
+   that a saved vegetarian now yields a vegetarian recommendation.
+
+Q2. "How do you test an LLM-based system?"
+A. Separate the deterministic layers from the model and test each with
+   the right tool. Deterministic code (matching, ranking, filtering) gets
+   hand-derived known-answer tests with independent oracles and mutation
+   testing. The model's behaviour gets scenario evaluations judged against
+   what was possible, with nondeterminism handled by repeats and by
+   reporting spread, not a single lucky run. And I record whether a pass
+   came from the scoring or from the model's luck.
+
+Q3. "How did you keep your tests from being tautological?"
+A. I derived expected values by hand before running anything, recorded a
+   hash of the case file prior to the first run, and kept a separate
+   literal copy of the ranking weights for the ranking checks. For D3 I
+   also wrote a test that applies the documented formula to each case's
+   own expected buckets to catch my arithmetic.
+
+Q4. "Describe a time you were wrong."
+A. Several, in section 6. The best one: I chose a ranking weight of 0.05
+   without measuring, it turned out to be silently disabled for the top
+   candidates by my own re-score code, and my first sweep showed 'no
+   effect' because it patched the wrong object. I fixed both, asserted
+   the patched value was in effect, and chose the weight by a rule I had
+   fixed before running.
+
+Q5. "How do you handle nondeterminism?"
+A. I measure it. Extraction at temperature 0 still varied: I ran every
+   phrasing 10 times to quantify it and found the model moved a
+   restriction between fields. I then made safety not depend on that
+   choice (code-level enforcement plus a deterministic detector). For
+   the final recommendation I ran D4 three times, reported the spread,
+   and added a metric that distinguishes outcome passes from
+   scoring-supported passes.
+
+Q6. "Why did you not lower the Dimension 1 threshold?"
+A. Because the cause is a model-availability problem, not a code
+   regression, and a threshold exists to say what 'good enough' means. If
+   I move it to fit the model I convert a failing result into a passing
+   one without improving anything. The document explains the cause
+   (retired model, free-plan limits) and the dimension stays red until a
+   stronger vision model is reachable.
+
+Q7. "How did you make sure the evaluation didn't corrupt real data?"
+A. Isolated databases for the stateful dimensions, a reset that asserts
+   zero rows in every table, read-back verification of seeded state, and
+   content fingerprints of the real databases before and after. When that
+   check false-alarmed on a WAL checkpoint, I changed it to hash rows
+   instead of bytes and tested that it ignores checkpoints but catches a
+   real change.
+
+Q8. "What was the most valuable bug the suite found, and why wasn't it
+    caught by unit tests?"
+A. Saved restrictions ignored (safety), or cuisine learning dead
+   (silent). Both had passing unit tests because the units were right;
+   the defect was at the seam: fusion read two fields from the profile,
+   and the scoring code looked up a lower-cased key against capitalized
+   keys. Unit tests exercise a function with inputs the author thought
+   of; an end-to-end scenario with a seeded profile exposes the wiring.
+
+Q9. "Safety-critical behaviour: how did you handle it?"
+A. Hard constraints are binary with a threshold of 1.0. A restriction
+   is enforced in code at several layers (tag filter, ingredient rules,
+   substitute rejection, the explanation), and anything I cannot enforce
+   is disclosed explicitly as NOT ENFORCED rather than implied to be met.
+   I declined to filter on nutrition after measuring that its estimates
+   were unreliable, and described halal/kosher as partial.
+
+Q10. "A trade-off you made."
+A. Dislike strength. Hard exclusion could leave nothing cookable; a
+   ranking penalty would not hold because the LLM does not reliably
+   follow the ranking. I chose: exclude while another cookable option
+   remains, otherwise keep, flag and disclose. It is testable (d5_18
+   checks the fallback) and does not depend on the model noticing a line.
+
+Q11. "How did you decide what counts as a failure when the system can't
+    do the thing?"
+A. By computing what was possible first. An expiring ingredient no
+   cookable recipe uses is not a failure; a better-matching recipe
+   correctly beating a marginal one is not a failure. Only failing to
+   use an available, better-or-equal option counts.
+
+Q12. "What would you do differently?"
+A. Hash the code logic, not just lexicons and prompts, so provenance
+   explains behavioural changes. Build a richer pantry fixture (only 22
+   of 250 recipes are cookable, so many passes are statements about this
+   pantry). Decide how much the final LLM choice may depart from the
+   ranking (d4_13). Add scored cases for the meal planner. And I would
+   have measured the nudge weight and the extraction behaviour before
+   shipping the first version, not after.
+
+Q13. "How do you know your fix didn't break anything?"
+A. Full test suite each time (786 -> 936 tests), the dimension re-runs
+   compared per case with the previous run (for D3: fixed d3_28, two
+   new passes, zero regressions), and extraction accuracy re-measured
+   after the extraction changes (69/70 and 137/140 unchanged).
+
+Q14. "Tell me about a design decision at a system boundary."
+A. Cuisine keys. I could have added .lower() at the one broken call site.
+   Instead I canonicalized the key where scores are written and read,
+   used shared cuisine families, and confirmed no data migration was
+   needed (legacy rows are re-keyed on read and the scorer rebuilds the
+   dimension from history on every rating).
+
+Q15. "How do you communicate bad news?"
+A. Plainly and with evidence. The final scorecard says FAIL, the first
+   line of the standing document names the failing dimension and its
+   cause, and the caveats section lists that D2 was re-baselined
+   post hoc, that the pantry is thin, and that the vision benchmark used
+   a different prompt format from production.
+
+
+---------------------------------------------------------------------
+10. WHAT NOT TO OVERCLAIM
+---------------------------------------------------------------------
+* D2's move from 20/30 to 55/55 is a post-hoc re-baseline after wrong
+  expectations were corrected and cases and pipeline changes were made;
+  it is not a blind result. Say so before they ask.
+* The pantry fixture makes only 22 of 250 recipes cookable, so passes are
+  about this pantry.
+* D4 is not fully fixed: the reasoning stage still overrides a correct
+  freshness ranking (d4_13), identically every run.
+* Some D3 expectations rest on intent, not documented rules (garlic
+  clove, stock cube); they are labelled and reported separately.
+* Provenance hashes do not cover logic changes.
+* The vision benchmark prompt format differs from production's JSON
+  variant; D1's headline measures a near neighbour of what ships.
+* Small samples: 15-55 cases per dimension; one case moves D4 by 0.067.
+* The suite tested one model on the free plan; nothing here speaks to a
+  larger model.
+* The nutrition "4x" bug: I confirmed the mechanism from the code change
+  (per-serving values were not scaled to the requested servings); do not
+  claim which dimension found it unless I can show it.
+* "About sixteen bugs" is the count of distinct defects in the catalogue
+  above (items 1-16, plus 17-18 and the scorer defects); be ready to show
+  the list.
+
+STACK TO NAME-DROP ACCURATELY: Python 3.11, LangGraph, FastMCP (stdio MCP
+servers), FastAPI, SQLite (aiosqlite, WAL), pydantic, Mistral
+(ministral-8b-2512), ruff, mypy --strict, pytest. Evaluation artifacts:
+backend/eval/{dimension1..5,analysis,isolation,provenance,cases*}.py,
+docs/EVALUATION.md, backend/eval/README.md, backend/eval/results/.

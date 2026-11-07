@@ -166,8 +166,7 @@ def build_schedule(
         pool = [
             c
             for c in pool
-            if c.protein_type is None
-            or protein_counts.get(c.protein_type, 0) < max_same_protein_per_week
+            if c.protein_type is None or protein_counts.get(c.protein_type, 0) < max_same_protein_per_week
         ]
 
         cuisine_repeat_forced = False

@@ -60,9 +60,7 @@ async def test_empty_cooking_patterns_returns_sensible_note(user_db: Database) -
 
 
 async def test_cooking_patterns_populated_by_log_meal(user_db: Database, recipe_db: Database) -> None:
-    await log_meal(
-        None, "Test", "italian", None, date.today(), user_db=user_db, recipe_db=recipe_db
-    )
+    await log_meal(None, "Test", "italian", None, date.today(), user_db=user_db, recipe_db=recipe_db)
 
     rows = await user_db.fetch_all("SELECT day_of_week, hour_of_day, cook_count FROM cooking_patterns")
     assert len(rows) == 1

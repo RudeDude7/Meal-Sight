@@ -40,9 +40,7 @@ async def update_profile(body: PreferenceUpdateRequest, manager: MCPManagerDep) 
 
 
 @router.delete("")
-async def remove_profile_preference(
-    body: PreferenceRemoveRequest, manager: MCPManagerDep
-) -> dict[str, Any]:
+async def remove_profile_preference(body: PreferenceRemoveRequest, manager: MCPManagerDep) -> dict[str, Any]:
     """Removes one entry from dietary_restrictions or disliked_ingredients
     — the only additive fields, and the only ones this can shrink.
     remove_preference is a no-op (returns the profile unchanged), not an

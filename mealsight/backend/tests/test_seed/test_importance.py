@@ -80,9 +80,7 @@ def test_defining_staple_beats_a_minor_background_protein_ingredient() -> None:
     # the ingredient list than a minor protein-term match (egg in the
     # dough, a splash of stock) must still win — the staple tier is
     # checked BEFORE the protein-term fallback, not after it.
-    result = assign_importances(
-        "Rappie Pie", ["Chicken Stock", "Onion", "Potatoes", "Butter"]
-    )
+    result = assign_importances("Rappie Pie", ["Chicken Stock", "Onion", "Potatoes", "Butter"])
     assert result[2] == "critical"
     assert result.count("critical") == 1
 

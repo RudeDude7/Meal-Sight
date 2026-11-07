@@ -51,3 +51,40 @@ def test_no_duplicate_pairs() -> None:
     entries = load_synonym_entries()
     pairs = [(entry["canonical_name"], entry["synonym"]) for entry in entries]
     assert len(pairs) == len(set(pairs))
+
+
+# Unit- or form-qualified names found in the corpus audit (a quantity or portion word fused into the
+# ingredient name). These ARE the same ingredient, so each must resolve to its base.
+FUSED_UNIT_SYNONYMS = [
+    ("garlic", "garlic clove"),
+    ("basil", "basil leaf"),
+    ("tarragon", "tarragon leaf"),
+    ("fennel", "fennel bulb"),
+    ("mozzarella", "mozzarella ball"),
+    ("chicken stock", "chicken stock cube"),
+    ("vegetable stock", "vegetable stock cube"),
+]
+
+# Names that look like the same shape but are genuinely different things, found in the same audit.
+# They must NOT be collapsed onto the bare word.
+DISTINCT_UNIT_NAMES = [
+    ("bay", "bay leaf"),  # 'bay' alone is not an ingredient
+    ("cinnamon", "cinnamon stick"),  # whole stick vs ground cinnamon
+    ("lemon", "lemon juice"),
+    ("lemon", "lemon zest"),
+    ("orange", "orange zest"),
+    ("gelatine", "gelatine leaf"),  # sheets vs powder
+    ("chicken", "chicken stock cube"),  # a stock cube is stock, never chicken
+]
+
+
+def test_fused_unit_names_resolve_to_their_base_ingredient() -> None:
+    pair_set = _as_pair_set(load_synonym_entries())
+    for base, qualified in FUSED_UNIT_SYNONYMS:
+        assert frozenset({base, qualified}) in pair_set, f"{qualified!r} should resolve to {base!r}"
+
+
+def test_similar_looking_but_distinct_unit_names_are_not_collapsed() -> None:
+    pair_set = _as_pair_set(load_synonym_entries())
+    for a, b in DISTINCT_UNIT_NAMES:
+        assert frozenset({a, b}) not in pair_set, f"{a!r} and {b!r} are different ingredients"

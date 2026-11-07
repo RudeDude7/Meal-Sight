@@ -1,0 +1,101 @@
+{
+  "schema": 1,
+  "recorded_from": "run_1794032750",
+  "recorded_at": "2026-11-07T06:25:51.126837+00:00",
+  "update_reason": "initial baseline: the final five-dimension scorecard of phases 10.1/10.2 (docs/EVALUATION.md)",
+  "how_to_refresh": "python -m eval.compare eval/results/<run>.json --update --reason '<why>' ; review the diff; commit it in the same change as whatever moved the numbers",
+  "provenance": {
+    "model_ids": {
+      "vision_model": "ministral-8b-2512",
+      "reasoning_model": "ministral-8b-2512",
+      "extraction_model": "ministral-8b-2512"
+    },
+    "prompt_versions": {
+      "vision_perception_prompt": "29437d278060",
+      "reasoning_prompt": "9dba200a64ef",
+      "extraction_prompt": "5ab13971be57"
+    },
+    "component_versions": {
+      "diet_groups": "2b2536c5ce6c",
+      "dietary_vocabulary": "810ae50068a4",
+      "protein_lexicon": "411e56fc683f",
+      "cuisine_families": "3fd7ca3faa74",
+      "avoid_groups": "ce4fbf73ce94",
+      "restriction_backstop_patterns": "70c8a0f535df",
+      "matcher_normalization": "bdbd9df24021",
+      "matcher_thresholds": "806f0633de51",
+      "ranking_weights": "32fdb421c1d2"
+    },
+    "data_versions": {
+      "recipe_corpus": "e10cdd72f5a0",
+      "ingredient_synonyms": "7b33e1297cb5",
+      "substitutions": "feae021fe1d7",
+      "nutrition_reference": "270062fe3c2e"
+    },
+    "pantry_fixture_sha256": "756090ab287f"
+  },
+  "dimensions": {
+    "dimension1_ingredient_recognition": {
+      "score": 0.4882,
+      "threshold": 0.6,
+      "case_count": 30,
+      "tolerance": 0.01,
+      "status": "known_failing",
+      "reason": "the original vision model (mistral-medium-2505) was retired and the medium tier is unavailable on the free plan; docs/EVALUATION.md section 4",
+      "noise_evidence": "F1 over five runs on the same code and prompt: 0.485, 0.492, 0.489, 0.489, 0.488 (spread 0.007); tolerance 0.010 leaves headroom above that",
+      "invariants": {}
+    },
+    "dimension2_constraint_satisfaction": {
+      "score": 1.0,
+      "threshold": 1.0,
+      "case_count": 55,
+      "tolerance": 0.02,
+      "status": "passing",
+      "reason": "hard constraints; a hard-constraint violation is a safety failure and is gated absolutely, not by tolerance",
+      "noise_evidence": "55/55 in every run since the case set was finalised; tolerance is one case (1/55 = 0.018)",
+      "invariants": {
+        "total_violations": 0
+      }
+    },
+    "dimension3_match_accuracy": {
+      "score": 1.0,
+      "threshold": 1.0,
+      "case_count": 32,
+      "tolerance": 0.0,
+      "status": "passing",
+      "reason": "deterministic arithmetic on fixed inputs, no model calls: any disagreement is real",
+      "noise_evidence": "32/32 in every run; fully deterministic",
+      "invariants": {
+        "disagreeing_cases": [],
+        "classification_accuracy": 1.0,
+        "score_accuracy": 1.0
+      }
+    },
+    "dimension4_freshness_prioritization": {
+      "score": 0.9333,
+      "threshold": 0.8,
+      "case_count": 15,
+      "tolerance": 0.07,
+      "status": "passing",
+      "reason": "d4_13 (the reasoning step overriding a correct freshness ranking) is a known failure at this level",
+      "noise_evidence": "14/15 in four consecutive runs after the freshness-flag fix; earlier runs ranged 12 to 14; tolerance is one case (1/15 = 0.067)",
+      "invariants": {
+        "case_defects": [],
+        "real_data_untouched": true
+      }
+    },
+    "dimension5_personalization": {
+      "score": 1.0,
+      "threshold": 0.8,
+      "case_count": 18,
+      "tolerance": 0.06,
+      "status": "passing",
+      "reason": "final choice is a language-model pick, so one case may flap",
+      "noise_evidence": "18/18 in the final runs; tolerance is one case (1/18 = 0.056)",
+      "invariants": {
+        "case_defects": [],
+        "real_data_untouched": true
+      }
+    }
+  }
+}

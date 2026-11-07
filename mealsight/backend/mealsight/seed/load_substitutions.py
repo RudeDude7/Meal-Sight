@@ -40,8 +40,12 @@ async def load_substitutions(db: Database | None = None) -> int:
             ) VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
-                entry["original_ingredient"], entry["substitute"], entry.get("ratio", "1:1"),
-                entry.get("flavor_impact"), entry.get("dietary_notes", ""), entry.get("notes"),
+                entry["original_ingredient"],
+                entry["substitute"],
+                entry.get("ratio", "1:1"),
+                entry.get("flavor_impact"),
+                entry.get("dietary_notes", ""),
+                entry.get("notes"),
             ),
         )
 

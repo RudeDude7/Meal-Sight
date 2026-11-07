@@ -590,6 +590,34 @@
     {
       "canonical_name": "tomato puree",
       "synonym": "tomato paste or sauce"
+    },
+    {
+      "canonical_name": "garlic",
+      "synonym": "garlic clove"
+    },
+    {
+      "canonical_name": "basil",
+      "synonym": "basil leaf"
+    },
+    {
+      "canonical_name": "tarragon",
+      "synonym": "tarragon leaf"
+    },
+    {
+      "canonical_name": "fennel",
+      "synonym": "fennel bulb"
+    },
+    {
+      "canonical_name": "mozzarella",
+      "synonym": "mozzarella ball"
+    },
+    {
+      "canonical_name": "chicken stock",
+      "synonym": "chicken stock cube"
+    },
+    {
+      "canonical_name": "vegetable stock",
+      "synonym": "vegetable stock cube"
     }
   ]
 }

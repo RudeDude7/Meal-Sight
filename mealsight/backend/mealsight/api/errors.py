@@ -42,9 +42,7 @@ def error_envelope(code: str, message: str) -> dict[str, Any]:
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(APIError)
     async def _handle_api_error(request: Request, exc: APIError) -> JSONResponse:
-        return JSONResponse(
-            status_code=exc.status_code, content=error_envelope(exc.code, exc.message)
-        )
+        return JSONResponse(status_code=exc.status_code, content=error_envelope(exc.code, exc.message))
 
     @app.exception_handler(RequestValidationError)
     async def _handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:

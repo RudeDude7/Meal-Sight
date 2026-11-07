@@ -49,9 +49,7 @@ async def init_database(db: Database, schema_path: Path) -> SchemaInitResult:
     created = sorted(set(after) - before)
     existing = sorted(before)
 
-    logger.info(
-        "database_initialized", db=db.name, created_tables=created, existing_tables=existing
-    )
+    logger.info("database_initialized", db=db.name, created_tables=created, existing_tables=existing)
     return SchemaInitResult(created_tables=created, existing_tables=existing)
 
 

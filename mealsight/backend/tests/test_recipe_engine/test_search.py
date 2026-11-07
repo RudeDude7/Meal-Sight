@@ -190,9 +190,7 @@ async def test_pantry_overlap_ranking_does_not_change_total_matched(recipe_db: D
             recipe_db, recipe_id=str(i), name=f"Recipe {i}", ingredients=[ingredient], cook_time_minutes=10
         )
 
-    result = await search_recipes(
-        recipe_db, dietary_filters=[], max_results=2, pantry_ingredients=["flour"]
-    )
+    result = await search_recipes(recipe_db, dietary_filters=[], max_results=2, pantry_ingredients=["flour"])
 
     assert len(result.results) == 2
     assert result.total_matched == 5
@@ -221,3 +219,65 @@ async def test_get_recipe_returns_full_detail(recipe_db: Database) -> None:
 async def test_get_recipe_raises_for_unknown_id(recipe_db: Database) -> None:
     with pytest.raises(ValueError, match="does-not-exist"):
         await get_recipe(recipe_db, "does-not-exist")
+
+
+async def test_cuisine_filter_accepts_the_demonym_for_a_country_label(recipe_db: Database) -> None:
+    """Regression: the corpus labels 'India'/'France' but users say 'Indian'/'French'."""
+    await insert_recipe(
+        recipe_db, recipe_id="1", name="Handi", ingredients=[_ONION], cook_time_minutes=20, cuisine="India"
+    )
+    await insert_recipe(
+        recipe_db, recipe_id="2", name="Soup", ingredients=[_ONION], cook_time_minutes=20, cuisine="France"
+    )
+    for asked in ("Indian", "india", "INDIAN"):
+        results = (
+            await search_recipes(recipe_db, dietary_filters=[], max_cook_time=60, cuisine=asked)
+        ).results
+        assert {r.id for r in results} == {"1"}, asked
+    french = (await search_recipes(recipe_db, dietary_filters=[], max_cook_time=60, cuisine="French")).results
+    assert {r.id for r in french} == {"2"}
+    nothing = (await search_recipes(recipe_db, dietary_filters=[], max_cook_time=60, cuisine="Thai")).results
+    assert nothing == []
+
+
+async def test_ingredient_enforced_restriction_excludes_on_the_ingredient_list(recipe_db: Database) -> None:
+    peanut = {
+        "name": "Peanut Butter",
+        "quantity": 1.0,
+        "unit": None,
+        "importance": "important",
+        "raw_measure": "1",
+    }
+    await insert_recipe(recipe_db, recipe_id="1", name="PB Toast", ingredients=[peanut], cook_time_minutes=5)
+    await insert_recipe(
+        recipe_db, recipe_id="2", name="Plain Toast", ingredients=[_ONION], cook_time_minutes=5
+    )
+
+    result = await search_recipes(recipe_db, dietary_filters=["peanut-free"])
+    assert {r.id for r in result.results} == {"2"}
+    assert result.total_matched == 1
+    assert result.excluded_by_ingredient_restrictions == 1
+    assert result.unenforced_restrictions == []
+    # underscore spelling is accepted too
+    assert {r.id for r in (await search_recipes(recipe_db, dietary_filters=["peanut_free"])).results} == {"2"}
+
+
+async def test_unenforced_restriction_is_reported_not_silently_dropped_and_not_a_dead_tag_filter(
+    recipe_db: Database,
+) -> None:
+    await insert_recipe(recipe_db, recipe_id="1", name="A", ingredients=[_ONION], cook_time_minutes=5)
+    result = await search_recipes(recipe_db, dietary_filters=["keto", "low-sodium"])
+    assert {r.id for r in result.results} == {"1"}, "must not match zero the way an untagged tag filter did"
+    assert result.unenforced_restrictions == ["keto", "low-sodium"]
+
+
+async def test_tag_backed_filter_behaviour_is_unchanged_and_reports_nothing_unenforced(
+    recipe_db: Database,
+) -> None:
+    await insert_recipe(
+        recipe_db, recipe_id="1", name="V", ingredients=[_ONION], cook_time_minutes=5, dietary_tags=["vegan"]
+    )
+    await insert_recipe(recipe_db, recipe_id="2", name="M", ingredients=[_ONION], cook_time_minutes=5)
+    result = await search_recipes(recipe_db, dietary_filters=["vegan"])
+    assert {r.id for r in result.results} == {"1"}
+    assert result.unenforced_restrictions == [] and result.excluded_by_ingredient_restrictions == 0

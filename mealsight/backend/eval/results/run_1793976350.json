@@ -1,0 +1,2298 @@
+{
+  "run_id": "run_1793976350",
+  "timestamp": "2026-11-06T14:45:50.941714+00:00",
+  "git_commit": "b200bbb632335be6abd6468916937875cef7921f",
+  "model_ids": {
+    "vision_model": "ministral-8b-2512",
+    "reasoning_model": "ministral-8b-2512",
+    "extraction_model": "ministral-8b-2512"
+  },
+  "prompt_versions": {
+    "vision_perception_prompt": "29437d278060",
+    "reasoning_prompt": "9dba200a64ef"
+  },
+  "dimensions": [
+    {
+      "name": "dimension2_constraint_satisfaction",
+      "pass_threshold": 1.0,
+      "score": 1.0,
+      "passed": true,
+      "metrics": {
+        "cases_passed": 43,
+        "cases_total": 43,
+        "total_violations": 0,
+        "refusal_cases_expected": 4,
+        "refusal_cases_actual": 4,
+        "hard_constraint_violations_by_kind": {},
+        "correct_refusals": [
+          "d2_06",
+          "d2_12",
+          "d2_15",
+          "d2_30"
+        ],
+        "wrongly_refused_satisfiable": [],
+        "soft_cuisine_score": 1.0,
+        "soft_cases_scored": 9,
+        "soft_cuisine_all_cases_score": 0.6,
+        "soft_all_cases_scored": 15,
+        "soft_cuisine_hits_attainable": 9,
+        "soft_honest_misses_unattainable": [
+          "d2_29",
+          "d2_37",
+          "d2_38",
+          "d2_39",
+          "d2_40",
+          "d2_42"
+        ],
+        "soft_unattainable_unexpected_hits": [],
+        "soft_unattainable_refused": [],
+        "soft_threshold": 0.5,
+        "soft_passed": true,
+        "soft_protein_cases": 0,
+        "soft_note": "headline soft_cuisine_score = hit rate over cuisine cases the seeded pantry could satisfy (cuisine_attainable=True, cases.py); misses the pantry makes unavoidable are listed separately as soft_honest_misses_unattainable. soft_cuisine_all_cases_score is the pooled rate, comparable to the first run's 0.5. Cuisine is scored only on cases that were not refused. No case sets a protein preference, so protein is unmeasured here",
+        "reasoning_model": "ministral-8b-2512",
+        "sampled": false
+      },
+      "case_count": 43,
+      "api_calls": 43,
+      "total_tokens": 159794,
+      "wall_clock_seconds": 153.73427633405663,
+      "image_results": [],
+      "case_results": [
+        {
+          "case_id": "d2_01",
+          "description": "single restriction: vegetarian",
+          "text_input": "I need a vegetarian dinner for tonight.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "vegetarian"
+            ],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegetarian"
+              ],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_02",
+          "description": "single restriction: vegan",
+          "text_input": "Give me a vegan recipe.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52914",
+          "recipe_name": "Boulangère Potatoes",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "vegan"
+            ],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegan"
+              ],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "dairy_free",
+              "gluten_free",
+              "nut_free",
+              "vegan",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 60,
+            "cuisine": "France",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "olive oil",
+              "onion",
+              "potato",
+              "thyme",
+              "vegetable stock"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_03",
+          "description": "single restriction: gluten-free",
+          "text_input": "I need something gluten-free to cook.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "gluten_free"
+            ],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "gluten-free"
+              ],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_04",
+          "description": "single restriction: dairy-free",
+          "text_input": "Find me a dairy-free recipe.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52998",
+          "recipe_name": "Corned Beef and Cabbage",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "dairy_free"
+            ],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "dairy-free"
+              ],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "dairy_free",
+              "gluten_free",
+              "nut_free"
+            ],
+            "cook_time_minutes": 65,
+            "cuisine": "Irish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "beef brisket",
+              "cabbage",
+              "carrot",
+              "potato"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_05",
+          "description": "single restriction: nut-free",
+          "text_input": "I need a nut-free meal, someone here has a nut allergy.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "nut_free"
+            ],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [
+              "nut"
+            ],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "nut-free"
+              ],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [
+                "nut"
+              ],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_06",
+          "description": "single restriction: keto (unsupported by corpus tags)",
+          "text_input": "I need a keto recipe.",
+          "expect_refusal": true,
+          "actual_refusal": true,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": null,
+          "recipe_name": null,
+          "notes": "correctly refused an unsatisfiable request",
+          "constraints_checked": {
+            "dietary": [
+              "keto"
+            ],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "keto"
+              ],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {}
+        },
+        {
+          "case_id": "d2_07",
+          "description": "vegan + gluten-free",
+          "text_input": "I need something vegan and gluten-free.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52914",
+          "recipe_name": "Boulangère Potatoes",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "gluten_free",
+              "vegan"
+            ],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegan",
+                "gluten-free"
+              ],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "dairy_free",
+              "gluten_free",
+              "nut_free",
+              "vegan",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 60,
+            "cuisine": "France",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "olive oil",
+              "onion",
+              "potato",
+              "thyme",
+              "vegetable stock"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_08",
+          "description": "vegetarian + dairy-free",
+          "text_input": "Vegetarian and dairy-free please, no dairy at all.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52914",
+          "recipe_name": "Boulangère Potatoes",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "dairy_free",
+              "vegetarian"
+            ],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegetarian",
+                "dairy-free"
+              ],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "dairy_free",
+              "gluten_free",
+              "nut_free",
+              "vegan",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 60,
+            "cuisine": "France",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "olive oil",
+              "onion",
+              "potato",
+              "thyme",
+              "vegetable stock"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_09",
+          "description": "vegan + nut-free",
+          "text_input": "I need a vegan recipe with no nuts, nut allergy in the house.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52914",
+          "recipe_name": "Boulangère Potatoes",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "nut_free",
+              "vegan"
+            ],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [
+              "nut"
+            ],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegan",
+                "nut-free"
+              ],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [
+                "nut"
+              ],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "dairy_free",
+              "gluten_free",
+              "nut_free",
+              "vegan",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 60,
+            "cuisine": "France",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "olive oil",
+              "onion",
+              "potato",
+              "thyme",
+              "vegetable stock"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_10",
+          "description": "vegan + gluten-free + nut-free (unsatisfiable combo)",
+          "text_input": "I need something vegan, gluten-free, and nut-free.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52914",
+          "recipe_name": "Boulangère Potatoes",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "gluten_free",
+              "nut_free",
+              "vegan"
+            ],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [
+              "nut"
+            ],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegan",
+                "gluten-free",
+                "nut-free"
+              ],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [
+                "nut"
+              ],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "dairy_free",
+              "gluten_free",
+              "nut_free",
+              "vegan",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 60,
+            "cuisine": "France",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "olive oil",
+              "onion",
+              "potato",
+              "thyme",
+              "vegetable stock"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_11",
+          "description": "gluten-free + dairy-free",
+          "text_input": "I need a gluten-free and dairy-free dinner.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52914",
+          "recipe_name": "Boulangère Potatoes",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "dairy_free",
+              "gluten_free"
+            ],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "gluten-free",
+                "dairy-free"
+              ],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "dairy_free",
+              "gluten_free",
+              "nut_free",
+              "vegan",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 60,
+            "cuisine": "France",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "olive oil",
+              "onion",
+              "potato",
+              "thyme",
+              "vegetable stock"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_12",
+          "description": "15 minute limit",
+          "text_input": "I only have 15 minutes, what can I make?",
+          "expect_refusal": true,
+          "actual_refusal": true,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": null,
+          "recipe_name": null,
+          "notes": "correctly refused an unsatisfiable request",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 15,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 15,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {}
+        },
+        {
+          "case_id": "d2_13",
+          "description": "20 minute limit",
+          "text_input": "Something quick, 20 minutes max.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52795",
+          "recipe_name": "Chicken Handi",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 20,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 20,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free"
+            ],
+            "cook_time_minutes": 20,
+            "cuisine": "India",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "chicken",
+              "chili powder",
+              "coriander seed",
+              "cumin seed",
+              "fenugreek",
+              "garam masala",
+              "garlic",
+              "ginger paste",
+              "green chilli",
+              "heavy cream",
+              "onion",
+              "salt",
+              "tomato",
+              "turmeric powder",
+              "vegetable oil",
+              "yogurt"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_14",
+          "description": "30 minute limit",
+          "text_input": "I need dinner in 30 minutes or less.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_15",
+          "description": "10 minute limit stacked with vegan + gluten-free + nut-free (unsatisfiable)",
+          "text_input": "I need something vegan, gluten-free, and nut-free, ready in 10 minutes.",
+          "expect_refusal": true,
+          "actual_refusal": true,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": null,
+          "recipe_name": null,
+          "notes": "correctly refused an unsatisfiable request",
+          "constraints_checked": {
+            "dietary": [
+              "gluten_free",
+              "nut_free",
+              "vegan"
+            ],
+            "max_minutes": 10,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegan",
+                "gluten-free",
+                "nut-free"
+              ],
+              "max_minutes": 10,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {}
+        },
+        {
+          "case_id": "d2_16",
+          "description": "45 minute limit",
+          "text_input": "I have 45 minutes for dinner tonight.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52846",
+          "recipe_name": "Chicken & mushroom Hotpot",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 45,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 45,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "nut_free"
+            ],
+            "cook_time_minutes": 42,
+            "cuisine": "British",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "all purpose flour",
+              "butter",
+              "chicken",
+              "chicken stock cube",
+              "mushroom",
+              "mustard powder",
+              "nutmeg",
+              "onion",
+              "potato",
+              "sweetcorn"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_17",
+          "description": "servings: 2",
+          "text_input": "I need a recipe for 2 people.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52998",
+          "recipe_name": "Corned Beef and Cabbage",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 2,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 2,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "dairy_free",
+              "gluten_free",
+              "nut_free"
+            ],
+            "cook_time_minutes": 65,
+            "cuisine": "Irish",
+            "servings_scaled_to": 2,
+            "ingredients": [
+              "beef brisket",
+              "cabbage",
+              "carrot",
+              "potato"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_18",
+          "description": "servings: 4",
+          "text_input": "Cooking for 4 people tonight.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52998",
+          "recipe_name": "Corned Beef and Cabbage",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 4,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 4,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "dairy_free",
+              "gluten_free",
+              "nut_free"
+            ],
+            "cook_time_minutes": 65,
+            "cuisine": "Irish",
+            "servings_scaled_to": 4,
+            "ingredients": [
+              "beef brisket",
+              "cabbage",
+              "carrot",
+              "potato"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_19",
+          "description": "servings: 6",
+          "text_input": "I need to feed 6 people.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52998",
+          "recipe_name": "Corned Beef and Cabbage",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 6,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 6,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "dairy_free",
+              "gluten_free",
+              "nut_free"
+            ],
+            "cook_time_minutes": 65,
+            "cuisine": "Irish",
+            "servings_scaled_to": 6,
+            "ingredients": [
+              "beef brisket",
+              "cabbage",
+              "carrot",
+              "potato"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_20",
+          "description": "servings: 1",
+          "text_input": "Just cooking for myself, 1 serving.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52998",
+          "recipe_name": "Corned Beef and Cabbage",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "dairy_free",
+              "gluten_free",
+              "nut_free"
+            ],
+            "cook_time_minutes": 65,
+            "cuisine": "Irish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "beef brisket",
+              "cabbage",
+              "carrot",
+              "potato"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_21",
+          "description": "avoid single ingredient: cilantro",
+          "text_input": "I need a recipe but please avoid cilantro, I hate it.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [
+              "cilantro"
+            ],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [
+                "cilantro"
+              ],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_22",
+          "description": "avoid multiple ingredients: mushrooms and olives",
+          "text_input": "Find me something to cook, but avoid mushrooms and olives.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [
+              "mushrooms",
+              "olives",
+              "mushroom",
+              "olive"
+            ],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [
+                "mushroom",
+                "olive"
+              ],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_23",
+          "description": "avoid ingredient: shellfish (allergy)",
+          "text_input": "I have a shellfish allergy, avoid shellfish entirely.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [
+              "shellfish"
+            ],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [
+                "shellfish"
+              ],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_24",
+          "description": "avoid ingredient: peanuts, stacked with vegetarian",
+          "text_input": "I need a vegetarian recipe, and please avoid peanuts, allergy.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "vegetarian"
+            ],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [
+              "peanuts",
+              "peanut"
+            ],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegetarian"
+              ],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [
+                "peanut"
+              ],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_25",
+          "description": "avoid dish: salad",
+          "text_input": "I want dinner tonight but not a salad, I'm tired of salads.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [
+              "salad"
+            ],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [
+                "salad"
+              ],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_26",
+          "description": "avoid dish: soup",
+          "text_input": "Anything but soup for dinner please.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [
+              "soup"
+            ],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [
+                "soup"
+              ],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_27",
+          "description": "avoid dish: stir fry, stacked with 20 minute limit",
+          "text_input": "I need something in 20 minutes, but not a stir fry.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": "52795",
+          "recipe_name": "Chicken Handi",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 20,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [
+              "stir fry"
+            ],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 20,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [
+                "stir fry"
+              ],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free"
+            ],
+            "cook_time_minutes": 20,
+            "cuisine": "India",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "chicken",
+              "chili powder",
+              "coriander seed",
+              "cumin seed",
+              "fenugreek",
+              "garam masala",
+              "garlic",
+              "ginger paste",
+              "green chilli",
+              "heavy cream",
+              "onion",
+              "salt",
+              "tomato",
+              "turmeric powder",
+              "vegetable oil",
+              "yogurt"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_28",
+          "description": "cuisine preference (soft) + vegetarian (hard)",
+          "text_input": "I'd like an Italian vegetarian dinner.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": 1.0,
+          "recipe_id": "53014",
+          "recipe_name": "Pizza Express Margherita",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "vegetarian"
+            ],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": "italian",
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegetarian"
+              ],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": "Italian",
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 37,
+            "cuisine": "Italian",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "all purpose flour",
+              "basil",
+              "black pepper",
+              "mozzarella",
+              "olive oil",
+              "oregano",
+              "passata",
+              "salt",
+              "sugar",
+              "water",
+              "yeast"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_29",
+          "description": "cuisine preference (soft) + 30 minute limit + servings 4",
+          "text_input": "I want Mexican food, 30 minutes or less, for 4 people.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": 0.0,
+          "recipe_id": "52940",
+          "recipe_name": "Brown Stew Chicken",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 30,
+            "servings": 4,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": "mexican",
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 30,
+              "servings": 4,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": "Mexican",
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "nut_free"
+            ],
+            "cook_time_minutes": 30,
+            "cuisine": "Jamaican",
+            "servings_scaled_to": 4,
+            "ingredients": [
+              "allspice",
+              "carrot",
+              "chicken",
+              "coconut milk",
+              "cornstarch",
+              "garlic clove",
+              "lime",
+              "onion",
+              "red pepper",
+              "soy sauce",
+              "thyme",
+              "tomato",
+              "vegetable oil"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_30",
+          "description": "full combination: vegan, dairy-free, avoid mushrooms, 30 minutes, 2 servings",
+          "text_input": "I need something vegan and dairy-free, no mushrooms, ready in 30 minutes, for 2 people.",
+          "expect_refusal": true,
+          "actual_refusal": true,
+          "passed": true,
+          "violations": [],
+          "soft_score": null,
+          "recipe_id": null,
+          "recipe_name": null,
+          "notes": "correctly refused an unsatisfiable request",
+          "constraints_checked": {
+            "dietary": [
+              "dairy_free",
+              "vegan"
+            ],
+            "max_minutes": 30,
+            "servings": 2,
+            "avoid_ingredients": [
+              "mushrooms",
+              "mushroom"
+            ],
+            "avoid_dishes": [],
+            "cuisine_soft": null,
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegan",
+                "dairy-free"
+              ],
+              "max_minutes": 30,
+              "servings": 2,
+              "avoid_ingredients": [
+                "mushroom"
+              ],
+              "avoid_dishes": [],
+              "cuisine": null,
+              "protein": null
+            }
+          },
+          "recipe_facts": {}
+        },
+        {
+          "case_id": "d2_31",
+          "description": "cuisine (attainable): Indian",
+          "text_input": "I'd like Indian food tonight.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": 1.0,
+          "recipe_id": "52795",
+          "recipe_name": "Chicken Handi",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": "india",
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": "Indian",
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free"
+            ],
+            "cook_time_minutes": 20,
+            "cuisine": "India",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "chicken",
+              "chili powder",
+              "coriander seed",
+              "cumin seed",
+              "fenugreek",
+              "garam masala",
+              "garlic",
+              "ginger paste",
+              "green chilli",
+              "heavy cream",
+              "onion",
+              "salt",
+              "tomato",
+              "turmeric powder",
+              "vegetable oil",
+              "yogurt"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_32",
+          "description": "cuisine (attainable): British",
+          "text_input": "I want something British for dinner.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": 1.0,
+          "recipe_id": "52846",
+          "recipe_name": "Chicken & mushroom Hotpot",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": "british",
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": "British",
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "nut_free"
+            ],
+            "cook_time_minutes": 42,
+            "cuisine": "British",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "all purpose flour",
+              "butter",
+              "chicken",
+              "chicken stock cube",
+              "mushroom",
+              "mustard powder",
+              "nutmeg",
+              "onion",
+              "potato",
+              "sweetcorn"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_33",
+          "description": "cuisine (attainable): French + avoid mushrooms",
+          "text_input": "French food please, no mushrooms.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": 1.0,
+          "recipe_id": "52914",
+          "recipe_name": "Boulangère Potatoes",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [
+              "mushroom"
+            ],
+            "avoid_dishes": [],
+            "cuisine_soft": "france",
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [
+                "mushroom"
+              ],
+              "avoid_dishes": [],
+              "cuisine": "French",
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "dairy_free",
+              "gluten_free",
+              "nut_free",
+              "vegan",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 60,
+            "cuisine": "France",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "olive oil",
+              "onion",
+              "potato",
+              "thyme",
+              "vegetable stock"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_34",
+          "description": "cuisine (attainable): Turkish",
+          "text_input": "Something Turkish, please.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": 1.0,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": "turkish",
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": "Turkish",
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_35",
+          "description": "cuisine (attainable): Jamaican",
+          "text_input": "I'm in the mood for Jamaican food.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": 1.0,
+          "recipe_id": "52940",
+          "recipe_name": "Brown Stew Chicken",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": "jamaican",
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": "Jamaican",
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "nut_free"
+            ],
+            "cook_time_minutes": 30,
+            "cuisine": "Jamaican",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "allspice",
+              "carrot",
+              "chicken",
+              "coconut milk",
+              "cornstarch",
+              "garlic clove",
+              "lime",
+              "onion",
+              "red pepper",
+              "soy sauce",
+              "thyme",
+              "tomato",
+              "vegetable oil"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_36",
+          "description": "cuisine (attainable): Italian, no other constraint",
+          "text_input": "Italian food please.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": 1.0,
+          "recipe_id": "53014",
+          "recipe_name": "Pizza Express Margherita",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": "italian",
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": "Italian",
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 37,
+            "cuisine": "Italian",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "all purpose flour",
+              "basil",
+              "black pepper",
+              "mozzarella",
+              "olive oil",
+              "oregano",
+              "passata",
+              "salt",
+              "sugar",
+              "water",
+              "yeast"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_37",
+          "description": "cuisine (NOT attainable): Thai",
+          "text_input": "I want Thai food.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": 0.0,
+          "recipe_id": "52841",
+          "recipe_name": "Creamy Tomato Soup",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": "thai",
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": "Thai",
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 28,
+            "cuisine": "British",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "bay leaf",
+              "carrot",
+              "celery",
+              "milk",
+              "olive oil",
+              "onion",
+              "passata",
+              "potato",
+              "sugar",
+              "tomato",
+              "tomato puree",
+              "vegetable stock cube",
+              "white vinegar"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_38",
+          "description": "cuisine (NOT attainable): Japanese + gluten-free",
+          "text_input": "Japanese dinner, and it has to be gluten-free.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": 0.0,
+          "recipe_id": "53021",
+          "recipe_name": "Golabki (cabbage roll)",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "gluten_free"
+            ],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": "japanese",
+            "extracted_by_pipeline": {
+              "dietary": [
+                "gluten-free"
+              ],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": "Japanese",
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free"
+            ],
+            "cook_time_minutes": 80,
+            "cuisine": "Polish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "beef",
+              "black pepper",
+              "butter",
+              "cabbage",
+              "garlic",
+              "onion",
+              "pork",
+              "rice",
+              "salt",
+              "tomato puree"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_39",
+          "description": "cuisine (NOT attainable): Chinese + 30 minutes",
+          "text_input": "Chinese food, 30 minutes or less.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": 0.0,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": 30,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": "chinese",
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": 30,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": "Chinese",
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_40",
+          "description": "cuisine (NOT attainable): Greek + vegetarian",
+          "text_input": "I'd like a Greek vegetarian dinner.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": 0.0,
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [
+              "vegetarian"
+            ],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": "greek",
+            "extracted_by_pipeline": {
+              "dietary": [
+                "vegetarian"
+              ],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": "Greek",
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free",
+              "vegetarian"
+            ],
+            "cook_time_minutes": 25,
+            "cuisine": "Turkish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_41",
+          "description": "cuisine (attainable): American -> 'United States'",
+          "text_input": "I'd like American food tonight.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": 1.0,
+          "recipe_id": "52996",
+          "recipe_name": "French Onion Chicken with Roasted Carrots & Mashed Potatoes",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": "united states",
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": "American",
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "gluten_free",
+              "nut_free"
+            ],
+            "cook_time_minutes": 50,
+            "cuisine": "United States",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "beef stock",
+              "butter",
+              "carrot",
+              "chicken breast",
+              "mozzarella",
+              "onion",
+              "pepper",
+              "potato",
+              "salt",
+              "sour cream",
+              "sugar",
+              "vegetable oil"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_42",
+          "description": "cuisine (NOT attainable): Dutch -> 'Netherlands'",
+          "text_input": "I want a Dutch dish.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": 0.0,
+          "recipe_id": "52998",
+          "recipe_name": "Corned Beef and Cabbage",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": "netherlands",
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": "Dutch",
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "dairy_free",
+              "gluten_free",
+              "nut_free"
+            ],
+            "cook_time_minutes": 65,
+            "cuisine": "Irish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "beef brisket",
+              "cabbage",
+              "carrot",
+              "potato"
+            ]
+          }
+        },
+        {
+          "case_id": "d2_43",
+          "description": "cuisine (attainable): country form 'Ireland' -> 'Irish'",
+          "text_input": "Something from Ireland, please.",
+          "expect_refusal": false,
+          "actual_refusal": false,
+          "passed": true,
+          "violations": [],
+          "soft_score": 1.0,
+          "recipe_id": "52998",
+          "recipe_name": "Corned Beef and Cabbage",
+          "notes": "ok",
+          "constraints_checked": {
+            "dietary": [],
+            "max_minutes": null,
+            "servings": 1,
+            "avoid_ingredients": [],
+            "avoid_dishes": [],
+            "cuisine_soft": "irish",
+            "extracted_by_pipeline": {
+              "dietary": [],
+              "max_minutes": null,
+              "servings": 1,
+              "avoid_ingredients": [],
+              "avoid_dishes": [],
+              "cuisine": "Irish",
+              "protein": null
+            }
+          },
+          "recipe_facts": {
+            "dietary_tags": [
+              "dairy_free",
+              "gluten_free",
+              "nut_free"
+            ],
+            "cook_time_minutes": 65,
+            "cuisine": "Irish",
+            "servings_scaled_to": 1,
+            "ingredients": [
+              "beef brisket",
+              "cabbage",
+              "carrot",
+              "potato"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "passed": true,
+  "pantry": {
+    "fixture": "demo_pantry.json",
+    "fixture_sha256": "756090ab287f",
+    "photo_sources": {
+      "photo_05": 15,
+      "photo_09": 18,
+      "photo_12": 18,
+      "photo_15": 20,
+      "photo_22": 14,
+      "photo_29": 20
+    },
+    "photo_items_note": "raw analyze_fridge_photo output, uncurated; duplicates across photos collapse to one row",
+    "staples_added_by_hand": [
+      "olive oil",
+      "vegetable oil",
+      "salt",
+      "black pepper",
+      "all purpose flour",
+      "sugar",
+      "paprika",
+      "ground cumin",
+      "dried oregano",
+      "chili powder",
+      "cinnamon",
+      "garlic powder",
+      "onion powder",
+      "dried thyme"
+    ],
+    "staples_note": "oil, salt, pepper, flour, sugar and common dried spices; no eggs, rice, pasta or proteins were added",
+    "rows_at_run_start": 64,
+    "pantry_content_sha256": "c975c014058a"
+  },
+  "notes": [
+    "Dimension 1 baseline SUPERSEDES the earlier F1 0.64 (mistral-medium-2505) and 0.55 (ministral-8b-2512) figures. Two scorer corrections make those numbers non-comparable, and both can only lower a score: (1) a photo where the model identified nothing now counts as a zero instead of being dropped from the mean; (2) 'green onion' no longer matches ground-truth 'onion' (a scallion is not a bulb onion). A lower number than 0.55 is therefore not by itself a model regression.",
+    "Dimension 2 now enforces hand-authored constraints (eval/cases.py) in addition to what the pipeline extracted, whole-word avoid matching, and a dimension verdict that requires every case to pass.",
+    "Dimension 2 corrections after run_1793926853: expectations for d2_10, d2_12 and d2_30 were corrected (see eval/cases.py CORRECTIONS); only a user-STATED cook-time limit is enforced by the scorer, not the profile default. The pipeline changed too: stated-vs-default cook time, relaxation on 'nothing cookable', code-level avoid-list exclusion, and a deterministic dietary-restriction backstop. Compare this run to run_1793926853 with those changes in mind; they are not like-for-like."
+  ],
+  "git_dirty": true,
+  "git_diff_sha256": "91f2405a34a3"
+}

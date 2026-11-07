@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/recipes", tags=["recipes"])
 @router.get("/search")
 async def search_recipes(
     manager: MCPManagerDep,
-    dietary_filters: list[str] | None = None,
+    dietary_filters: Annotated[list[str] | None, Query()] = None,
     max_cook_time: int | None = None,
     cuisine: str | None = None,
     meal_type: str | None = None,
@@ -39,6 +39,8 @@ async def search_recipes(
         "max_results": max_results,
     }
     result = await manager.call_tool("recipe_engine", "search_recipes", arguments)
+    # The response carries `unenforced_restrictions`: requested restrictions the system cannot check.
+    # Results are NOT filtered by those, and a consumer must not read them as if they were.
     return unwrap_mcp_result(result)
 
 

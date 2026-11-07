@@ -24,6 +24,7 @@ from collections.abc import Mapping
 
 from mealsight.db import get_recipe_db, get_user_db
 from mealsight.db.connection import Database
+from mealsight.matching.cuisine import canonical_cuisine_label
 from mealsight.matching.normalize import normalize_ingredient
 from mealsight.seed.recipe_parsing import PROTEIN_TERMS
 
@@ -147,7 +148,9 @@ async def recompute_preference_scores(
         normalized = _normalize_rating(row["rating"])
 
         if row["cuisine"]:
-            cuisine_ratings.setdefault(row["cuisine"], []).append(normalized)
+            # One key per cuisine however the meal was logged ("italian", "Italian"): see
+            # mealsight.matching.cuisine.canonical_cuisine_label.
+            cuisine_ratings.setdefault(canonical_cuisine_label(row["cuisine"]), []).append(normalized)
 
         if row["recipe_id"] is not None:
             protein = derive_protein(ingredients_by_recipe.get(row["recipe_id"], []))

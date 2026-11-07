@@ -2,22 +2,26 @@
 
 Base: PROMPT_CONSERVATIVE ("B-conservative") from scripts/
 diagnose_vision.py, the winning prompt from scripts/benchmark_vision.py's
-multi-sample benchmark (mistral-medium-2505 + B-conservative, mean F1
-0.64 at native resolution — see docs/vision_benchmark_report.md). The
-model and prompt are both benchmark-determined and are not substituted
-here; this module only extends that prompt's requested output.
+multi-sample benchmark (originally mistral-medium-2505 + B-conservative,
+mean F1 0.64 at native resolution; that model was since retired and
+VISION_MODEL is now ministral-8b-2512, B-conservative mean F1 0.55 — see
+docs/vision_benchmark_report.md and docs/VISION_FINDINGS.md). The
+prompt is benchmark-determined and is not substituted here; this module
+only extends that prompt's requested output.
 
 The one part of the original prompt preserved word for word: explicit
-permission to say it cannot identify anything with confidence.
-docs/vision_benchmark_report.md's own findings tie prompt A's
-catastrophic 0.00 F1 failures directly to the ABSENCE of that
-permission — a model with no sanctioned way to say "I'm not sure"
-hallucinates a full generic fridge inventory instead of admitting
-uncertainty. That escape hatch is exactly what turns into
-VisionPerception's own empty-result shape below, so it survives into
-this module's structured-JSON version unchanged in spirit, even though
-the original benchmark's output format (one pipe-delimited line per
-item) is not what's requested here.
+permission to say it cannot identify anything with confidence. That
+escape hatch turns into VisionPerception's own empty-result shape
+below, so it survives into this module's structured-JSON version
+unchanged in spirit, even though the original benchmark's output
+format (one pipe-delimited line per item) is not what's requested here.
+(An earlier version of this docstring cited prompt A's "catastrophic
+0.00 F1" as evidence that the permission prevents hallucinated
+inventories. That result was a scoring artifact — the matcher rejected
+parenthetical asides, and prompt A actually scores about 0.59 against
+B's 0.64 once corrected, see docs/VISION_FINDINGS.md — so it is no
+evidence for or against this sentence. The permission is kept because
+it is a sensible default, not because a measurement demanded it.)
 
 Extension: the original prompt asked only for an item name and a
 confidence level, one per line. This version asks for the same
@@ -48,12 +52,12 @@ VISION_PERCEPTION_PROMPT = (
     "{\n"
     '  "identified_items": [\n'
     "    {\n"
-    '      "name": "<specific food name, e.g. \'chicken thighs\' not \'meat\', '
-    "\'red bell pepper\' not \'pepper\'>\",\n"
+    "      \"name\": \"<specific food name, e.g. 'chicken thighs' not 'meat', "
+    "'red bell pepper' not 'pepper'>\",\n"
     '      "quantity": <a number, or null if you cannot tell>,\n'
     "      \"unit\": \"<a unit, e.g. 'count', 'lb', 'liter', or null if you "
     'cannot tell>",\n'
-    "      \"freshness\": \"<a brief freshness observation, e.g. 'fresh', "
+    '      "freshness": "<a brief freshness observation, e.g. \'fresh\', '
     "'wilted', 'moldy', or null if you cannot tell>\",\n"
     '      "confidence": "<high, medium, or low>"\n'
     "    }\n"
@@ -99,7 +103,7 @@ def build_extraction_prompt(transcript: str) -> str:
         "field, empty) whenever it wasn't mentioned at all. This applies just as "
         "much to mood_or_preference as any other field: wanting something easy, "
         "quick, or made from whatever's on hand is NOT evidence of tiredness or "
-        "any other emotional state — never write \"tired\" (or infer any mood at "
+        'any other emotional state — never write "tired" (or infer any mood at '
         "all) unless the person's own words actually name one.\n"
         "\n"
         "Every stated constraint must end up SOMEWHERE in the output — never "
@@ -129,6 +133,38 @@ def build_extraction_prompt(transcript: str) -> str:
         'food"). A single mention should only ever land in ONE of these three '
         "fields, whichever actually matches what was said.\n"
         "\n"
+        "POLARITY — read this carefully, because getting it backwards is worse "
+        "than leaving a field empty. dietary_restrictions, avoid_ingredients and "
+        "avoid_dishes hold ONLY things the speaker wants to EXCLUDE, and an item "
+        "goes into one of them ONLY when the speaker used an explicit exclusion "
+        'cue: no, not, without, avoid, skip, hate, "don\'t want", "don\'t like", '
+        '"allergic to", "can\'t eat", "nothing with", "anything but", "anything '
+        'except", "other than", "free of". Something the speaker WANTS — "with '
+        'beef", "I want pork", "something with shrimp", "using eggs", "craving '
+        'pasta" — is NEVER an avoid item. A wanted protein goes in '
+        "protein_preference; any other wanted ingredient goes in "
+        'additional_context (for example "wants eggs and cheese"). The words '
+        '"anything" and "something" do not change polarity; the cue words '
+        'before the food do. "Anything with beef" means beef is WANTED '
+        '(protein_preference: beef, avoid_ingredients: []). "Anything but beef" '
+        'means beef is AVOIDED (avoid_ingredients: ["beef"], protein_preference: '
+        "null). Before writing anything into an avoid field, check that the "
+        "speaker actually said an exclusion cue about that exact item; if they "
+        "did not, it does not belong there.\n"
+        "\n"
+        "WANT versus HAVE — a different distinction from the avoid/want one above. "
+        "ingredients_on_hand holds ONLY specific foods the speaker says they HAVE right "
+        'now, and only on an explicit possession cue: "I have", "I\'ve got", "we have", '
+        '"there\'s X in the fridge/freezer/pantry", "my fridge has", "I\'ve got some X '
+        'left", "I just bought X", "leftover X". Something merely WANTED ("with salmon", '
+        '"I want chicken", "I\'m craving shrimp", "can we do pasta") is NEVER on hand; '
+        "it goes to protein_preference or additional_context as before. A food that is negated or "
+        'gone is not on hand either ("I\'m out of eggs", "I don\'t have milk", "I used '
+        'to have salmon", "no chicken"). The same food can be both: "I have salmon and '
+        'want to use it" puts salmon in ingredients_on_hand AND protein_preference. '
+        "Before writing anything into ingredients_on_hand, check the speaker used a "
+        "possession cue about that exact food.\n"
+        "\n"
         "If someone expresses two things that don't fit together (wanting a "
         "very fast meal but also describing a slow-cooked dish, or wanting "
         "something light but also something heavy and fried), do not silently "
@@ -138,10 +174,12 @@ def build_extraction_prompt(transcript: str) -> str:
         "instead of picking a side.\n"
         "\n"
         "Fields to extract:\n"
-        "- servings: integer number of people, or null\n"
+        "- servings: integer number of people, or null (set it only when the "
+        'speaker says how many people the meal is for: "for one" or "by myself" '
+        "means 1; if they never say, it is null)\n"
         "- max_cook_time_minutes: integer minutes, or null\n"
         "- dietary_restrictions: list of whole-category restrictions actually "
-        "stated (phrase each simply, e.g. \"vegetarian\", \"dairy-free\", "
+        'stated (phrase each simply, e.g. "vegetarian", "dairy-free", '
         '"gluten-free", "low-sodium" — a fixed vocabulary is applied to '
         "these afterward, so simple, common phrasing matters more than exact "
         "wording)\n"
@@ -165,16 +203,17 @@ def build_extraction_prompt(transcript: str) -> str:
         "- avoid_dishes: list of specific dishes or dish-styles to avoid "
         "actually stated\n"
         "- mood_or_preference: a brief note on tone/mood/vague preference "
-        "actually expressed (e.g. \"tired, wants something easy\"), or null "
+        'actually expressed (e.g. "tired, wants something easy"), or null '
         "if nothing like that was expressed\n"
-        "- protein_preference: a specific protein actually mentioned (e.g. "
+        "- protein_preference: a specific protein the speaker WANTS (e.g. "
         '"chicken", "salmon") or a general preference actually stated (e.g. '
-        '"high-protein"), or null\n'
-        "- occasion: a specific occasion actually mentioned (e.g. \"birthday "
+        '"high-protein"), or null. Never a protein they asked to avoid\n'
+        '- occasion: a specific occasion actually mentioned (e.g. "birthday '
         'dinner", "meal prep for the week"), or null\n'
+        "- ingredients_on_hand: list of specific foods the speaker says they have "
+        "(see WANT versus HAVE above); empty when none stated\n"
         "- additional_context: any other concretely stated detail worth "
-        "keeping that doesn't fit the fields above (e.g. an ingredient "
-        "mentioned as already on hand, not yet in the pantry), or null\n"
+        "keeping that doesn't fit the fields above, or null\n"
         "\n"
-        f"Transcript:\n\"\"\"\n{transcript}\n\"\"\"\n"
+        f'Transcript:\n"""\n{transcript}\n"""\n'
     )

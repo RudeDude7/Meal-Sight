@@ -63,6 +63,7 @@ _RESULT_FIELDS = (
     "stream_messages",
     "matched_ingredients",
     "substitutions",
+    "waste_candidates",
 )
 
 
@@ -170,9 +171,7 @@ async def start_recommendation(
             raise APIError(400, "invalid_text", str(exc)) from exc
 
     if not image_bytes and not audio_bytes and not text_input:
-        raise APIError(
-            400, "no_input_provided", "Provide at least one of image, audio, or text."
-        )
+        raise APIError(400, "no_input_provided", "Provide at least one of image, audio, or text.")
 
     session = sessions.create()
 

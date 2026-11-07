@@ -114,9 +114,7 @@ def _base_manager(rating: int | None = None) -> FakeManager:
 async def test_cook_logs_meal_and_deducts_pantry() -> None:
     manager = _base_manager()
     async with running_client(manager) as (client, _manager):
-        response = await client.post(
-            "/api/cook", json={"recipe_id": "recipe-1", "servings_made": 2}
-        )
+        response = await client.post("/api/cook", json={"recipe_id": "recipe-1", "servings_made": 2})
     assert response.status_code == 200
     body = response.json()
     assert body["meal"]["id"] == 42
@@ -237,12 +235,8 @@ async def test_deduction_never_exceeds_pantry_holdings() -> None:
 
 async def test_rating_endpoint_updates_scores() -> None:
     responses: dict[tuple[str, str], ToolCallResult] = {
-        ("user_intelligence", "rate_meal"): ToolCallResult(
-            success=True, data={**MEAL_RECORD, "rating": 4}
-        ),
-        ("user_intelligence", "get_user_profile"): ToolCallResult(
-            success=True, data=PROFILE_DATA_AFTER
-        ),
+        ("user_intelligence", "rate_meal"): ToolCallResult(success=True, data={**MEAL_RECORD, "rating": 4}),
+        ("user_intelligence", "get_user_profile"): ToolCallResult(success=True, data=PROFILE_DATA_AFTER),
     }
     manager = FakeManager(responses)
     async with running_client(manager) as (client, _manager):
@@ -278,9 +272,7 @@ async def test_pantry_failure_after_log_meal_still_returns_200() -> None:
         success=False, error="transport failure"
     )
     async with running_client(manager) as (client, _manager):
-        response = await client.post(
-            "/api/cook", json={"recipe_id": "recipe-1", "servings_made": 2}
-        )
+        response = await client.post("/api/cook", json={"recipe_id": "recipe-1", "servings_made": 2})
     assert response.status_code == 200
     body = response.json()
     assert body["meal"]["id"] == 42

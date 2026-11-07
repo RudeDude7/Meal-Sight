@@ -33,9 +33,7 @@ async def test_update_pantry_happy_path_adds_new_items(mcp_client: Client[Any]) 
 async def test_update_pantry_accumulates_rather_than_replacing(mcp_client: Client[Any]) -> None:
     await mcp_client.call_tool("update_pantry", {"items": [_ONION_ITEM]})
 
-    result = await mcp_client.call_tool(
-        "update_pantry", {"items": [{**_ONION_ITEM, "quantity": 3.0}]}
-    )
+    result = await mcp_client.call_tool("update_pantry", {"items": [{**_ONION_ITEM, "quantity": 3.0}]})
 
     assert result.data["added_count"] == 0
     assert result.data["updated_count"] == 1

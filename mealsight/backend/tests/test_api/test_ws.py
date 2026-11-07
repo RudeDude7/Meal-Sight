@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import threading
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -130,13 +131,33 @@ def test_ws_messages_arrive_in_order() -> None:
     ]
 
 
+async def _wait_until(event: threading.Event, seconds: float = 10.0) -> None:
+    """Waits for a threading.Event without blocking the app's event loop. The bound only exists so a bug
+    that stops the test thread releasing it cannot hang the suite; it is not a timing assumption."""
+    deadline = time.monotonic() + seconds
+    while not event.is_set():
+        if time.monotonic() > deadline:
+            raise TimeoutError("the test never released the held-open run")
+        await asyncio.sleep(0.005)
+
+
 def test_ws_mid_run_receives_buffered_then_live_messages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A client connecting mid-run is first replayed what it missed, then receives what happens after.
+
+    Synchronised with events, not sleeps (it used to sleep 0.15 s and 0.3 s and assume the machine kept up,
+    which made it timing-sensitive on a loaded CI runner). The fake run emits two messages, then is HELD OPEN
+    until the client has connected and read those two. That also makes the test prove its own name: the two
+    messages were read while the run had not progressed, so they can only have been replayed from the buffer,
+    and the third and fourth can only have arrived live."""
+    emitted = threading.Event()
+    release = threading.Event()
+
     async def fake_run_recommendation(**kwargs: Any) -> dict[str, Any]:
         stream = kwargs["stream"]
         stream.emit("node_start", node="perceive")
-        await asyncio.sleep(0.05)
         stream.emit("node_complete", node="perceive", duration_ms=50.0)
-        await asyncio.sleep(0.3)
+        emitted.set()
+        await _wait_until(release)
         stream.emit("recommendation", recipe_id="r1", summary="Pick this one.", available=True)
         return {"final_response": "Fake recipe", "stream_messages": []}
 
@@ -145,16 +166,14 @@ def test_ws_mid_run_receives_buffered_then_live_messages(monkeypatch: pytest.Mon
     with _client() as client:
         start = client.post("/api/recommend", data={"text": "anything"})
         session_id = start.json()["session_id"]
-
-        # Give the background task time to emit node_start/node_complete
-        # (0.05s sleep) before connecting — this is the "mid-run,
-        # buffered" half of the test.
-        time.sleep(0.15)
+        assert emitted.wait(10), "the fake run never emitted its first two messages"
 
         with client.websocket_connect(f"/ws/{session_id}") as ws:
             buffered_first = ws.receive_json()
             buffered_second = ws.receive_json()
-            # live: arrives only after the fake's own 0.3s sleep resolves.
+            # The run is still held open, so these two were replayed from the buffer, not delivered live.
+            assert not release.is_set()
+            release.set()
             live = ws.receive_json()
             complete = ws.receive_json()
 

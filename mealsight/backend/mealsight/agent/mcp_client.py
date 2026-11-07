@@ -197,7 +197,11 @@ class MCPClientManager:
         call_timeout_seconds: float = DEFAULT_CALL_TIMEOUT_SECONDS,
         startup_timeout_seconds: float = DEFAULT_STARTUP_TIMEOUT_SECONDS,
         max_retries: int = DEFAULT_MAX_RETRIES,
+        env: dict[str, str] | None = None,
     ) -> None:
+        # Extra environment for the server subprocesses (merged over the default one). The eval harness
+        # uses it to point the servers at throwaway pantry/profile databases instead of the real ones.
+        self._env = dict(env) if env else None
         self._call_timeout_seconds = call_timeout_seconds
         self._startup_timeout_seconds = startup_timeout_seconds
         self._max_retries = max_retries
@@ -234,12 +238,17 @@ class MCPClientManager:
         ]
         if failures:
             await self.shutdown()
-            raise MCPServerStartupError(
-                "One or more MCP servers failed to start: " + "; ".join(failures)
-            )
+            raise MCPServerStartupError("One or more MCP servers failed to start: " + "; ".join(failures))
 
         self._started = True
         logger.info("mcp_manager_started", servers=server_names)
+
+    def _subprocess_env(self) -> dict[str, str]:
+        """The environment a server subprocess starts with: the PARENT's, plus any extra this manager was
+        given. The stdio transport otherwise starts the child with only a handful of safe variables (HOME,
+        PATH ...), so a server could read its API keys from a .env file but not from real environment
+        variables: it failed to start under Docker, CI or anything that supplies secrets that way."""
+        return {**os.environ, **(self._env or {})}
 
     async def _start_one(self, server_name: ServerName) -> None:
         forwarder = _StderrForwarder(server_name)
@@ -248,6 +257,7 @@ class MCPClientManager:
             command=sys.executable,
             args=["-m", f"mealsight.mcp_servers.{server_name}"],
             cwd=str(BACKEND_DIR),
+            env=self._subprocess_env(),
             log_file=forwarder.file,
             keep_alive=True,
         )
@@ -306,9 +316,7 @@ class MCPClientManager:
         runtime condition worth degrading gracefully around.
         """
         if server not in self._clients:
-            raise ValueError(
-                f"Unknown MCP server {server!r}; expected one of {sorted(EXPECTED_TOOLS)}."
-            )
+            raise ValueError(f"Unknown MCP server {server!r}; expected one of {sorted(EXPECTED_TOOLS)}.")
 
         client = self._clients[server]
         last_error: str | None = None

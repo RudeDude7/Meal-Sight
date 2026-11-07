@@ -40,7 +40,12 @@ BASE_URL = "https://api.mistral.ai/v1"
 # afterward.
 IMAGE_TOKEN_ESTIMATE = 2000
 
-_CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL)
+# Leading and trailing fences are matched independently: ministral-8b-2512
+# was observed returning a complete JSON object followed by a lone closing
+# fence with no opening one (30/30 vision responses, 2026-10-16), which a
+# both-ends-or-nothing pattern leaves untouched.
+_LEADING_FENCE_RE = re.compile(r"^```[A-Za-z0-9_-]*[ \t]*\r?\n?")
+_TRAILING_FENCE_RE = re.compile(r"\r?\n?[ \t]*```$")
 
 _JPEG_MAGIC = b"\xff\xd8\xff"
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -70,14 +75,49 @@ def detect_image_media_type(image_bytes: bytes) -> str:
     raise ValueError("Unrecognized image format — expected JPEG, PNG, or WEBP magic bytes")
 
 
-def _strip_code_fences(text: str) -> str:
+def strip_code_fences(text: str) -> str:
+    """Removes a leading ```/```json fence and/or a trailing ``` fence,
+    each independently, so a payload with only one of the two parses."""
     stripped = text.strip()
-    match = _CODE_FENCE_RE.match(stripped)
-    return match.group(1).strip() if match else stripped
+    stripped = _LEADING_FENCE_RE.sub("", stripped, count=1)
+    stripped = _TRAILING_FENCE_RE.sub("", stripped, count=1)
+    return stripped.strip()
+
+
+def strip_json_comments(text: str) -> str:
+    """Removes // line comments and /* */ block comments that sit OUTSIDE
+    string literals. ministral-8b-2512 habitually annotates list items
+    (`"cuisine"  // User prefers Mexican`), which is not valid JSON; a "//"
+    inside a string (a URL, say) is left alone."""
+    out: list[str] = []
+    i, n = 0, len(text)
+    in_string = False
+    while i < n:
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 1
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+            out.append(ch)
+        elif text.startswith("//", i):
+            newline = text.find("\n", i)
+            i = n if newline == -1 else newline - 1
+        elif text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            i = n if end == -1 else end + 1
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
 
 
 def _parse_and_validate(text: str, schema: type[SchemaT]) -> SchemaT:
-    data = json.loads(_strip_code_fences(text))
+    data = json.loads(strip_json_comments(strip_code_fences(text)))
     return schema.model_validate(data)
 
 
@@ -141,9 +181,7 @@ class MistralProvider(TextProvider, VisionProvider):
     def _auth_headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {settings.mistral_api_key.get_secret_value()}"}
 
-    async def _send_chat(
-        self, body: dict[str, Any], model_id: str, estimated_tokens: int
-    ) -> TextResponse:
+    async def _send_chat(self, body: dict[str, Any], model_id: str, estimated_tokens: int) -> TextResponse:
         await self._rate_limiter.acquire(model_id, estimated_tokens)
         started = time.monotonic()
 
@@ -249,7 +287,7 @@ class MistralProvider(TextProvider, VisionProvider):
         json_prompt = (
             f"{prompt}\n\nRespond with valid JSON only, matching EXACTLY this shape "
             f"(use null for an absent value, [] for an empty list): {schema_description}\n"
-            "No markdown code fences, no other text."
+            "No markdown code fences, no comments, no other text."
         )
         response = await self.complete(
             json_prompt, model_id, system=system, max_tokens=max_tokens, temperature=temperature

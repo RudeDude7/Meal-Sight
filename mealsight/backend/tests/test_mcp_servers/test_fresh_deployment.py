@@ -76,7 +76,12 @@ async def test_recipe_engine_server_works_from_a_fresh_directory_with_no_manual_
     async with Client(recipe_mcp) as client:
         result = await client.call_tool("search_recipes", {"max_results": 5})
 
-    assert result.data == {"results": [], "total_matched": 0}
+    assert result.data == {
+        "results": [],
+        "total_matched": 0,
+        "unenforced_restrictions": [],
+        "excluded_by_ingredient_restrictions": 0,
+    }
 
 
 async def test_pantry_manager_server_works_from_a_fresh_directory_with_no_manual_step() -> None:

@@ -11,8 +11,9 @@ endpoint) skip the token bucket entirely rather than deadlocking against
 an always-empty one.
 
 Concurrency: each model has its own asyncio.Lock, not a single global
-lock, so waiting for mistral-medium-2505's slow 0.42 RPS budget never
-blocks a concurrent call to ministral-8b-2512's much faster budget. Two
+lock, so waiting on one model's slow budget (e.g. a 0.5 RPS ministral-14b
+call) never blocks a concurrent call to a different model with a much
+faster budget (e.g. ministral-8b-2512 at 3.13 RPS). Two
 concurrent callers for the *same* model do serialize — that's the point
 of the lock: the bucket only has room for one call near its refill
 boundary, and holding the lock across the wait is what makes "check, wait,

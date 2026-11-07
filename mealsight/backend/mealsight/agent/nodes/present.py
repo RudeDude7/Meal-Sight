@@ -126,6 +126,7 @@ def _merged_constraints(state: MealSightState) -> dict[str, Any] | None:
         "servings": unified.servings,
         "max_cook_time_minutes": unified.max_cook_time_minutes,
         "dietary_restrictions": unified.dietary_restrictions,
+        "unenforced_restrictions": unified.unenforced_restrictions,
         "cuisine_preference": unified.cuisine_preference,
         "avoid_ingredients": unified.avoid_ingredients,
         "avoid_dishes": unified.avoid_dishes,

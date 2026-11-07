@@ -1,0 +1,22 @@
+[
+ {"id": "have_01", "text": "I have salmon in the freezer, what can I make?", "have": ["salmon"], "not_have": []},
+ {"id": "have_02", "text": "There's chicken thighs in the fridge.", "have": ["chicken thigh"], "not_have": []},
+ {"id": "have_03", "text": "I've got some leftover rice and a couple of eggs.", "have": ["rice", "egg"], "not_have": []},
+ {"id": "have_04", "text": "We have shrimp and lemons at home, something quick.", "have": ["shrimp", "lemon"], "not_have": []},
+ {"id": "have_05", "text": "I just bought tofu, dinner for two.", "have": ["tofu"], "not_have": []},
+ {"id": "have_06", "text": "My fridge has spinach and feta.", "have": ["spinach", "feta"], "not_have": []},
+ {"id": "have_07", "text": "I have chicken, but I'm in the mood for something Italian.", "have": ["chicken"], "not_have": []},
+ {"id": "want_01", "text": "I want something with salmon.", "have": [], "not_have": ["salmon"]},
+ {"id": "want_02", "text": "Anything with chicken, for 4 people.", "have": [], "not_have": ["chicken"]},
+ {"id": "want_03", "text": "I'm craving shrimp.", "have": [], "not_have": ["shrimp"]},
+ {"id": "want_04", "text": "Make me something with beef.", "have": [], "not_have": ["beef"]},
+ {"id": "want_05", "text": "Can we do pasta tonight?", "have": [], "not_have": ["pasta"]},
+ {"id": "want_06", "text": "Something with eggs and cheese.", "have": [], "not_have": ["egg", "cheese"]},
+ {"id": "want_07", "text": "Seafood or fish if possible, dinner for 2.", "have": [], "not_have": ["seafood", "fish"]},
+ {"id": "neg_01", "text": "I'm out of eggs.", "have": [], "not_have": ["egg"]},
+ {"id": "neg_02", "text": "I don't have any milk.", "have": [], "not_have": ["milk"]},
+ {"id": "neg_03", "text": "I used to have salmon but it's gone.", "have": [], "not_have": ["salmon"]},
+ {"id": "neg_04", "text": "No chicken please.", "have": [], "not_have": ["chicken"]},
+ {"id": "both_01", "text": "I have salmon in the freezer and I'd love something with salmon to use it up.", "have": ["salmon"], "not_have": []},
+ {"id": "both_02", "text": "I have chicken but I want fish tonight.", "have": ["chicken"], "not_have": ["fish"]}
+]

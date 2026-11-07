@@ -72,8 +72,12 @@ async def request_with_retry(
                 ) from exc
             delay = _backoff_delay(attempt)
             logger.warning(
-                "provider_retry", provider=provider, model_id=model_id,
-                attempt=attempt + 1, reason="timeout", delay_seconds=delay,
+                "provider_retry",
+                provider=provider,
+                model_id=model_id,
+                attempt=attempt + 1,
+                reason="timeout",
+                delay_seconds=delay,
             )
             await asyncio.sleep(delay)
             continue
@@ -87,8 +91,12 @@ async def request_with_retry(
                 ) from exc
             delay = _backoff_delay(attempt)
             logger.warning(
-                "provider_retry", provider=provider, model_id=model_id,
-                attempt=attempt + 1, reason="connection_error", delay_seconds=delay,
+                "provider_retry",
+                provider=provider,
+                model_id=model_id,
+                attempt=attempt + 1,
+                reason="connection_error",
+                delay_seconds=delay,
             )
             await asyncio.sleep(delay)
             continue
@@ -118,8 +126,12 @@ async def request_with_retry(
             reason = f"http_{response.status_code}"
 
         logger.warning(
-            "provider_retry", provider=provider, model_id=model_id,
-            attempt=attempt + 1, reason=reason, delay_seconds=delay,
+            "provider_retry",
+            provider=provider,
+            model_id=model_id,
+            attempt=attempt + 1,
+            reason=reason,
+            delay_seconds=delay,
         )
         await asyncio.sleep(delay)
 

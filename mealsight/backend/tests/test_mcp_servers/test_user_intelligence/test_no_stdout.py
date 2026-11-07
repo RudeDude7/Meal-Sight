@@ -21,9 +21,7 @@ async def test_nothing_is_written_to_stdout_during_tool_calls(
     await insert_recipe(recipe_id="r1", name="Tacos", cuisine="mexican", ingredients=["beef"])
 
     await mcp_client.call_tool("get_user_profile", {})
-    await mcp_client.call_tool(
-        "update_preferences", {"preference_type": "household_size", "value": 3}
-    )
+    await mcp_client.call_tool("update_preferences", {"preference_type": "household_size", "value": 3})
     await mcp_client.call_tool(
         "update_preferences", {"preference_type": "favorite_color", "value": "blue"}
     )  # validation path

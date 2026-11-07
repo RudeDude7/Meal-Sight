@@ -41,6 +41,7 @@ from .load_nutrition import coverage_report, load_nutrition, print_coverage_repo
 from .load_substitutions import load_substitutions
 from .load_synonyms import load_synonyms
 from .recipes_from_mealdb import run as run_recipe_ingestion
+from .snapshot import load_snapshot
 
 logger = get_logger("mealsight.seed.seed_all")
 
@@ -50,7 +51,7 @@ MIN_SYNONYMS = 80
 MIN_NUTRITION_ENTRIES = 120
 
 
-async def _run() -> int:
+async def _run(from_snapshot: bool = False) -> int:
     warnings: list[str] = []
 
     db = get_recipe_db()
@@ -62,8 +63,12 @@ async def _run() -> int:
     # initialized database.
     await init_database(db, db.schema_path)
 
-    print("Seeding recipes from TheMealDB...")
-    recipe_count = await run_recipe_ingestion(db)
+    if from_snapshot:
+        print("Loading recipes from the pinned snapshot (offline)...")
+        recipe_count = await load_snapshot(db)
+    else:
+        print("Seeding recipes from TheMealDB...")
+        recipe_count = await run_recipe_ingestion(db)
 
     print("Loading ingredient synonyms...")
     synonym_count = await load_synonyms(db)
@@ -125,10 +130,15 @@ def main() -> int:
     [project.scripts] `mealsight-seed` command points at, since console
     script entry points call a plain callable, not a coroutine."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.parse_args()
+    parser.add_argument(
+        "--from-snapshot",
+        action="store_true",
+        help="Load the committed recipe snapshot instead of calling TheMealDB (offline; used by CI).",
+    )
+    args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-    return asyncio.run(_run())
+    return asyncio.run(_run(args.from_snapshot))
 
 
 if __name__ == "__main__":

@@ -58,8 +58,7 @@ def validate_image(image_bytes: bytes) -> None:
 
     if image_format not in SUPPORTED_IMAGE_FORMATS:
         raise ImageValidationError(
-            f"Unsupported image format {image_format!r} — expected one of "
-            f"{sorted(SUPPORTED_IMAGE_FORMATS)}."
+            f"Unsupported image format {image_format!r} — expected one of {sorted(SUPPORTED_IMAGE_FORMATS)}."
         )
 
     if width < MIN_IMAGE_DIMENSION_PX or height < MIN_IMAGE_DIMENSION_PX:

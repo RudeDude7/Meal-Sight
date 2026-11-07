@@ -69,9 +69,7 @@ async def get_expiring_pantry_items(
     endpoint in this router, specifically so the frontend can render the
     backend's own real copy rather than a second, drift-prone
     reimplementation of _suggest_action's category-default table."""
-    result = await manager.call_tool(
-        "pantry_manager", "flag_expiring", {"days_threshold": days_threshold}
-    )
+    result = await manager.call_tool("pantry_manager", "flag_expiring", {"days_threshold": days_threshold})
     return unwrap_mcp_result(result)
 
 

@@ -50,11 +50,15 @@ async def test_ranks_proportional_use_of_the_supplied_list_above_recipe_own_cove
 
 async def test_a_recipe_using_fewer_of_the_supplied_ingredients_ranks_lower(recipe_db: Database) -> None:
     await insert_recipe(
-        recipe_db, recipe_id="full-match", name="Full Match",
+        recipe_db,
+        recipe_id="full-match",
+        name="Full Match",
         ingredients=[_ingredient("egg"), _ingredient("flour"), _ingredient("milk")],
     )
     await insert_recipe(
-        recipe_db, recipe_id="partial-match", name="Partial Match",
+        recipe_db,
+        recipe_id="partial-match",
+        name="Partial Match",
         ingredients=[_ingredient("egg"), _ingredient("cheese")],
     )
 
@@ -64,9 +68,10 @@ async def test_a_recipe_using_fewer_of_the_supplied_ingredients_ranks_lower(reci
 
     assert [r.id for r in result.results] == ["full-match", "partial-match"]
     assert result.results[0].match_percentage == 1.0
-    assert result.results[1].match_percentage == round(1 / 3, 10) or abs(
-        result.results[1].match_percentage - 1 / 3
-    ) < 1e-9
+    assert (
+        result.results[1].match_percentage == round(1 / 3, 10)
+        or abs(result.results[1].match_percentage - 1 / 3) < 1e-9
+    )
 
 
 async def test_minimum_match_percentage_filters_recipes_below_it(recipe_db: Database) -> None:
@@ -84,7 +89,9 @@ async def test_minimum_match_percentage_filters_recipes_below_it(recipe_db: Data
 
 async def test_default_minimum_match_percentage_is_point_six(recipe_db: Database) -> None:
     await insert_recipe(
-        recipe_db, recipe_id="borderline", name="Borderline",
+        recipe_db,
+        recipe_id="borderline",
+        name="Borderline",
         ingredients=[_ingredient("egg"), _ingredient("flour")],
     )
     # 2 of 3 supplied = 0.667, clears the documented default of 0.6.
@@ -111,9 +118,7 @@ async def test_synonyms_resolve_to_the_same_canonical_ingredient(recipe_db: Data
     await recipe_db.execute(
         "INSERT INTO ingredient_synonyms (canonical_name, synonym) VALUES ('green onion', 'scallion')"
     )
-    await insert_recipe(
-        recipe_db, recipe_id="r1", name="R1", ingredients=[_ingredient("scallions")]
-    )
+    await insert_recipe(recipe_db, recipe_id="r1", name="R1", ingredients=[_ingredient("scallions")])
     result = await get_recipe_by_ingredients(recipe_db, ["green onion"], minimum_match_percentage=0.0)
     assert len(result.results) == 1
     assert result.results[0].match_percentage == 1.0
@@ -121,10 +126,10 @@ async def test_synonyms_resolve_to_the_same_canonical_ingredient(recipe_db: Data
 
 async def test_matched_ingredient_names_reflects_the_recipes_own_raw_names(recipe_db: Database) -> None:
     await insert_recipe(
-        recipe_db, recipe_id="r1", name="R1",
+        recipe_db,
+        recipe_id="r1",
+        name="R1",
         ingredients=[_ingredient("Chicken Breast"), _ingredient("Rice")],
     )
-    result = await get_recipe_by_ingredients(
-        recipe_db, ["chicken breast"], minimum_match_percentage=0.0
-    )
+    result = await get_recipe_by_ingredients(recipe_db, ["chicken breast"], minimum_match_percentage=0.0)
     assert result.results[0].matched_ingredient_names == ["Chicken Breast"]

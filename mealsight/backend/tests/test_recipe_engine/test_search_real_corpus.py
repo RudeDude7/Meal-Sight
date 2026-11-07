@@ -58,3 +58,17 @@ async def test_breakfast_mapping_is_the_real_narrow_corpus_category_not_diluted_
         assert result.total_matched > 0, "the real corpus must have at least one breakfast-tagged recipe"
     finally:
         await recipe_db.close()
+
+
+async def test_every_cuisine_label_in_the_real_corpus_has_a_family() -> None:
+    """If a recipe is seeded with a cuisine label that mealsight.matching.cuisine
+    does not know, it would silently be unreachable by its demonym."""
+    from mealsight.matching.cuisine import known_labels
+
+    recipe_db = get_recipe_db()
+    try:
+        rows = await recipe_db.fetch_all("SELECT DISTINCT cuisine FROM recipes WHERE cuisine IS NOT NULL")
+    finally:
+        await recipe_db.close()
+    missing = {str(r["cuisine"]) for r in rows} - set(known_labels())
+    assert not missing, f"cuisine labels with no family in matching/cuisine.py: {sorted(missing)}"

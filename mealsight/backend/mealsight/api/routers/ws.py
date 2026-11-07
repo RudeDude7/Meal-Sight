@@ -74,9 +74,7 @@ async def _send(websocket: WebSocket, message: BaseWSMessage) -> bool:
 
 
 @router.websocket("/ws/{session_id}")
-async def recommendation_websocket(
-    websocket: WebSocket, session_id: str, sessions: SessionsWSDep
-) -> None:
+async def recommendation_websocket(websocket: WebSocket, session_id: str, sessions: SessionsWSDep) -> None:
     await websocket.accept()
 
     session: RecommendationSession | None = sessions.get(session_id)

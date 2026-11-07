@@ -75,6 +75,7 @@ _QUERY_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 def _for_query(value: datetime) -> str:
     return value.strftime(_QUERY_TIMESTAMP_FORMAT)
 
+
 # "A handful" — the task's own explicit framing for the minimum sample
 # size a trend comparison needs before a percentage means anything.
 # Applied to BOTH the current and the previous period: if either has
@@ -119,9 +120,7 @@ def _build_insight(item_name: str, count: int, reasons: list[str]) -> str:
     reason_clause = f"all {_REASON_LABELS[dominant]}" if all_same else f"mostly {_REASON_LABELS[dominant]}"
     suggestion = _REASON_SUGGESTIONS[dominant]
     times = "time" if count == 1 else "times"
-    return (
-        f"You've thrown away {item_name} {count} {times}, {reason_clause} — consider {suggestion}."
-    )
+    return f"You've thrown away {item_name} {count} {times}, {reason_clause} — consider {suggestion}."
 
 
 async def log_waste(
@@ -164,9 +163,7 @@ async def log_waste(
         (canonical, quantity_wasted, unit, reason),
     )
 
-    reason_rows = await pantry_db.fetch_all(
-        "SELECT reason FROM waste_log WHERE item_name = ?", (canonical,)
-    )
+    reason_rows = await pantry_db.fetch_all("SELECT reason FROM waste_log WHERE item_name = ?", (canonical,))
     all_reasons = [row["reason"] for row in reason_rows]
     count = len(all_reasons)
 
@@ -191,9 +188,7 @@ async def log_waste(
     )
 
 
-def _period_bounds(
-    time_range: WasteTimeRange, current_time: datetime
-) -> tuple[datetime, datetime | None]:
+def _period_bounds(time_range: WasteTimeRange, current_time: datetime) -> tuple[datetime, datetime | None]:
     """Returns (current_period_start, previous_period_start), where
     previous_period_start is None for all_time (no previous period
     exists). The current period always runs from its own start through

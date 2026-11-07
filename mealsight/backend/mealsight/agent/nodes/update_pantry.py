@@ -21,6 +21,8 @@ from langgraph.runtime import Runtime
 
 from mealsight.agent.context import AgentContext
 from mealsight.agent.state import MealSightState
+from mealsight.config.settings import settings
+from mealsight.pantry.expiring import split_usable_and_waste
 from mealsight.perception.processor import to_pantry_item_inputs
 from mealsight.utils.logging import get_logger
 
@@ -55,17 +57,28 @@ async def _apply_pantry_update(state: MealSightState, runtime: Runtime[AgentCont
     return messages
 
 
-async def _check_expiring(runtime: Runtime[AgentContext]) -> tuple[list[dict[str, Any]], list[str]]:
+async def _check_expiring(
+    runtime: Runtime[AgentContext],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     result = await runtime.context.mcp.call_tool("pantry_manager", "flag_expiring", {})
     if not (result.success and isinstance(result.data, dict)):
-        return [], [f"[{NODE_NAME}] Couldn't check expiring items: {result.error or 'unknown error'}."]
+        return [], [], [f"[{NODE_NAME}] Couldn't check expiring items: {result.error or 'unknown error'}."]
 
-    items = result.data.get("items", [])
-    if not items:
-        return items, [f"[{NODE_NAME}] Nothing expiring soon."]
-
-    names = ", ".join(item.get("name", "?") for item in items)
-    return items, [f"[{NODE_NAME}] {len(items)} item(s) expiring soon: {names}."]
+    usable, waste = split_usable_and_waste(result.data.get("items", []))
+    messages: list[str] = []
+    if usable:
+        names = ", ".join(item.get("name", "?") for item in usable)
+        messages.append(f"[{NODE_NAME}] {len(usable)} item(s) expiring soon: {names}.")
+    else:
+        messages.append(f"[{NODE_NAME}] Nothing expiring soon.")
+    if waste:
+        names = ", ".join(f"{item.get('name', '?')} ({item['days_overdue']}d overdue)" for item in waste)
+        messages.append(
+            f"[{NODE_NAME}] {len(waste)} item(s) are more than {settings.expired_grace_days} days past "
+            f"their estimated shelf life, so they are treated as waste rather than ingredients to use "
+            f"up: {names}. Log them as waste to clear them from the pantry."
+        )
+    return usable, waste, messages
 
 
 async def _fetch_pantry_items(runtime: Runtime[AgentContext]) -> tuple[list[dict[str, Any]], list[str]]:
@@ -91,10 +104,14 @@ async def update_pantry(state: MealSightState, runtime: Runtime[AgentContext]) -
         update_messages = [f"[{NODE_NAME}] Pantry update failed unexpectedly."]
 
     try:
-        expiring_items, expiring_messages = await _check_expiring(runtime)
+        expiring_items, waste_candidates, expiring_messages = await _check_expiring(runtime)
     except Exception:
         logger.error("update_pantry_expiring_unexpected_failure", exc_info=True)
-        expiring_items, expiring_messages = [], [f"[{NODE_NAME}] Expiring-item check failed unexpectedly."]
+        expiring_items, waste_candidates, expiring_messages = (
+            [],
+            [],
+            [f"[{NODE_NAME}] Expiring-item check failed unexpectedly."],
+        )
 
     try:
         pantry_items, pantry_messages = await _fetch_pantry_items(runtime)
@@ -105,6 +122,7 @@ async def update_pantry(state: MealSightState, runtime: Runtime[AgentContext]) -
     logger.info("node_finished", node=NODE_NAME)
     return {
         "expiring_items": expiring_items,
+        "waste_candidates": waste_candidates,
         "pantry_items": pantry_items,
         "stream_messages": [*update_messages, *expiring_messages, *pantry_messages],
     }

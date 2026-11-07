@@ -1,0 +1,1475 @@
+{
+  "run_id": "run_1793993547",
+  "timestamp": "2026-11-06T19:32:27.304538+00:00",
+  "git_commit": "b200bbb632335be6abd6468916937875cef7921f",
+  "model_ids": {
+    "vision_model": "ministral-8b-2512",
+    "reasoning_model": "ministral-8b-2512",
+    "extraction_model": "ministral-8b-2512"
+  },
+  "prompt_versions": {
+    "vision_perception_prompt": "29437d278060",
+    "reasoning_prompt": "9dba200a64ef",
+    "extraction_prompt": "5ab13971be57"
+  },
+  "component_versions": {
+    "diet_groups": "2b2536c5ce6c",
+    "dietary_vocabulary": "810ae50068a4",
+    "protein_lexicon": "411e56fc683f",
+    "cuisine_families": "3fd7ca3faa74",
+    "avoid_groups": "ce4fbf73ce94",
+    "restriction_backstop_patterns": "70c8a0f535df",
+    "matcher_normalization": "bdbd9df24021",
+    "matcher_thresholds": "806f0633de51",
+    "ranking_weights": "32fdb421c1d2"
+  },
+  "data_versions": {
+    "recipe_corpus": "e10cdd72f5a0",
+    "ingredient_synonyms": "7b33e1297cb5",
+    "substitutions": "feae021fe1d7",
+    "nutrition_reference": "270062fe3c2e"
+  },
+  "dimensions": [
+    {
+      "name": "dimension4_freshness_prioritization",
+      "pass_threshold": 0.8,
+      "score": 0.8,
+      "passed": true,
+      "metrics": {
+        "cases_passed": 12,
+        "cases_total": 15,
+        "pass_threshold": 0.8,
+        "verdicts": {
+          "failed_to_prioritize": 2,
+          "justified_deprioritization": 2,
+          "no_opportunity": 5,
+          "used": 6
+        },
+        "opportunity_cases": 10,
+        "opportunity_cases_passed": 8,
+        "failed_to_prioritize": [
+          "d4_06",
+          "d4_09"
+        ],
+        "case_defects": [
+          "d4_13"
+        ],
+        "expiring_list_errors": [
+          "d4_13"
+        ],
+        "freshness_flag_accuracy": 0.9833333333333333,
+        "freshness_flag_checks": 60,
+        "freshness_flag_wrong": [
+          "d4_08"
+        ],
+        "real_data_untouched": true,
+        "real_db_fingerprints": {
+          "pantry": "87bdf39a65c7ad02",
+          "user_intelligence": "959cc8b3f2be79e5",
+          "recipes": "2eff90a86d06ad65"
+        }
+      },
+      "case_count": 15,
+      "api_calls": 15,
+      "total_tokens": 56368,
+      "wall_clock_seconds": 168.23160124989226,
+      "image_results": [],
+      "case_results": [],
+      "match_case_results": [],
+      "scenario_case_results": [
+        {
+          "case_id": "d4_01",
+          "description": "one item expiring tomorrow, one recipe built on it",
+          "paths": [
+            "basic"
+          ],
+          "expected": {
+            "situation": "must_prioritize",
+            "expiring": [
+              "thyme"
+            ],
+            "waste": []
+          },
+          "actual": {
+            "situation": "must_prioritize",
+            "recommended": "Boulangère Potatoes",
+            "recommended_composite": 0.825,
+            "reported_expiring": [
+              "thyme"
+            ],
+            "reported_waste": [],
+            "cookable_count": 5,
+            "top_by_hand_composite": [
+              [
+                "Boulangère Potatoes",
+                0.825,
+                [
+                  "thyme"
+                ]
+              ],
+              [
+                "Kumpir",
+                0.525,
+                []
+              ],
+              [
+                "Feteer Meshaltet",
+                0.435,
+                []
+              ],
+              [
+                "French Onion Soup",
+                0.375,
+                []
+              ]
+            ]
+          },
+          "verdict": "used",
+          "passed": true,
+          "explanation": "Boulangère Potatoes uses expiring ['thyme'].",
+          "case_defect": null,
+          "diagnostics": {
+            "flag_checks": [
+              {
+                "recipe": "Boulangère Potatoes",
+                "expected_flag": true,
+                "system_flag": true,
+                "ok": true
+              },
+              {
+                "recipe": "Kumpir",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Feteer Meshaltet",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "French Onion Soup",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              }
+            ],
+            "pantry_readback": {
+              "rows": 11,
+              "days_remaining": {
+                "thyme": 1
+              }
+            }
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d4_02",
+          "description": "perishable dairy expiring, many recipes use it",
+          "paths": [
+            "many_users"
+          ],
+          "expected": {
+            "situation": "must_prioritize",
+            "expiring": [
+              "milk"
+            ],
+            "waste": []
+          },
+          "actual": {
+            "situation": "must_prioritize",
+            "recommended": "Toad In The Hole",
+            "recommended_composite": 0.5678,
+            "reported_expiring": [
+              "milk"
+            ],
+            "reported_waste": [],
+            "cookable_count": 20,
+            "top_by_hand_composite": [
+              [
+                "Pancakes",
+                0.825,
+                [
+                  "milk"
+                ]
+              ],
+              [
+                "Home-made Mandazi",
+                0.825,
+                [
+                  "milk"
+                ]
+              ],
+              [
+                "Polskie Nalesniki (Polish Pancakes)",
+                0.7393,
+                [
+                  "milk"
+                ]
+              ],
+              [
+                "Chocolate Gateau",
+                0.725,
+                [
+                  "milk"
+                ]
+              ]
+            ]
+          },
+          "verdict": "used",
+          "passed": true,
+          "explanation": "Toad In The Hole uses expiring ['milk'].",
+          "case_defect": null,
+          "diagnostics": {
+            "flag_checks": [
+              {
+                "recipe": "Toad In The Hole",
+                "expected_flag": true,
+                "system_flag": true,
+                "ok": true
+              },
+              {
+                "recipe": "Paszteciki (Polish Pasties)",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Feteer Meshaltet",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              }
+            ],
+            "pantry_readback": {
+              "rows": 12,
+              "days_remaining": {
+                "milk": 1
+              }
+            }
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d4_03",
+          "description": "two different items expiring, used by different recipes",
+          "paths": [
+            "multiple_expiring"
+          ],
+          "expected": {
+            "situation": "must_prioritize",
+            "expiring": [
+              "thyme",
+              "milk"
+            ],
+            "waste": []
+          },
+          "actual": {
+            "situation": "must_prioritize",
+            "recommended": "Boulangère Potatoes",
+            "recommended_composite": 0.825,
+            "reported_expiring": [
+              "milk",
+              "thyme"
+            ],
+            "reported_waste": [],
+            "cookable_count": 26,
+            "top_by_hand_composite": [
+              [
+                "Pancakes",
+                0.825,
+                [
+                  "milk"
+                ]
+              ],
+              [
+                "Boulangère Potatoes",
+                0.825,
+                [
+                  "thyme"
+                ]
+              ],
+              [
+                "Home-made Mandazi",
+                0.825,
+                [
+                  "milk"
+                ]
+              ],
+              [
+                "Polskie Nalesniki (Polish Pancakes)",
+                0.7393,
+                [
+                  "milk"
+                ]
+              ]
+            ]
+          },
+          "verdict": "used",
+          "passed": true,
+          "explanation": "Boulangère Potatoes uses expiring ['thyme'].",
+          "case_defect": null,
+          "diagnostics": {
+            "flag_checks": [
+              {
+                "recipe": "Boulangère Potatoes",
+                "expected_flag": true,
+                "system_flag": true,
+                "ok": true
+              },
+              {
+                "recipe": "Pierogi (Polish Dumplings)",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Toad In The Hole",
+                "expected_flag": true,
+                "system_flag": true,
+                "ok": true
+              },
+              {
+                "recipe": "Paszteciki (Polish Pasties)",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Feteer Meshaltet",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Spanish Tortilla",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              }
+            ],
+            "pantry_readback": {
+              "rows": 16,
+              "days_remaining": {
+                "milk": 2,
+                "thyme": 1
+              }
+            }
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d4_04",
+          "description": "expiring item that no recipe uses",
+          "paths": [
+            "no_opportunity"
+          ],
+          "expected": {
+            "situation": "no_opportunity",
+            "expiring": [
+              "kiwi"
+            ],
+            "waste": []
+          },
+          "actual": {
+            "situation": "no_opportunity",
+            "recommended": "Kumpir",
+            "recommended_composite": 0.625,
+            "reported_expiring": [
+              "kiwi"
+            ],
+            "reported_waste": [],
+            "cookable_count": 5,
+            "top_by_hand_composite": [
+              [
+                "Kumpir",
+                0.625,
+                []
+              ],
+              [
+                "Boulangère Potatoes",
+                0.435,
+                []
+              ],
+              [
+                "Feteer Meshaltet",
+                0.435,
+                []
+              ],
+              [
+                "French Onion Soup",
+                0.375,
+                []
+              ]
+            ]
+          },
+          "verdict": "no_opportunity",
+          "passed": true,
+          "explanation": "No cookable recipe uses an expiring, usable item, so there was nothing to prioritize.",
+          "case_defect": null,
+          "diagnostics": {
+            "flag_checks": [
+              {
+                "recipe": "Kumpir",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Boulangère Potatoes",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Feteer Meshaltet",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "French Onion Soup",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              }
+            ],
+            "pantry_readback": {
+              "rows": 11,
+              "days_remaining": {
+                "kiwi": 1
+              }
+            }
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d4_05",
+          "description": "item 5 days past its shelf life is waste, not an opportunity",
+          "paths": [
+            "expired_excluded"
+          ],
+          "expected": {
+            "situation": "no_opportunity",
+            "expiring": [],
+            "waste": [
+              "thyme"
+            ]
+          },
+          "actual": {
+            "situation": "no_opportunity",
+            "recommended": "Kumpir",
+            "recommended_composite": 0.525,
+            "reported_expiring": [],
+            "reported_waste": [
+              "thyme"
+            ],
+            "cookable_count": 5,
+            "top_by_hand_composite": [
+              [
+                "Boulangère Potatoes",
+                0.555,
+                []
+              ],
+              [
+                "Kumpir",
+                0.525,
+                []
+              ],
+              [
+                "Feteer Meshaltet",
+                0.435,
+                []
+              ],
+              [
+                "French Onion Soup",
+                0.375,
+                []
+              ]
+            ]
+          },
+          "verdict": "no_opportunity",
+          "passed": true,
+          "explanation": "No cookable recipe uses an expiring, usable item, so there was nothing to prioritize.",
+          "case_defect": null,
+          "diagnostics": {
+            "flag_checks": [
+              {
+                "recipe": "Boulangère Potatoes",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Kumpir",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Feteer Meshaltet",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "French Onion Soup",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              }
+            ],
+            "pantry_readback": {
+              "rows": 11,
+              "days_remaining": {
+                "thyme": -5
+              }
+            }
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d4_06",
+          "description": "grace boundary: 2 days past is still usable, 3 days past is waste",
+          "paths": [
+            "expired_excluded",
+            "boundary"
+          ],
+          "expected": {
+            "situation": "must_prioritize",
+            "expiring": [
+              "thyme"
+            ],
+            "waste": [
+              "vegetable stock"
+            ]
+          },
+          "actual": {
+            "situation": "must_prioritize",
+            "recommended": "Kumpir",
+            "recommended_composite": 0.525,
+            "reported_expiring": [
+              "thyme"
+            ],
+            "reported_waste": [
+              "vegetable stock"
+            ],
+            "cookable_count": 5,
+            "top_by_hand_composite": [
+              [
+                "Boulangère Potatoes",
+                0.705,
+                [
+                  "thyme"
+                ]
+              ],
+              [
+                "Kumpir",
+                0.525,
+                []
+              ],
+              [
+                "Feteer Meshaltet",
+                0.435,
+                []
+              ],
+              [
+                "French Onion Soup",
+                0.375,
+                []
+              ]
+            ]
+          },
+          "verdict": "failed_to_prioritize",
+          "passed": false,
+          "explanation": "Kumpir (composite 0.525, uses no expiring item) was recommended although Boulangère Potatoes (composite 0.705) uses ['thyme'] and scores at least as well.",
+          "case_defect": null,
+          "diagnostics": {
+            "flag_checks": [
+              {
+                "recipe": "Boulangère Potatoes",
+                "expected_flag": true,
+                "system_flag": true,
+                "ok": true
+              },
+              {
+                "recipe": "Kumpir",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Feteer Meshaltet",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "French Onion Soup",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              }
+            ],
+            "pantry_readback": {
+              "rows": 11,
+              "days_remaining": {
+                "thyme": -2,
+                "vegetable stock": -3
+              }
+            }
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d4_07",
+          "description": "a marginal recipe uses the expiring item; a far better recipe exists",
+          "paths": [
+            "justified_deprioritization"
+          ],
+          "expected": {
+            "situation": "justified_deprioritization",
+            "expiring": [
+              "cabbage"
+            ],
+            "waste": []
+          },
+          "actual": {
+            "situation": "justified_deprioritization",
+            "recommended": "Boulangère Potatoes",
+            "recommended_composite": 0.675,
+            "reported_expiring": [
+              "cabbage"
+            ],
+            "reported_waste": [],
+            "cookable_count": 7,
+            "top_by_hand_composite": [
+              [
+                "Boulangère Potatoes",
+                0.675,
+                []
+              ],
+              [
+                "Kumpir",
+                0.525,
+                []
+              ],
+              [
+                "Corned Beef and Cabbage",
+                0.525,
+                [
+                  "cabbage"
+                ]
+              ],
+              [
+                "Golabki (cabbage roll)",
+                0.525,
+                [
+                  "cabbage"
+                ]
+              ]
+            ]
+          },
+          "verdict": "justified_deprioritization",
+          "passed": true,
+          "explanation": "Boulangère Potatoes (composite 0.675) legitimately beats the best expiring-item recipe, Corned Beef and Cabbage (composite 0.525): a stronger match outweighs the freshness bonus.",
+          "case_defect": null,
+          "diagnostics": {
+            "flag_checks": [
+              {
+                "recipe": "Boulangère Potatoes",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Corned Beef and Cabbage",
+                "expected_flag": true,
+                "system_flag": true,
+                "ok": true
+              },
+              {
+                "recipe": "Golabki (cabbage roll)",
+                "expected_flag": true,
+                "system_flag": true,
+                "ok": true
+              },
+              {
+                "recipe": "Feteer Meshaltet",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "French Onion Soup",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              }
+            ],
+            "pantry_readback": {
+              "rows": 12,
+              "days_remaining": {
+                "cabbage": 1
+              }
+            }
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d4_08",
+          "description": "expiring chicken THIGH; the recipe line says just 'chicken'",
+          "paths": [
+            "specificity",
+            "mechanism"
+          ],
+          "expected": {
+            "situation": "must_prioritize",
+            "expiring": [
+              "chicken thigh"
+            ],
+            "waste": []
+          },
+          "actual": {
+            "situation": "must_prioritize",
+            "recommended": "Chicken Karaage",
+            "recommended_composite": 0.6917,
+            "reported_expiring": [
+              "chicken thigh"
+            ],
+            "reported_waste": [],
+            "cookable_count": 3,
+            "top_by_hand_composite": [
+              [
+                "Chicken Karaage",
+                0.6917,
+                [
+                  "chicken thigh"
+                ]
+              ],
+              [
+                "Feteer Meshaltet",
+                0.435,
+                []
+              ],
+              [
+                "Tarte Tatin",
+                0.375,
+                []
+              ]
+            ]
+          },
+          "verdict": "used",
+          "passed": true,
+          "explanation": "Chicken Karaage uses expiring ['chicken thigh']. FRESHNESS FLAG DISAGREES for: Chicken Karaage (should be True, system said False)",
+          "case_defect": null,
+          "diagnostics": {
+            "flag_checks": [
+              {
+                "recipe": "Chicken Karaage",
+                "expected_flag": true,
+                "system_flag": false,
+                "ok": false
+              },
+              {
+                "recipe": "Feteer Meshaltet",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              }
+            ],
+            "pantry_readback": {
+              "rows": 12,
+              "days_remaining": {
+                "chicken thigh": 1
+              }
+            }
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d4_09",
+          "description": "expiring chicken",
+          "paths": [
+            "basic"
+          ],
+          "expected": {
+            "situation": "must_prioritize",
+            "expiring": [
+              "chicken"
+            ],
+            "waste": []
+          },
+          "actual": {
+            "situation": "must_prioritize",
+            "recommended": "Kumpir",
+            "recommended_composite": 0.525,
+            "reported_expiring": [
+              "chicken"
+            ],
+            "reported_waste": [],
+            "cookable_count": 6,
+            "top_by_hand_composite": [
+              [
+                "Chicken & mushroom Hotpot",
+                0.5523,
+                [
+                  "chicken"
+                ]
+              ],
+              [
+                "Kumpir",
+                0.525,
+                []
+              ],
+              [
+                "Boulangère Potatoes",
+                0.435,
+                []
+              ],
+              [
+                "Feteer Meshaltet",
+                0.435,
+                []
+              ]
+            ]
+          },
+          "verdict": "failed_to_prioritize",
+          "passed": false,
+          "explanation": "Kumpir (composite 0.525, uses no expiring item) was recommended although Chicken & mushroom Hotpot (composite 0.5523) uses ['chicken'] and scores at least as well.",
+          "case_defect": null,
+          "diagnostics": {
+            "flag_checks": [
+              {
+                "recipe": "Chicken & mushroom Hotpot",
+                "expected_flag": true,
+                "system_flag": true,
+                "ok": true
+              },
+              {
+                "recipe": "Kumpir",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Boulangère Potatoes",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Feteer Meshaltet",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "French Onion Soup",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              }
+            ],
+            "pantry_readback": {
+              "rows": 11,
+              "days_remaining": {
+                "chicken": 1
+              }
+            }
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d4_10",
+          "description": "nothing near expiry (control)",
+          "paths": [
+            "control"
+          ],
+          "expected": {
+            "situation": "no_opportunity",
+            "expiring": [],
+            "waste": []
+          },
+          "actual": {
+            "situation": "no_opportunity",
+            "recommended": "Boulangère Potatoes",
+            "recommended_composite": 0.675,
+            "reported_expiring": [],
+            "reported_waste": [],
+            "cookable_count": 5,
+            "top_by_hand_composite": [
+              [
+                "Boulangère Potatoes",
+                0.675,
+                []
+              ],
+              [
+                "Kumpir",
+                0.625,
+                []
+              ],
+              [
+                "Feteer Meshaltet",
+                0.435,
+                []
+              ],
+              [
+                "French Onion Soup",
+                0.375,
+                []
+              ]
+            ]
+          },
+          "verdict": "no_opportunity",
+          "passed": true,
+          "explanation": "No cookable recipe uses an expiring, usable item, so there was nothing to prioritize.",
+          "case_defect": null,
+          "diagnostics": {
+            "flag_checks": [
+              {
+                "recipe": "Boulangère Potatoes",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Kumpir",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Feteer Meshaltet",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "French Onion Soup",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              }
+            ],
+            "pantry_readback": {
+              "rows": 12,
+              "days_remaining": {}
+            }
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d4_11",
+          "description": "threshold edge: 3 days left counts, 4 days left does not",
+          "paths": [
+            "boundary"
+          ],
+          "expected": {
+            "situation": "must_prioritize",
+            "expiring": [
+              "thyme"
+            ],
+            "waste": []
+          },
+          "actual": {
+            "situation": "must_prioritize",
+            "recommended": "Boulangère Potatoes",
+            "recommended_composite": 0.825,
+            "reported_expiring": [
+              "thyme"
+            ],
+            "reported_waste": [],
+            "cookable_count": 5,
+            "top_by_hand_composite": [
+              [
+                "Boulangère Potatoes",
+                0.825,
+                [
+                  "thyme"
+                ]
+              ],
+              [
+                "Kumpir",
+                0.625,
+                []
+              ],
+              [
+                "Feteer Meshaltet",
+                0.435,
+                []
+              ],
+              [
+                "French Onion Soup",
+                0.375,
+                []
+              ]
+            ]
+          },
+          "verdict": "used",
+          "passed": true,
+          "explanation": "Boulangère Potatoes uses expiring ['thyme'].",
+          "case_defect": null,
+          "diagnostics": {
+            "flag_checks": [
+              {
+                "recipe": "Boulangère Potatoes",
+                "expected_flag": true,
+                "system_flag": true,
+                "ok": true
+              },
+              {
+                "recipe": "Kumpir",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Feteer Meshaltet",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "French Onion Soup",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              }
+            ],
+            "pantry_readback": {
+              "rows": 12,
+              "days_remaining": {
+                "cheese": 4,
+                "thyme": 3
+              }
+            }
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d4_12",
+          "description": "expiring item whose only recipe cannot be cooked",
+          "paths": [
+            "uncookable_user"
+          ],
+          "expected": {
+            "situation": "no_opportunity",
+            "expiring": [
+              "salmon"
+            ],
+            "waste": []
+          },
+          "actual": {
+            "situation": "no_opportunity",
+            "recommended": "Kumpir",
+            "recommended_composite": 0.525,
+            "reported_expiring": [
+              "salmon"
+            ],
+            "reported_waste": [],
+            "cookable_count": 5,
+            "top_by_hand_composite": [
+              [
+                "Kumpir",
+                0.525,
+                []
+              ],
+              [
+                "Boulangère Potatoes",
+                0.435,
+                []
+              ],
+              [
+                "Feteer Meshaltet",
+                0.435,
+                []
+              ],
+              [
+                "French Onion Soup",
+                0.375,
+                []
+              ]
+            ]
+          },
+          "verdict": "no_opportunity",
+          "passed": true,
+          "explanation": "No cookable recipe uses an expiring, usable item, so there was nothing to prioritize.",
+          "case_defect": null,
+          "diagnostics": {
+            "flag_checks": [
+              {
+                "recipe": "Kumpir",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Boulangère Potatoes",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Feteer Meshaltet",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "French Onion Soup",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              }
+            ],
+            "pantry_readback": {
+              "rows": 10,
+              "days_remaining": {
+                "salmon": 1
+              }
+            }
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d4_13",
+          "description": "expiring staple used by nearly every baking recipe",
+          "paths": [
+            "many_users"
+          ],
+          "expected": {
+            "situation": "must_prioritize",
+            "expiring": [
+              "butter"
+            ],
+            "waste": []
+          },
+          "actual": {
+            "situation": "no_opportunity",
+            "recommended": "Feteer Meshaltet",
+            "recommended_composite": 0.435,
+            "reported_expiring": [],
+            "reported_waste": [],
+            "cookable_count": 20,
+            "top_by_hand_composite": [
+              [
+                "Pancakes",
+                0.675,
+                []
+              ],
+              [
+                "Home-made Mandazi",
+                0.675,
+                []
+              ],
+              [
+                "Mince Pies",
+                0.625,
+                []
+              ],
+              [
+                "Polskie Nalesniki (Polish Pancakes)",
+                0.5893,
+                []
+              ]
+            ]
+          },
+          "verdict": "no_opportunity",
+          "passed": false,
+          "explanation": "No cookable recipe uses an expiring, usable item, so there was nothing to prioritize. EXPIRING LIST WRONG: reported [], expected ['butter'].",
+          "case_defect": "designed as must_prioritize but the pantry produces no_opportunity (cookable users of an expiring item: []) | derived expiring [] / waste [] differ from the case",
+          "diagnostics": {
+            "flag_checks": [
+              {
+                "recipe": "Paszteciki (Polish Pasties)",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Feteer Meshaltet",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Toad In The Hole",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              }
+            ],
+            "pantry_readback": {
+              "rows": 12,
+              "days_remaining": {}
+            }
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d4_14",
+          "description": "expiring vegetable that several savoury recipes use",
+          "paths": [
+            "basic"
+          ],
+          "expected": {
+            "situation": "must_prioritize",
+            "expiring": [
+              "potato"
+            ],
+            "waste": []
+          },
+          "actual": {
+            "situation": "must_prioritize",
+            "recommended": "Boulangère Potatoes",
+            "recommended_composite": 0.825,
+            "reported_expiring": [
+              "potato"
+            ],
+            "reported_waste": [],
+            "cookable_count": 5,
+            "top_by_hand_composite": [
+              [
+                "Boulangère Potatoes",
+                0.825,
+                [
+                  "potato"
+                ]
+              ],
+              [
+                "Kumpir",
+                0.775,
+                [
+                  "potato"
+                ]
+              ],
+              [
+                "Feteer Meshaltet",
+                0.435,
+                []
+              ],
+              [
+                "French Onion Soup",
+                0.375,
+                []
+              ]
+            ]
+          },
+          "verdict": "used",
+          "passed": true,
+          "explanation": "Boulangère Potatoes uses expiring ['potato'].",
+          "case_defect": null,
+          "diagnostics": {
+            "flag_checks": [
+              {
+                "recipe": "Boulangère Potatoes",
+                "expected_flag": true,
+                "system_flag": true,
+                "ok": true
+              },
+              {
+                "recipe": "Kumpir",
+                "expected_flag": true,
+                "system_flag": true,
+                "ok": true
+              },
+              {
+                "recipe": "Feteer Meshaltet",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "French Onion Soup",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              }
+            ],
+            "pantry_readback": {
+              "rows": 12,
+              "days_remaining": {
+                "potato": 2
+              }
+            }
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d4_15",
+          "description": "second marginal user: lemon expiring, only a weak recipe uses it",
+          "paths": [
+            "justified_deprioritization"
+          ],
+          "expected": {
+            "situation": "justified_deprioritization",
+            "expiring": [
+              "lemon"
+            ],
+            "waste": []
+          },
+          "actual": {
+            "situation": "justified_deprioritization",
+            "recommended": "Boulangère Potatoes",
+            "recommended_composite": 0.675,
+            "reported_expiring": [
+              "lemon"
+            ],
+            "reported_waste": [],
+            "cookable_count": 6,
+            "top_by_hand_composite": [
+              [
+                "Boulangère Potatoes",
+                0.675,
+                []
+              ],
+              [
+                "Kumpir",
+                0.525,
+                []
+              ],
+              [
+                "Skillet Apple Pork Chops with Roasted Sweet Potatoes & Zucchini",
+                0.525,
+                [
+                  "lemon"
+                ]
+              ],
+              [
+                "Feteer Meshaltet",
+                0.435,
+                []
+              ]
+            ]
+          },
+          "verdict": "justified_deprioritization",
+          "passed": true,
+          "explanation": "Boulangère Potatoes (composite 0.675) legitimately beats the best expiring-item recipe, Skillet Apple Pork Chops with Roasted Sweet Potatoes & Zucchini (composite 0.525): a stronger match outweighs the freshness bonus.",
+          "case_defect": null,
+          "diagnostics": {
+            "flag_checks": [
+              {
+                "recipe": "Boulangère Potatoes",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Kumpir",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "Feteer Meshaltet",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              },
+              {
+                "recipe": "French Onion Soup",
+                "expected_flag": false,
+                "system_flag": false,
+                "ok": true
+              }
+            ],
+            "pantry_readback": {
+              "rows": 12,
+              "days_remaining": {
+                "lemon": 1
+              }
+            }
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        }
+      ]
+    }
+  ],
+  "passed": true,
+  "pantry": {
+    "fixture": "demo_pantry.json",
+    "fixture_sha256": "756090ab287f",
+    "photo_sources": {
+      "photo_05": 15,
+      "photo_09": 18,
+      "photo_12": 18,
+      "photo_15": 20,
+      "photo_22": 14,
+      "photo_29": 20
+    },
+    "photo_items_note": "raw analyze_fridge_photo output, uncurated; duplicates across photos collapse to one row",
+    "staples_added_by_hand": [
+      "olive oil",
+      "vegetable oil",
+      "salt",
+      "black pepper",
+      "all purpose flour",
+      "sugar",
+      "paprika",
+      "ground cumin",
+      "dried oregano",
+      "chili powder",
+      "cinnamon",
+      "garlic powder",
+      "onion powder",
+      "dried thyme"
+    ],
+    "staples_note": "oil, salt, pepper, flour, sugar and common dried spices; no eggs, rice, pasta or proteins were added",
+    "rows_at_run_start": 64,
+    "pantry_content_sha256": "c975c014058a"
+  },
+  "notes": [
+    "Dimension 1 baseline SUPERSEDES the earlier F1 0.64 (mistral-medium-2505) and 0.55 (ministral-8b-2512) figures. Two scorer corrections make those numbers non-comparable, and both can only lower a score: (1) a photo where the model identified nothing now counts as a zero instead of being dropped from the mean; (2) 'green onion' no longer matches ground-truth 'onion' (a scallion is not a bulb onion). A lower number than 0.55 is therefore not by itself a model regression.",
+    "Dimension 2 now enforces hand-authored constraints (eval/cases.py) in addition to what the pipeline extracted, whole-word avoid matching, and a dimension verdict that requires every case to pass.",
+    "Dimension 2 corrections after run_1793926853: expectations for d2_10, d2_12 and d2_30 were corrected (see eval/cases.py CORRECTIONS); only a user-STATED cook-time limit is enforced by the scorer, not the profile default. The pipeline changed too: stated-vs-default cook time, relaxation on 'nothing cookable', code-level avoid-list exclusion, and a deterministic dietary-restriction backstop. Compare this run to run_1793926853 with those changes in mind; they are not like-for-like."
+  ],
+  "git_dirty": true,
+  "git_diff_sha256": "bf6a1423d452"
+}

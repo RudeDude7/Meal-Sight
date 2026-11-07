@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = REPO_ROOT / ".env"
 REQUEST_TIMEOUT = 30
-MODEL = "mistral-medium-2505"
+MODEL = "ministral-8b-2512"
 
 CALLS_PER_RECOMMENDATION = 6
 TPM_CEILING = 1_000_000

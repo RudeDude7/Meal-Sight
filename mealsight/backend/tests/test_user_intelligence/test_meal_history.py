@@ -76,9 +76,7 @@ async def test_get_meal_history_orders_most_recent_first(user_db: Database, reci
 
 async def test_get_meal_history_filters_by_cuisine_and_rating(user_db: Database, recipe_db: Database) -> None:
     today = date.today()
-    await log_meal(
-        "recipe-1", "Thai", "thai", None, today, rating=5, user_db=user_db, recipe_db=recipe_db
-    )
+    await log_meal("recipe-1", "Thai", "thai", None, today, rating=5, user_db=user_db, recipe_db=recipe_db)
     await log_meal(
         "recipe-2", "Italian", "italian", None, today, rating=2, user_db=user_db, recipe_db=recipe_db
     )

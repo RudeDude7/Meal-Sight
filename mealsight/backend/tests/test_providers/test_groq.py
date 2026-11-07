@@ -38,9 +38,7 @@ async def test_transcribe_returns_text_on_success(provider: GroqProvider) -> Non
 
 @respx.mock
 async def test_cloudflare_1010_surfaces_as_provider_unavailable(provider: GroqProvider) -> None:
-    cloudflare_body = (
-        "<html><body>Sorry, you have been blocked</body></html>\nerror code: 1010"
-    )
+    cloudflare_body = "<html><body>Sorry, you have been blocked</body></html>\nerror code: 1010"
     respx.post(TRANSCRIBE_URL).mock(
         return_value=httpx.Response(403, text=cloudflare_body, headers={"Content-Type": "text/html"})
     )

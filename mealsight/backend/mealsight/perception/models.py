@@ -113,6 +113,10 @@ class RawExtractedConstraints(BaseModel):
     avoid_dishes: list[str] = []
     mood_or_preference: str | None = None
     protein_preference: str | None = None
+    # Foods the speaker says they HAVE ("there's salmon in the freezer").
+    # Distinct from protein_preference / wanted ingredients, which are what
+    # they WANT and say nothing about what is on hand.
+    ingredients_on_hand: list[str] = []
     occasion: str | None = None
     additional_context: str | None = None
 
@@ -147,6 +151,7 @@ class AudioPerception(BaseModel):
     protein_preference: str | None
     occasion: str | None
     additional_context: str | None
+    ingredients_on_hand: list[str] = []
 
 
 class TextPerception(BaseModel):
@@ -169,6 +174,7 @@ class TextPerception(BaseModel):
     protein_preference: str | None
     occasion: str | None
     additional_context: str | None
+    ingredients_on_hand: list[str] = []
 
 
 ModalityName = Literal["vision", "audio", "text"]
@@ -257,3 +263,25 @@ class UnifiedMealRequest(BaseModel):
     occasion: str | None
     modalities_received: list[ModalityName]
     conflicts_detected: list[DetectedConflict]
+    # True when max_cook_time_minutes was filled from the user profile's
+    # default because the user stated no time. A stated limit is a
+    # constraint; a profile default only exists so a request with no stated
+    # time still gets a sensible answer, so it ranks and never excludes.
+    max_cook_time_is_default: bool = False
+    # True when protein_preference came from the saved profile because the request stated none.
+    protein_preference_is_default: bool = False
+    # Restrictions in dietary_restrictions that came from the saved profile (a subset of it), for disclosure.
+    restrictions_from_profile: list[str] = []
+
+    @property
+    def unenforced_restrictions(self) -> list[str]:
+        """Stated restrictions the system cannot check (see mealsight.matching.diet.UNENFORCED).
+        They are disclosed to the user, never silently dropped."""
+        from mealsight.matching.diet import split_restrictions
+
+        return split_restrictions(self.dietary_restrictions).unenforced
+
+    @property
+    def stated_max_cook_time_minutes(self) -> int | None:
+        """The cook-time limit the user actually stated, else None."""
+        return None if self.max_cook_time_is_default else self.max_cook_time_minutes

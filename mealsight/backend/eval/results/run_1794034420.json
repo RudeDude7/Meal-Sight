@@ -1,0 +1,1934 @@
+{
+  "run_id": "run_1794034420",
+  "timestamp": "2026-11-07T06:53:40.898886+00:00",
+  "git_commit": "b200bbb632335be6abd6468916937875cef7921f",
+  "model_ids": {
+    "vision_model": "ministral-8b-2512",
+    "reasoning_model": "ministral-8b-2512",
+    "extraction_model": "ministral-8b-2512"
+  },
+  "prompt_versions": {
+    "vision_perception_prompt": "29437d278060",
+    "reasoning_prompt": "9dba200a64ef",
+    "extraction_prompt": "5ab13971be57"
+  },
+  "component_versions": {
+    "diet_groups": "2b2536c5ce6c",
+    "dietary_vocabulary": "810ae50068a4",
+    "protein_lexicon": "411e56fc683f",
+    "cuisine_families": "3fd7ca3faa74",
+    "avoid_groups": "ce4fbf73ce94",
+    "restriction_backstop_patterns": "70c8a0f535df",
+    "matcher_normalization": "bdbd9df24021",
+    "matcher_thresholds": "806f0633de51",
+    "ranking_weights": "32fdb421c1d2"
+  },
+  "data_versions": {
+    "recipe_corpus": "e10cdd72f5a0",
+    "ingredient_synonyms": "7b33e1297cb5",
+    "substitutions": "feae021fe1d7",
+    "nutrition_reference": "270062fe3c2e"
+  },
+  "dimensions": [
+    {
+      "name": "dimension3_match_accuracy",
+      "pass_threshold": 1.0,
+      "score": 1.0,
+      "passed": true,
+      "metrics": {
+        "cases_passed": 32,
+        "cases_total": 32,
+        "score_accuracy": 1.0,
+        "classification_accuracy": 1.0,
+        "can_cook_accuracy": 1.0,
+        "exclusion_accuracy": 1.0,
+        "score_correct_but_misclassified": [],
+        "score_tolerance": 0.001,
+        "disagreeing_cases": [],
+        "by_path_passed_of_total": {
+          "avoid_exclusion": "4/4",
+          "clamp": "1/1",
+          "critical_missing": "5/5",
+          "dietary_rejection": "1/1",
+          "duplicate_line": "2/2",
+          "exact": "2/2",
+          "expired_excluded": "2/2",
+          "normalization": "3/3",
+          "optional_gap": "2/2",
+          "protected_term": "5/5",
+          "specificity_full": "4/4",
+          "specificity_partial": "1/1",
+          "stock_cube": "2/2",
+          "substitution": "4/4",
+          "synonym": "7/7",
+          "threshold": "2/2"
+        },
+        "by_basis": {
+          "intent": "3/3",
+          "rule": "29/29"
+        }
+      },
+      "case_count": 32,
+      "api_calls": 0,
+      "total_tokens": 0,
+      "wall_clock_seconds": 0.02575595793314278,
+      "image_results": [],
+      "case_results": [],
+      "match_case_results": [
+        {
+          "case_id": "d3_01",
+          "description": "exact matches through plural / prep-word normalization",
+          "recipe_id": "52914",
+          "recipe_name": "Boulangère Potatoes",
+          "paths": [
+            "exact",
+            "normalization"
+          ],
+          "basis": "rule",
+          "expected_score": 1.0,
+          "actual_score": 1.0,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "olive oil",
+              "onion",
+              "potato",
+              "thyme",
+              "vegetable stock"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "olive oil",
+              "onion",
+              "potato",
+              "thyme",
+              "vegetable stock"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "Onions->onion, fresh thyme->thyme ('fresh' is a prep word), potatoes->potato; olive oil and vegetable stock are protected two-word terms kept whole. All 5 of 5 present: 5/5 = 1.0."
+        },
+        {
+          "case_id": "d3_02",
+          "description": "synonym matches: scallions=spring onions, white rice=rice, cilantro=coriander",
+          "recipe_id": "52956",
+          "recipe_name": "Chicken Congee",
+          "paths": [
+            "synonym"
+          ],
+          "basis": "rule",
+          "expected_score": 0.8889,
+          "actual_score": 0.8889,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "chicken",
+              "cilantro",
+              "ginger",
+              "green onion",
+              "pepper",
+              "rice",
+              "salt",
+              "water"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "ginger cordial"
+            ],
+            "critical_missing": [],
+            "score": 0.8889,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "chicken",
+              "cilantro",
+              "ginger",
+              "green onion",
+              "pepper",
+              "rice",
+              "salt",
+              "water"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "ginger cordial"
+            ],
+            "critical_missing": [],
+            "score": 0.8889,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "Recipe: Chicken Salt Pepper 'Ginger Cordial' Ginger 'Spring Onions' Rice Water Coriander (9). Synonym table: spring onion(s) and scallion(s) -> green onion; white rice -> rice; coriander -> cilantro. 'ginger cordial' is not 'ginger' (extra word 'cordial' is no cut/variety), so missing (important). 8 matched / 9 = 0.8889."
+        },
+        {
+          "case_id": "d3_03",
+          "description": "specificity, pantry MORE specific: chicken thighs satisfy 'chicken' fully",
+          "recipe_id": "52831",
+          "recipe_name": "Chicken Karaage",
+          "paths": [
+            "specificity_full"
+          ],
+          "basis": "rule",
+          "expected_score": 0.6667,
+          "actual_score": 0.6667,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "chicken",
+              "garlic",
+              "ginger",
+              "lemon",
+              "soy sauce",
+              "vegetable oil"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "potato starch",
+              "sake",
+              "sugar"
+            ],
+            "critical_missing": [],
+            "score": 0.6667,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "chicken",
+              "garlic",
+              "ginger",
+              "lemon",
+              "soy sauce",
+              "vegetable oil"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "potato starch",
+              "sake",
+              "sugar"
+            ],
+            "critical_missing": [],
+            "score": 0.6667,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "'chicken thigh' has every word of 'chicken' plus 'thigh', a listed cut: full match. 'Granulated sugar' resolves to sugar (synonym) and is not in the pantry; sake and potato starch absent; none has a substitution. 6 matched / 9 = 0.6667; chicken (critical) is matched, so can cook."
+        },
+        {
+          "case_id": "d3_04",
+          "description": "specificity, pantry LESS specific: generic chicken for 'chicken breast' is a partial",
+          "recipe_id": "52765",
+          "recipe_name": "Chicken Enchilada Casserole",
+          "paths": [
+            "specificity_partial"
+          ],
+          "basis": "rule",
+          "expected_score": 0.675,
+          "actual_score": 0.675,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "corn tortilla",
+              "enchilada sauce"
+            ],
+            "substitutable": [],
+            "partial": [
+              [
+                "chicken breast",
+                "chicken"
+              ]
+            ],
+            "missing": [
+              "monterey jack cheese"
+            ],
+            "critical_missing": [],
+            "score": 0.675,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "corn tortilla",
+              "enchilada sauce"
+            ],
+            "substitutable": [],
+            "partial": [
+              [
+                "chicken breast",
+                "chicken"
+              ]
+            ],
+            "missing": [
+              "monterey jack cheese"
+            ],
+            "critical_missing": [],
+            "score": 0.675,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "Recipe: 'Enchilada sauce' 'shredded Monterey Jack cheese' 'corn tortillas' 'chicken breasts' (4). The recipe wants 'chicken breast'; pantry 'chicken' lacks 'breast', a listed cut: partial, worth 0.7. Monterey Jack is not a cut/variety word, so the cheese is missing. (2 + 0.7)/4 = 0.675. The partial is the critical item and is NOT critical-missing."
+        },
+        {
+          "case_id": "d3_05",
+          "description": "protected term: sweet potato must not satisfy potato",
+          "recipe_id": "52914",
+          "recipe_name": "Boulangère Potatoes",
+          "paths": [
+            "protected_term",
+            "critical_missing"
+          ],
+          "basis": "rule",
+          "expected_score": 0.5,
+          "actual_score": 0.5,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "olive oil",
+              "onion",
+              "thyme",
+              "vegetable stock"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "potato"
+            ],
+            "critical_missing": [
+              "potato"
+            ],
+            "score": 0.5,
+            "can_cook": false,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "olive oil",
+              "onion",
+              "thyme",
+              "vegetable stock"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "potato"
+            ],
+            "critical_missing": [
+              "potato"
+            ],
+            "score": 0.5,
+            "can_cook": false,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "'sweet potato' is protected, so it is not 'potato' plus a variety word. Potatoes is the critical ingredient and is missing. base 4/5 = 0.8, minus 0.3 for one critical missing = 0.5. The score reaches the 0.5 threshold, but a critical ingredient is missing, so can_cook is False."
+        },
+        {
+          "case_id": "d3_06",
+          "description": "protected term: cream must not satisfy cream cheese",
+          "recipe_id": "53024",
+          "recipe_name": "Rogaliki (Polish Croissant Cookies)",
+          "paths": [
+            "protected_term",
+            "synonym"
+          ],
+          "basis": "rule",
+          "expected_score": 0.8333,
+          "actual_score": 0.8333,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "all purpose flour",
+              "baking powder",
+              "butter",
+              "egg yolk",
+              "jam"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "cream cheese"
+            ],
+            "critical_missing": [],
+            "score": 0.8333,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "all purpose flour",
+              "baking powder",
+              "butter",
+              "egg yolk",
+              "jam"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "cream cheese"
+            ],
+            "critical_missing": [],
+            "score": 0.8333,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "Recipe: Butter 'Egg Yolks'[c] 'Cream Cheese' 'Baking Powder' Flour Jam (6). Pantry 'cream' resolves through the synonym table to heavy cream, which is not cream cheese (protected). Flour resolves to all purpose flour on both sides. 5/6 = 0.8333."
+        },
+        {
+          "case_id": "d3_07",
+          "description": "protected term that can collapse: 'hot sauce' must not become plain 'sauce'",
+          "recipe_id": "52769",
+          "recipe_name": "Kapsalon",
+          "paths": [
+            "protected_term"
+          ],
+          "basis": "rule",
+          "expected_score": 0.875,
+          "actual_score": 0.875,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "cucumber",
+              "doner meat",
+              "fry",
+              "garlic sauce",
+              "gouda cheese",
+              "lettuce",
+              "tomato"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "hot sauce"
+            ],
+            "critical_missing": [],
+            "score": 0.875,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "cucumber",
+              "doner meat",
+              "fry",
+              "garlic sauce",
+              "gouda cheese",
+              "lettuce",
+              "tomato"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "hot sauce"
+            ],
+            "critical_missing": [],
+            "score": 0.875,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "Recipe: Fries, 'Doner Meat', 'Garlic sauce', Hotsauce, Lettuce, Tomato, Cucumber, 'Gouda cheese' (8). Synonym table: hotsauce -> hot sauce. 'hot' is a prep modifier that normalization strips, so 'hot sauce' survives only because it is a PROTECTED term; without protection it would collapse to 'sauce' and be satisfied by the pantry's generic 'sauce'. It must not be: hot sauce is missing (important). 'Fries' singularizes to 'fry'. 7 of 8 matched = 0.875, nothing critical missing. [Replaced after the first run. The original d3_07 (pantry 'cream cheese' against a recipe's 'heavy cream') passed, but a mutation check showed it could not fail on protected-term logic: both names carry an extra word, so they never match whatever is protected. This case can fail: it is the one place PROTECTED_TERMS changes an outcome, because 'hot' is stripped as a prep word.]"
+        },
+        {
+          "case_id": "d3_08",
+          "description": "protected term: spring onion (green onion) must not satisfy onion",
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "paths": [
+            "protected_term",
+            "synonym"
+          ],
+          "basis": "rule",
+          "expected_score": 0.8333,
+          "actual_score": 0.8333,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "butter",
+              "cheese",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "onion"
+            ],
+            "critical_missing": [],
+            "score": 0.8333,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "butter",
+              "cheese",
+              "potato",
+              "red chilli flake",
+              "red pepper"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "onion"
+            ],
+            "critical_missing": [],
+            "score": 0.8333,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "spring onions -> green onion (synonym), which is protected and not 'onion' plus a variety word. Onion (important) is missing; 5/6 = 0.8333."
+        },
+        {
+          "case_id": "d3_09",
+          "description": "specificity full by colour + optional-only gaps still cook",
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "paths": [
+            "specificity_full",
+            "optional_gap"
+          ],
+          "basis": "rule",
+          "expected_score": 0.6667,
+          "actual_score": 0.6667,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "red chilli flake",
+              "red pepper"
+            ],
+            "critical_missing": [],
+            "score": 0.6667,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "butter",
+              "cheese",
+              "onion",
+              "potato"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "red chilli flake",
+              "red pepper"
+            ],
+            "critical_missing": [],
+            "score": 0.6667,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "'red onion' is 'onion' plus the listed variety word 'red': full match. The two missing items are both optional, so nothing critical is missing: 4/6 = 0.6667, can cook."
+        },
+        {
+          "case_id": "d3_10",
+          "description": "substitution applied: oat milk for milk",
+          "recipe_id": "52854",
+          "recipe_name": "Pancakes",
+          "paths": [
+            "substitution"
+          ],
+          "basis": "rule",
+          "expected_score": 0.9571,
+          "actual_score": 0.9571,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "all purpose flour",
+              "blueberry",
+              "egg",
+              "raspberry",
+              "sugar",
+              "sunflower oil"
+            ],
+            "substitutable": [
+              [
+                "milk",
+                "oat milk"
+              ]
+            ],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 0.9571,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "all purpose flour",
+              "blueberry",
+              "egg",
+              "raspberry",
+              "sugar",
+              "sunflower oil"
+            ],
+            "substitutable": [
+              [
+                "milk",
+                "oat milk"
+              ]
+            ],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 0.9571,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "Substitutions table: milk -> almond milk / oat milk / soy milk (all 1:1, minimal). Pantry has oat milk. 6 matched + 1 substituted: (6 + 0.7)/7 = 0.9571."
+        },
+        {
+          "case_id": "d3_11",
+          "description": "substitution applied: evaporated milk for heavy cream (no restriction)",
+          "recipe_id": "52787",
+          "recipe_name": "Hot Chocolate Fudge",
+          "paths": [
+            "substitution"
+          ],
+          "basis": "rule",
+          "expected_score": 0.95,
+          "actual_score": 0.95,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "chocolate chip",
+              "condensed milk",
+              "miniature marshmallow",
+              "vanilla extract",
+              "white chocolate chip"
+            ],
+            "substitutable": [
+              [
+                "heavy cream",
+                "evaporated milk"
+              ]
+            ],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 0.95,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "chocolate chip",
+              "condensed milk",
+              "miniature marshmallow",
+              "vanilla extract",
+              "white chocolate chip"
+            ],
+            "substitutable": [
+              [
+                "heavy cream",
+                "evaporated milk"
+              ]
+            ],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 0.95,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "Substitutions: heavy cream -> evaporated milk (1:1, minimal). (5 + 0.7)/6 = 0.95."
+        },
+        {
+          "case_id": "d3_12",
+          "description": "substitution REJECTED on dietary grounds: evaporated milk is not dairy-free",
+          "recipe_id": "52787",
+          "recipe_name": "Hot Chocolate Fudge",
+          "paths": [
+            "substitution",
+            "dietary_rejection"
+          ],
+          "basis": "rule",
+          "expected_score": 0.8333,
+          "actual_score": 0.8333,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "chocolate chip",
+              "condensed milk",
+              "miniature marshmallow",
+              "vanilla extract",
+              "white chocolate chip"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "heavy cream"
+            ],
+            "critical_missing": [],
+            "score": 0.8333,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "chocolate chip",
+              "condensed milk",
+              "miniature marshmallow",
+              "vanilla extract",
+              "white chocolate chip"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "heavy cream"
+            ],
+            "critical_missing": [],
+            "score": 0.8333,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "Same pantry as d3_11 but dairy_free is requested. 'evaporated milk' is a dairy term, so the substitute is ineligible and heavy cream stays missing: 5/6 = 0.8333. (The matched items are not second-guessed: the pantry already holds them.)"
+        },
+        {
+          "case_id": "d3_13",
+          "description": "critical missing forces can_cook False even though the score clears 0.5",
+          "recipe_id": "52920",
+          "recipe_name": "Chicken Marengo",
+          "paths": [
+            "critical_missing",
+            "protected_term"
+          ],
+          "basis": "rule",
+          "expected_score": 0.5571,
+          "actual_score": 0.5571,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "black olive",
+              "chicken stock",
+              "mushroom",
+              "olive oil",
+              "parsley",
+              "passata"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "chicken leg"
+            ],
+            "critical_missing": [
+              "chicken leg"
+            ],
+            "score": 0.5571,
+            "can_cook": false,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "black olive",
+              "chicken stock",
+              "mushroom",
+              "olive oil",
+              "parsley",
+              "passata"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "chicken leg"
+            ],
+            "critical_missing": [
+              "chicken leg"
+            ],
+            "score": 0.5571,
+            "can_cook": false,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "Chicken Legs is critical and absent; 'chicken stock' is a protected term and is not a chicken leg. base 6/7 = 0.8571, minus 0.3 = 0.5571 (above 0.5) but can_cook is False. [Corrected after the first run: the matched name was originally written as 'chicken stock', wrongly treating 'cube' as a stripped container word. 'cube' is not in the container-word list, so the normalized name is 'chicken stock cube' on both sides. Classification and score were already right.][After the stock-cube fix: 'chicken stock cube' is now a synonym of chicken stock, so the canonical label is 'chicken stock' again. Classification and score unchanged.]"
+        },
+        {
+          "case_id": "d3_14",
+          "description": "empty pantry: everything missing, score clamped to 0",
+          "recipe_id": "52914",
+          "recipe_name": "Boulangère Potatoes",
+          "paths": [
+            "critical_missing",
+            "clamp"
+          ],
+          "basis": "rule",
+          "expected_score": 0.0,
+          "actual_score": 0.0,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "olive oil",
+              "onion",
+              "potato",
+              "thyme",
+              "vegetable stock"
+            ],
+            "critical_missing": [
+              "potato"
+            ],
+            "score": 0.0,
+            "can_cook": false,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "olive oil",
+              "onion",
+              "potato",
+              "thyme",
+              "vegetable stock"
+            ],
+            "critical_missing": [
+              "potato"
+            ],
+            "score": 0.0,
+            "can_cook": false,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "Nothing matched: base 0, minus 0.3 for the critical potato = -0.3, clamped to 0.0."
+        },
+        {
+          "case_id": "d3_15",
+          "description": "below the threshold with no critical gap: can_cook False",
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "paths": [
+            "threshold"
+          ],
+          "basis": "rule",
+          "expected_score": 0.3333,
+          "actual_score": 0.3333,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "onion",
+              "potato"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "butter",
+              "cheese",
+              "red chilli flake",
+              "red pepper"
+            ],
+            "critical_missing": [],
+            "score": 0.3333,
+            "can_cook": false,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "onion",
+              "potato"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "butter",
+              "cheese",
+              "red chilli flake",
+              "red pepper"
+            ],
+            "critical_missing": [],
+            "score": 0.3333,
+            "can_cook": false,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "2 of 6 = 0.3333 < 0.5 and no ingredient is critical, so it is the threshold alone that blocks cooking."
+        },
+        {
+          "case_id": "d3_16",
+          "description": "exactly at the threshold: score 0.5 can cook",
+          "recipe_id": "52978",
+          "recipe_name": "Kumpir",
+          "paths": [
+            "threshold"
+          ],
+          "basis": "rule",
+          "expected_score": 0.5,
+          "actual_score": 0.5,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "butter",
+              "onion",
+              "potato"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "cheese",
+              "red chilli flake",
+              "red pepper"
+            ],
+            "critical_missing": [],
+            "score": 0.5,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "butter",
+              "onion",
+              "potato"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "cheese",
+              "red chilli flake",
+              "red pepper"
+            ],
+            "critical_missing": [],
+            "score": 0.5,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "3/6 = 0.5, which meets 'at least 0.5'; nothing critical is missing."
+        },
+        {
+          "case_id": "d3_17",
+          "description": "long-expired pantry item (3 days past) is excluded from matching entirely",
+          "recipe_id": "52914",
+          "recipe_name": "Boulangère Potatoes",
+          "paths": [
+            "expired_excluded",
+            "critical_missing"
+          ],
+          "basis": "rule",
+          "expected_score": 0.5,
+          "actual_score": 0.5,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "olive oil",
+              "onion",
+              "thyme",
+              "vegetable stock"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "potato"
+            ],
+            "critical_missing": [
+              "potato"
+            ],
+            "score": 0.5,
+            "can_cook": false,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "olive oil",
+              "onion",
+              "thyme",
+              "vegetable stock"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "potato"
+            ],
+            "critical_missing": [
+              "potato"
+            ],
+            "score": 0.5,
+            "can_cook": false,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "Grace is 2 days past shelf life; potatoes at -3 are waste and are not offered to the matcher, so the critical potato is missing exactly as in d3_05: 0.8 - 0.3 = 0.5, can_cook False."
+        },
+        {
+          "case_id": "d3_18",
+          "description": "pantry item exactly 2 days past (within grace) or with unknown age still counts",
+          "recipe_id": "52914",
+          "recipe_name": "Boulangère Potatoes",
+          "paths": [
+            "expired_excluded"
+          ],
+          "basis": "rule",
+          "expected_score": 1.0,
+          "actual_score": 1.0,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "olive oil",
+              "onion",
+              "potato",
+              "thyme",
+              "vegetable stock"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "olive oil",
+              "onion",
+              "potato",
+              "thyme",
+              "vegetable stock"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "-2 is within the 2-day grace and None means age unknown: both are usable. 5/5 = 1.0."
+        },
+        {
+          "case_id": "d3_19",
+          "description": "avoid-list exclusion: avoiding mushroom removes Chicken Marengo",
+          "recipe_id": "52920",
+          "recipe_name": "Chicken Marengo",
+          "paths": [
+            "avoid_exclusion"
+          ],
+          "basis": "rule",
+          "expected_score": 1.0,
+          "actual_score": 1.0,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "black olive",
+              "chicken leg",
+              "chicken stock",
+              "mushroom",
+              "olive oil",
+              "parsley",
+              "passata"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": true
+          },
+          "actual": {
+            "matched": [
+              "black olive",
+              "chicken leg",
+              "chicken stock",
+              "mushroom",
+              "olive oil",
+              "parsley",
+              "passata"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": true
+          },
+          "disagreements": [],
+          "derivation": "The match itself is perfect (7/7 = 1.0) but the recipe contains mushrooms, so it must be excluded from the candidates. [Corrected after the first run: the matched name was originally written as 'chicken stock', same slip as d3_13.][After the stock-cube fix: canonical label is 'chicken stock'. Classification and score unchanged.]"
+        },
+        {
+          "case_id": "d3_20",
+          "description": "avoid-list exclusion: cilantro and coriander are the same herb",
+          "recipe_id": "52968",
+          "recipe_name": "Mbuzi Choma (Roasted Goat)",
+          "paths": [
+            "avoid_exclusion",
+            "synonym"
+          ],
+          "basis": "rule",
+          "expected_score": 0.8571,
+          "actual_score": 0.8571,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "corn flour",
+              "goat meat",
+              "green chilli",
+              "onion",
+              "salt",
+              "tomato"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "cilantro"
+            ],
+            "critical_missing": [],
+            "score": 0.8571,
+            "can_cook": true,
+            "excluded_by_avoid": true
+          },
+          "actual": {
+            "matched": [
+              "corn flour",
+              "goat meat",
+              "green chilli",
+              "onion",
+              "salt",
+              "tomato"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "cilantro"
+            ],
+            "critical_missing": [],
+            "score": 0.8571,
+            "can_cook": true,
+            "excluded_by_avoid": true
+          },
+          "disagreements": [],
+          "derivation": "The recipe lists 'Coriander Leaves'; avoiding cilantro must exclude it. Match: 6/7 = 0.8571 with only the optional coriander (-> cilantro) missing."
+        },
+        {
+          "case_id": "d3_21",
+          "description": "avoid-list exclusion: a category word (dairy) excludes a recipe made of its members",
+          "recipe_id": "52919",
+          "recipe_name": "Fennel Dauphinoise",
+          "paths": [
+            "avoid_exclusion"
+          ],
+          "basis": "rule",
+          "expected_score": 1.0,
+          "actual_score": 1.0,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "butter",
+              "double cream",
+              "fennel",
+              "garlic",
+              "milk",
+              "parmesan",
+              "potato"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": true
+          },
+          "actual": {
+            "matched": [
+              "butter",
+              "double cream",
+              "fennel",
+              "garlic",
+              "milk",
+              "parmesan",
+              "potato"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": true
+          },
+          "disagreements": [],
+          "derivation": "Milk, double cream, butter and parmesan cheese are all dairy: excluded. Match 7/7 = 1.0 (parmesan cheese resolves to parmesan)."
+        },
+        {
+          "case_id": "d3_22",
+          "description": "avoid-list negative: nothing in Boulangere Potatoes is a nut or dairy",
+          "recipe_id": "52914",
+          "recipe_name": "Boulangère Potatoes",
+          "paths": [
+            "avoid_exclusion"
+          ],
+          "basis": "rule",
+          "expected_score": 1.0,
+          "actual_score": 1.0,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "olive oil",
+              "onion",
+              "potato",
+              "thyme",
+              "vegetable stock"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "olive oil",
+              "onion",
+              "potato",
+              "thyme",
+              "vegetable stock"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "Onions, thyme, olive oil, potatoes, vegetable stock: no nut, no dairy. Not excluded."
+        },
+        {
+          "case_id": "d3_23",
+          "description": "optional-only gaps: missing salt and coriander still cook",
+          "recipe_id": "52968",
+          "recipe_name": "Mbuzi Choma (Roasted Goat)",
+          "paths": [
+            "optional_gap"
+          ],
+          "basis": "rule",
+          "expected_score": 0.7143,
+          "actual_score": 0.7143,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "corn flour",
+              "goat meat",
+              "green chilli",
+              "onion",
+              "tomato"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "cilantro",
+              "salt"
+            ],
+            "critical_missing": [],
+            "score": 0.7143,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "corn flour",
+              "goat meat",
+              "green chilli",
+              "onion",
+              "tomato"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "cilantro",
+              "salt"
+            ],
+            "critical_missing": [],
+            "score": 0.7143,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "Both missing items are optional. 5/7 = 0.7143, nothing critical missing, can cook. 'Corn Flour' is protected and kept whole."
+        },
+        {
+          "case_id": "d3_24",
+          "description": "a duplicated recipe line counts twice",
+          "recipe_id": "52917",
+          "recipe_name": "White chocolate creme brulee",
+          "paths": [
+            "exact",
+            "synonym",
+            "duplicate_line"
+          ],
+          "basis": "rule",
+          "expected_score": 1.0,
+          "actual_score": 1.0,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "double cream",
+              "egg yolk",
+              "sugar",
+              "sugar",
+              "vanilla",
+              "white chocolate chip"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "double cream",
+              "egg yolk",
+              "sugar",
+              "sugar",
+              "vanilla",
+              "white chocolate chip"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "'Caster Sugar' appears on two lines; each resolves to sugar and each is matched by the one pantry sugar. 6 entries, 6 matched: 1.0."
+        },
+        {
+          "case_id": "d3_25",
+          "description": "container words and prep words: 'can of kidney beans', 'canned tomatoes'",
+          "recipe_id": "52867",
+          "recipe_name": "Vegetarian Chilli",
+          "paths": [
+            "normalization"
+          ],
+          "basis": "rule",
+          "expected_score": 0.75,
+          "actual_score": 0.75,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "kidney bean",
+              "roasted vegetable",
+              "tomato"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "mixed grain"
+            ],
+            "critical_missing": [],
+            "score": 0.75,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "kidney bean",
+              "roasted vegetable",
+              "tomato"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "mixed grain"
+            ],
+            "critical_missing": [],
+            "score": 0.75,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "'can of' and 'canned' are container words, 'Chopped' a prep word: kidney bean, tomato. Mixed Grain missing (important). 3/4 = 0.75; the critical kidney bean is matched."
+        },
+        {
+          "case_id": "d3_26",
+          "description": "synonym on a repeated line: powdered sugar = icing sugar",
+          "recipe_id": "52976",
+          "recipe_name": "Cashew Ghoriba Biscuits",
+          "paths": [
+            "synonym",
+            "duplicate_line"
+          ],
+          "basis": "rule",
+          "expected_score": 0.8333,
+          "actual_score": 0.8333,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "almond",
+              "cashew nut",
+              "egg yolk",
+              "powdered sugar",
+              "powdered sugar"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "orange blossom water"
+            ],
+            "critical_missing": [],
+            "score": 0.8333,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "almond",
+              "cashew nut",
+              "egg yolk",
+              "powdered sugar",
+              "powdered sugar"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "orange blossom water"
+            ],
+            "critical_missing": [],
+            "score": 0.8333,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "Icing Sugar appears twice and resolves to powdered sugar (synonym table): both lines matched. Orange Blossom Water missing. 5/6 = 0.8333."
+        },
+        {
+          "case_id": "d3_27",
+          "description": "synonyms: margarine=butter, white sugar=sugar, plain flour=flour",
+          "recipe_id": "52776",
+          "recipe_name": "Chocolate Gateau",
+          "paths": [
+            "synonym",
+            "normalization"
+          ],
+          "basis": "rule",
+          "expected_score": 1.0,
+          "actual_score": 1.0,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "all purpose flour",
+              "butter",
+              "chocolate",
+              "egg",
+              "milk",
+              "sugar"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "all purpose flour",
+              "butter",
+              "chocolate",
+              "egg",
+              "milk",
+              "sugar"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "'Plain chocolate' -> chocolate ('plain' is a prep word). Synonym table: margarine -> butter, white sugar and granulated sugar -> sugar, plain flour -> all-purpose flour. 6/6 = 1.0."
+        },
+        {
+          "case_id": "d3_28",
+          "description": "'garlic clove' is garlic",
+          "recipe_id": "53025",
+          "recipe_name": "Ful Medames",
+          "paths": [
+            "specificity_full"
+          ],
+          "basis": "intent",
+          "expected_score": 1.0,
+          "actual_score": 1.0,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "broad bean",
+              "cumin",
+              "garlic",
+              "lemon",
+              "olive oil",
+              "parsley"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "broad bean",
+              "cumin",
+              "garlic",
+              "lemon",
+              "olive oil",
+              "parsley"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "A recipe line 'Garlic Clove' is satisfied by a pantry that has garlic: a clove is garlic. 6/6 = 1.0. The documented rules do not list 'clove' as a cut/variety word, so this rests on what the ingredient means. [After the garlic-clove fix: 'garlic clove' is now a synonym of garlic, so the canonical label of the matched line is 'garlic'. The classification (matched) and score are unchanged from the original expectation.]"
+        },
+        {
+          "case_id": "d3_29",
+          "description": "specificity full: salmon fillet satisfies salmon",
+          "recipe_id": "52773",
+          "recipe_name": "Honey Teriyaki Salmon",
+          "paths": [
+            "specificity_full"
+          ],
+          "basis": "rule",
+          "expected_score": 0.6,
+          "actual_score": 0.6,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "olive oil",
+              "salmon",
+              "soy sauce"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "sake",
+              "sesame seed"
+            ],
+            "critical_missing": [],
+            "score": 0.6,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "olive oil",
+              "salmon",
+              "soy sauce"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [
+              "sake",
+              "sesame seed"
+            ],
+            "critical_missing": [],
+            "score": 0.6,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "'fillet' is a listed cut. 3 of 5 matched = 0.6; sake (important) and sesame seed (optional) missing, nothing critical missing."
+        },
+        {
+          "case_id": "d3_30",
+          "description": "substitution for a CRITICAL ingredient, best of two by flavour impact",
+          "recipe_id": "52831",
+          "recipe_name": "Chicken Karaage",
+          "paths": [
+            "substitution"
+          ],
+          "basis": "rule",
+          "expected_score": 0.9667,
+          "actual_score": 0.9667,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "garlic",
+              "ginger",
+              "lemon",
+              "potato starch",
+              "sake",
+              "soy sauce",
+              "sugar",
+              "vegetable oil"
+            ],
+            "substitutable": [
+              [
+                "chicken",
+                "seitan"
+              ]
+            ],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 0.9667,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "garlic",
+              "ginger",
+              "lemon",
+              "potato starch",
+              "sake",
+              "soy sauce",
+              "sugar",
+              "vegetable oil"
+            ],
+            "substitutable": [
+              [
+                "chicken",
+                "seitan"
+              ]
+            ],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 0.9667,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "Substitutions: chicken -> chickpeas (significant), firm tofu (significant), seitan (noticeable). Pantry has tofu and seitan; the lower-impact seitan is chosen. A substituted critical ingredient is not missing. (8 + 0.7)/9 = 0.9667."
+        },
+        {
+          "case_id": "d3_31",
+          "description": "stock cube in the recipe, liquid stock in the pantry",
+          "recipe_id": "52920",
+          "recipe_name": "Chicken Marengo",
+          "paths": [
+            "stock_cube"
+          ],
+          "basis": "intent",
+          "expected_score": 1.0,
+          "actual_score": 1.0,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "black olive",
+              "chicken leg",
+              "chicken stock",
+              "mushroom",
+              "olive oil",
+              "parsley",
+              "passata"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "black olive",
+              "chicken leg",
+              "chicken stock",
+              "mushroom",
+              "olive oil",
+              "parsley",
+              "passata"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "Recipe line 'Chicken Stock Cube'; pantry has chicken stock. A stock cube is concentrated chicken stock: someone holding stock can make the dish, so the line is satisfied. 7/7 = 1.0. The documented rules do not cover 'cube', so this rests on what the ingredient means."
+        },
+        {
+          "case_id": "d3_32",
+          "description": "liquid stock in the recipe, stock cube in the pantry (critical ingredient)",
+          "recipe_id": "52933",
+          "recipe_name": "Rappie Pie",
+          "paths": [
+            "stock_cube",
+            "critical_missing"
+          ],
+          "basis": "intent",
+          "expected_score": 1.0,
+          "actual_score": 1.0,
+          "score_ok": true,
+          "classification_ok": true,
+          "can_cook_ok": true,
+          "exclusion_ok": true,
+          "passed": true,
+          "expected": {
+            "matched": [
+              "black pepper",
+              "butter",
+              "chicken breast",
+              "chicken stock",
+              "onion",
+              "potato",
+              "salt"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "actual": {
+            "matched": [
+              "black pepper",
+              "butter",
+              "chicken breast",
+              "chicken stock",
+              "onion",
+              "potato",
+              "salt"
+            ],
+            "substitutable": [],
+            "partial": [],
+            "missing": [],
+            "critical_missing": [],
+            "score": 1.0,
+            "can_cook": true,
+            "excluded_by_avoid": false
+          },
+          "disagreements": [],
+          "derivation": "Recipe: Butter Onions 'Chicken Stock'[c] 'Chicken Breast' Potatoes Salt 'Black Pepper' (7). A pantry with chicken stock cubes can make the chicken stock the recipe wants (the critical line). 7/7 = 1.0. Rests on what the ingredient means."
+        }
+      ],
+      "scenario_case_results": []
+    }
+  ],
+  "passed": true,
+  "pantry": {
+    "fixture": "demo_pantry.json",
+    "fixture_sha256": "756090ab287f",
+    "photo_sources": {
+      "photo_05": 15,
+      "photo_09": 18,
+      "photo_12": 18,
+      "photo_15": 20,
+      "photo_22": 14,
+      "photo_29": 20
+    },
+    "photo_items_note": "raw analyze_fridge_photo output, uncurated; duplicates across photos collapse to one row",
+    "staples_added_by_hand": [
+      "olive oil",
+      "vegetable oil",
+      "salt",
+      "black pepper",
+      "all purpose flour",
+      "sugar",
+      "paprika",
+      "ground cumin",
+      "dried oregano",
+      "chili powder",
+      "cinnamon",
+      "garlic powder",
+      "onion powder",
+      "dried thyme"
+    ],
+    "staples_note": "oil, salt, pepper, flour, sugar and common dried spices; no eggs, rice, pasta or proteins were added",
+    "rows_at_run_start": 64,
+    "pantry_content_sha256": "c975c014058a"
+  },
+  "notes": [
+    "Dimension 1 baseline SUPERSEDES the earlier F1 0.64 (mistral-medium-2505) and 0.55 (ministral-8b-2512) figures. Two scorer corrections make those numbers non-comparable, and both can only lower a score: (1) a photo where the model identified nothing now counts as a zero instead of being dropped from the mean; (2) 'green onion' no longer matches ground-truth 'onion' (a scallion is not a bulb onion). A lower number than 0.55 is therefore not by itself a model regression.",
+    "Dimension 2 now enforces hand-authored constraints (eval/cases.py) in addition to what the pipeline extracted, whole-word avoid matching, and a dimension verdict that requires every case to pass.",
+    "Dimension 2 corrections after run_1793926853: expectations for d2_10, d2_12 and d2_30 were corrected (see eval/cases.py CORRECTIONS); only a user-STATED cook-time limit is enforced by the scorer, not the profile default. The pipeline changed too: stated-vs-default cook time, relaxation on 'nothing cookable', code-level avoid-list exclusion, and a deterministic dietary-restriction backstop. Compare this run to run_1793926853 with those changes in mind; they are not like-for-like.",
+    "Dimension 3 (match accuracy) checks the matcher's arithmetic against hand-derived values, 32 cases; Dimensions 4 and 5 run each case against a throwaway pantry/profile database (eval/isolation.py), reset and verified empty between cases, and fingerprint the real pantry, user and recipe databases before and after (they must be unchanged). The pass thresholds for 4 and 5 (0.80) were fixed before their first run. Dimension 5 also reports cases that passed on outcome while the system's own scoring did not reflect the profile (passed_without_scoring_support): those passes came from tie-breaking or the language model."
+  ],
+  "git_dirty": true,
+  "git_diff_sha256": "83375bae15e3"
+}

@@ -43,10 +43,13 @@ def search_results_to_dict(search_results: SearchResults) -> dict[str, Any]:
     "cook_time_minutes", "dietary_tags"}, ...], "total_matched": int}.
     Compact summaries only — no ingredients, no steps. total_matched is
     the count before max_results capped the list; it can be larger than
-    len(results)."""
+    len(results). unenforced_restrictions lists requested restrictions that could not be checked, so the
+    results are NOT filtered by them."""
     return {
         "results": [summary.model_dump(mode="json") for summary in search_results.results],
         "total_matched": search_results.total_matched,
+        "unenforced_restrictions": list(search_results.unenforced_restrictions),
+        "excluded_by_ingredient_restrictions": search_results.excluded_by_ingredient_restrictions,
     }
 
 

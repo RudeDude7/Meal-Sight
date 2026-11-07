@@ -1,0 +1,94 @@
+# Fast checks + the free per-PR matcher gate. No secrets, no API calls.
+# Placeholder keys below are NOT secrets: Settings refuses to import without them, and no test calls out.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MISTRAL_API_KEY: ci-placeholder-not-a-secret
+  GROQ_API_KEY: ci-placeholder-not-a-secret
+  OPENWEATHER_API_KEY: ci-placeholder-not-a-secret
+  UV_FROZEN: "1"
+
+jobs:
+  backend:
+    name: Backend (ruff, mypy --strict, pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: mealsight/backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.11"
+          enable-cache: true
+          cache-dependency-glob: mealsight/backend/uv.lock
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run mypy --strict mealsight eval
+      - name: "pytest (hermetic, no network, no keys)"
+        run: uv run pytest -q -p no:cacheprovider --durations=10
+
+  frontend:
+    name: Frontend (typecheck, lint, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: mealsight/frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: mealsight/frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+
+  matcher-gate:
+    name: Eval gate (Dimension 3, matcher arithmetic)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: mealsight/backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.11"
+          enable-cache: true
+          cache-dependency-glob: mealsight/backend/uv.lock
+      - run: uv sync --frozen
+      - name: Build the reference databases from the pinned snapshot (offline, deterministic)
+        run: |
+          mkdir -p ../data
+          uv run python -m mealsight.seed.seed_all --from-snapshot
+      - name: Run Dimension 3 (no API calls)
+        run: uv run env PYTHONPATH=. python -m eval dimension3
+      - name: Regression gate against the recorded baseline
+        run: |
+          card=$(ls -t eval/results/run_*.json | head -1)
+          uv run env PYTHONPATH=. python -m eval.compare "$card" --only dimension3 --strict-data \
+            --summary-file "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: dimension3-scorecard
+          path: mealsight/backend/eval/results/*.json
+          if-no-files-found: ignore
+          retention-days: 14

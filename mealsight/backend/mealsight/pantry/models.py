@@ -25,6 +25,11 @@ class PantryItemInput(BaseModel):
     unit: str | None
     category: str
     freshness_status: str = "fresh"
+    # True only when a photo actually reported a freshness observation.
+    # freshness_status falls back to "fresh" to fill the column, and that
+    # fallback is not evidence of anything, so update_pantry must not
+    # treat it as such.
+    freshness_observed: bool = False
 
 
 class PantryItem(BaseModel):

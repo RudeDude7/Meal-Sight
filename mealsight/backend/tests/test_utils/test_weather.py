@@ -11,12 +11,21 @@ from __future__ import annotations
 import httpx
 import pytest
 import respx
+from pydantic import SecretStr
 
 from mealsight.config.settings import settings
 from mealsight.providers.exceptions import ProviderError
 from mealsight.utils import weather
 
 WEATHER_URL = f"{settings.openweather_base_url}/weather"
+
+
+@pytest.fixture(autouse=True)
+def _configured_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A key is configured for every test here, instead of relying on the developer's own .env having one
+    (on a machine without it, such as CI, every test that expects a call otherwise got None). The tests that
+    need 'no key' still set it to None themselves."""
+    monkeypatch.setattr(settings, "openweather_api_key", SecretStr("test-key-not-real"))
 
 
 @pytest.fixture(autouse=True)

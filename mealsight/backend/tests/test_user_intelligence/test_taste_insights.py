@@ -38,9 +38,7 @@ async def _log_meal_at(
     )
 
 
-async def _log_n_meals(
-    user_db: Database, recipe_db: Database, n: int, *, cuisine: str = "italian"
-) -> None:
+async def _log_n_meals(user_db: Database, recipe_db: Database, n: int, *, cuisine: str = "italian") -> None:
     await insert_recipe(recipe_db, recipe_id="r-filler", name="Filler", cuisine=cuisine, ingredients=[])
     for _ in range(n):
         await log_meal(
@@ -95,12 +93,8 @@ async def test_protein_variety_scores_a_skewed_distribution_lower_than_an_even_o
         await log_meal(
             "chicken-r", "Chicken", "american", "dinner", date.today(), user_db=user_db, recipe_db=recipe_db
         )
-    await log_meal(
-        "beef-r", "Beef", "american", "dinner", date.today(), user_db=user_db, recipe_db=recipe_db
-    )
-    skewed = await get_taste_insights(
-        "all_time", user_db=user_db, recipe_db=recipe_db, pantry_db=pantry_db
-    )
+    await log_meal("beef-r", "Beef", "american", "dinner", date.today(), user_db=user_db, recipe_db=recipe_db)
+    skewed = await get_taste_insights("all_time", user_db=user_db, recipe_db=recipe_db, pantry_db=pantry_db)
 
     # Even: 5 chicken, 5 beef — fresh databases for a clean comparison.
     import pathlib
@@ -109,18 +103,29 @@ async def test_protein_variety_scores_a_skewed_distribution_lower_than_an_even_o
     from mealsight.db.init import init_database
 
     even_user_db = Database(
-        pathlib.Path(user_db.path).parent / "even_user.db", name="user_intelligence",
+        pathlib.Path(user_db.path).parent / "even_user.db",
+        name="user_intelligence",
         schema_path=SCHEMA_DIR / "user_intelligence.sql",
     )
     await init_database(even_user_db, even_user_db.schema_path)
     for _ in range(5):
         await log_meal(
-            "chicken-r", "Chicken", "american", "dinner", date.today(),
-            user_db=even_user_db, recipe_db=recipe_db,
+            "chicken-r",
+            "Chicken",
+            "american",
+            "dinner",
+            date.today(),
+            user_db=even_user_db,
+            recipe_db=recipe_db,
         )
         await log_meal(
-            "beef-r", "Beef", "american", "dinner", date.today(),
-            user_db=even_user_db, recipe_db=recipe_db,
+            "beef-r",
+            "Beef",
+            "american",
+            "dinner",
+            date.today(),
+            user_db=even_user_db,
+            recipe_db=recipe_db,
         )
     even = await get_taste_insights(
         "all_time", user_db=even_user_db, recipe_db=recipe_db, pantry_db=pantry_db
@@ -157,13 +162,25 @@ async def test_cuisine_dominance_suggestion_names_real_cuisine_and_count(
     await insert_recipe(recipe_db, recipe_id="mx-1", name="Tacos", cuisine="mexican", ingredients=[])
     for _ in range(6):
         await log_meal(
-            "it-1", "Pasta", "italian", "dinner", date.today(), rating=4,
-            user_db=user_db, recipe_db=recipe_db,
+            "it-1",
+            "Pasta",
+            "italian",
+            "dinner",
+            date.today(),
+            rating=4,
+            user_db=user_db,
+            recipe_db=recipe_db,
         )
     for _ in range(2):
         await log_meal(
-            "mx-1", "Tacos", "mexican", "dinner", date.today(), rating=5,
-            user_db=user_db, recipe_db=recipe_db,
+            "mx-1",
+            "Tacos",
+            "mexican",
+            "dinner",
+            date.today(),
+            rating=5,
+            user_db=user_db,
+            recipe_db=recipe_db,
         )
 
     result = await get_taste_insights("all_time", user_db=user_db, recipe_db=recipe_db, pantry_db=pantry_db)
@@ -237,13 +254,21 @@ async def test_waste_correlation_does_not_fire_when_ingredient_is_actually_cooke
     user_db: Database, recipe_db: Database, pantry_db: Database
 ) -> None:
     await insert_recipe(
-        recipe_db, recipe_id="cilantro-r", name="Cilantro Lime Rice", cuisine="mexican",
+        recipe_db,
+        recipe_id="cilantro-r",
+        name="Cilantro Lime Rice",
+        cuisine="mexican",
         ingredients=["cilantro", "rice"],
     )
     for _ in range(settings.min_meals_for_insights + 5):
         await log_meal(
-            "cilantro-r", "Cilantro Lime Rice", "mexican", "dinner", date.today(),
-            user_db=user_db, recipe_db=recipe_db,
+            "cilantro-r",
+            "Cilantro Lime Rice",
+            "mexican",
+            "dinner",
+            date.today(),
+            user_db=user_db,
+            recipe_db=recipe_db,
         )
     for _ in range(settings.waste_insight_threshold):
         await pantry_db.execute(

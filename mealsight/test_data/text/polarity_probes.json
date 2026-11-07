@@ -1,0 +1,86 @@
+[
+ {
+  "id": "probe_01",
+  "text": "Anything with chicken, for 4 people.",
+  "polarity": "want",
+  "item": "chicken"
+ },
+ {
+  "id": "probe_02",
+  "text": "I want something with chicken.",
+  "polarity": "want",
+  "item": "chicken"
+ },
+ {
+  "id": "probe_03",
+  "text": "Anything but chicken.",
+  "polarity": "avoid",
+  "item": "chicken"
+ },
+ {
+  "id": "probe_04",
+  "text": "Anything with salmon.",
+  "polarity": "want",
+  "item": "salmon"
+ },
+ {
+  "id": "probe_05",
+  "text": "No chicken please.",
+  "polarity": "avoid",
+  "item": "chicken"
+ },
+ {
+  "id": "probe_06",
+  "text": "Nothing with shellfish, I'm allergic.",
+  "polarity": "avoid",
+  "item": "shellfish"
+ },
+ {
+  "id": "probe_07",
+  "text": "Anything except mushrooms.",
+  "polarity": "avoid",
+  "item": "mushroom"
+ },
+ {
+  "id": "probe_08",
+  "text": "Surprise me with some fish.",
+  "polarity": "want",
+  "item": "fish"
+ },
+ {
+  "id": "probe_09",
+  "text": "Dinner using pork tonight.",
+  "polarity": "want",
+  "item": "pork"
+ },
+ {
+  "id": "probe_10",
+  "text": "Something with shrimp, nothing too spicy.",
+  "polarity": "want",
+  "item": "shrimp"
+ },
+ {
+  "id": "probe_11",
+  "text": "Skip the beef, I'd love something with turkey.",
+  "polarity": "avoid",
+  "item": "beef"
+ },
+ {
+  "id": "probe_12",
+  "text": "Skip the beef, I'd love something with turkey.",
+  "polarity": "want",
+  "item": "turkey"
+ },
+ {
+  "id": "probe_13",
+  "text": "I'm not eating eggs this week.",
+  "polarity": "avoid",
+  "item": "egg"
+ },
+ {
+  "id": "probe_14",
+  "text": "Make me something with eggs and cheese.",
+  "polarity": "want",
+  "item": "egg"
+ }
+]

@@ -6,7 +6,12 @@ anywhere. No MCP wrapper yet — these are called directly for now.
 """
 
 from mealsight.pantry.category import EXPLICIT_CATEGORY_MAP, Category, resolve_category
-from mealsight.pantry.expiring import flag_expiring
+from mealsight.pantry.expiring import (
+    flag_expiring,
+    is_long_expired,
+    split_usable_and_waste,
+    usable_pantry_names,
+)
 from mealsight.pantry.grocery import (
     CATEGORY_TO_SECTION,
     SECTION_ORDER,
@@ -81,6 +86,9 @@ __all__ = [
     "WasteTrend",
     "create_grocery_list",
     "flag_expiring",
+    "split_usable_and_waste",
+    "is_long_expired",
+    "usable_pantry_names",
     "get_grocery_list",
     "get_pantry",
     "get_waste_stats",

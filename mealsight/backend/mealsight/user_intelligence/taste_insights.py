@@ -107,9 +107,7 @@ def _protein_variety_score(proteins: list[str]) -> float | None:
     return entropy / max_entropy
 
 
-async def _actual_ingredient_names_by_meal(
-    rows: list[Any], recipe_db: Database
-) -> list[list[str]]:
+async def _actual_ingredient_names_by_meal(rows: list[Any], recipe_db: Database) -> list[list[str]]:
     recipe_ids_needed = {row["recipe_id"] for row in rows if row["recipe_id"] is not None}
     ingredients_by_recipe = await load_recipe_ingredient_names(recipe_db, recipe_ids_needed)
 
@@ -202,9 +200,7 @@ def _cuisine_dominance_suggestion(
             if weeks_since >= 1
             else "you made one recently"
         )
-        return (
-            f"{base} — your {alt_cuisine} recipes rate {alt_average:.1f} on average and {recency}."
-        )
+        return f"{base} — your {alt_cuisine} recipes rate {alt_average:.1f} on average and {recency}."
     return f"{base} — consider mixing in a different cuisine."
 
 
@@ -310,9 +306,7 @@ async def get_taste_insights(
         cook_time = cook_times.get(row["recipe_id"]) if row["recipe_id"] is not None else None
         if cook_time is not None:
             actual_cook_times.append(cook_time)
-    preferred_cook_time_minutes = (
-        statistics.median(actual_cook_times) if actual_cook_times else None
-    )
+    preferred_cook_time_minutes = statistics.median(actual_cook_times) if actual_cook_times else None
 
     if time_range == "all_time":
         earliest_date = min(date_.fromisoformat(row["date"]) for row in rows)
@@ -337,9 +331,7 @@ async def get_taste_insights(
     all_time_rows = (
         rows
         if time_range == "all_time"
-        else await user_db.fetch_all(
-            "SELECT recipe_id, ingredients_used FROM meal_history"
-        )
+        else await user_db.fetch_all("SELECT recipe_id, ingredients_used FROM meal_history")
     )
     all_time_ingredient_lists = (
         ingredient_lists

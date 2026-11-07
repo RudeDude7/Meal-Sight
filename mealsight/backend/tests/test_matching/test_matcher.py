@@ -139,9 +139,7 @@ def test_dairy_free_substitute_accepted_without_the_constraint() -> None:
     recipe = [_ingredient("butter", "important")]
     pantry = ["olive oil"]
 
-    result = match_recipe(
-        recipe, pantry, substitution_map, _NO_SYNONYMS, dietary_restrictions=["dairy_free"]
-    )
+    result = match_recipe(recipe, pantry, substitution_map, _NO_SYNONYMS, dietary_restrictions=["dairy_free"])
 
     assert len(result.substitutable_items) == 1
     assert result.substitutable_items[0].substitute == "olive oil"
@@ -170,3 +168,60 @@ def test_synonym_resolution_used_for_both_pantry_and_recipe_side() -> None:
 
     assert len(result.matched_items) == 1
     assert result.matched_items[0].name == "bell pepper"
+
+
+def _mayo_map() -> dict[str, list[SubstitutionOption]]:
+    return {
+        "mayonnaise": [SubstitutionOption(substitute="greek yogurt", ratio="1:1", flavor_impact="noticeable")]
+    }
+
+
+def test_greek_yogurt_is_not_offered_for_mayonnaise_to_a_dairy_free_user_in_either_spelling() -> None:
+    recipe = [_ingredient("mayonnaise", "important")]
+    for spelling in ("dairy_free", "dairy-free"):
+        result = match_recipe(
+            recipe, ["greek yogurt"], _mayo_map(), _NO_SYNONYMS, dietary_restrictions=[spelling]
+        )
+        assert result.substitutable_items == [], spelling
+        assert [m.name for m in result.missing_items] == ["mayonnaise"]
+    allowed = match_recipe(recipe, ["greek yogurt"], _mayo_map(), _NO_SYNONYMS)
+    assert [s.substitute for s in allowed.substitutable_items] == ["greek yogurt"]
+
+
+def test_ingredient_enforced_restrictions_judge_substitutes_by_ingredients_not_tags() -> None:
+    peanut_map = {
+        "butter": [
+            SubstitutionOption(substitute="peanut butter", ratio="1:1", flavor_impact="noticeable"),
+            SubstitutionOption(substitute="olive oil", ratio="3:4", flavor_impact="noticeable"),
+        ]
+    }
+    recipe = [_ingredient("butter", "important")]
+    only_peanut = match_recipe(
+        recipe, ["peanut butter"], peanut_map, _NO_SYNONYMS, dietary_restrictions=["peanut-free"]
+    )
+    assert only_peanut.substitutable_items == [], "a peanut substitute must be refused for a peanut-free user"
+    ok = match_recipe(recipe, ["olive oil"], peanut_map, _NO_SYNONYMS, dietary_restrictions=["peanut-free"])
+    assert [s.substitute for s in ok.substitutable_items] == ["olive oil"], (
+        "an acceptable substitute must NOT be rejected just because 'peanut_free' is not a corpus tag"
+    )
+
+
+def test_a_restriction_that_cannot_be_verified_does_not_veto_every_substitute() -> None:
+    result = match_recipe(
+        [_ingredient("butter", "important")],
+        ["olive oil"],
+        {"butter": [SubstitutionOption(substitute="olive oil", ratio="3:4", flavor_impact="noticeable")]},
+        _NO_SYNONYMS,
+        dietary_restrictions=["low-sodium", "keto"],
+    )
+    assert [s.substitute for s in result.substitutable_items] == ["olive oil"]
+
+
+def test_avoid_list_blocks_a_substitute_containing_the_avoided_ingredient() -> None:
+    flour_map = {
+        "flour": [SubstitutionOption(substitute="almond flour", ratio="1:1", flavor_impact="significant")]
+    }
+    recipe = [_ingredient("flour", "important")]
+    assert match_recipe(recipe, ["almond flour"], flour_map, _NO_SYNONYMS).substitutable_items
+    blocked = match_recipe(recipe, ["almond flour"], flour_map, _NO_SYNONYMS, avoid_ingredients=["nut"])
+    assert blocked.substitutable_items == [] and [m.name for m in blocked.missing_items] == ["flour"]

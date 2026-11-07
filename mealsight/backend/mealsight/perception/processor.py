@@ -21,7 +21,6 @@ makes).
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping
 
 from pydantic import ValidationError
@@ -29,6 +28,7 @@ from pydantic import ValidationError
 from mealsight.config.settings import settings
 from mealsight.db import get_pantry_db, get_recipe_db
 from mealsight.db.connection import Database
+from mealsight.matching.avoid import implied_dietary_tags
 from mealsight.matching.normalize import normalize_ingredient
 from mealsight.matching.synonyms import load_synonym_map, resolve_canonical
 from mealsight.pantry.category import resolve_category
@@ -44,6 +44,7 @@ from mealsight.perception.models import (
     VisionPerception,
 )
 from mealsight.perception.prompt import VISION_PERCEPTION_PROMPT, build_extraction_prompt
+from mealsight.perception.restrictions import detect_dietary_restrictions
 from mealsight.perception.validation import (
     AudioValidationError,
     ImageValidationError,
@@ -54,18 +55,22 @@ from mealsight.perception.validation import (
     validate_text,
 )
 from mealsight.providers import ProviderError, get_audio_provider, get_text_provider, get_vision_provider
+from mealsight.providers.mistral import strip_code_fences
 from mealsight.utils.logging import get_logger
 
 logger = get_logger("mealsight.perception")
 
 _AUDIO_FORMAT_TO_EXTENSION: dict[str, str] = {"WAV": "wav", "MP3": "mp3", "M4A": "m4a", "WEBM": "webm"}
 
-# A small, deliberate duplicate of mealsight.providers.mistral's own
-# private _strip_code_fences / _CODE_FENCE_RE — the same "duplicate a
-# tiny private helper rather than import across a package boundary"
-# precedent mealsight.pantry.category already established for a
-# different module's private helper.
-_CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL)
+# Graceful degradation (return an empty perception) is right for an
+# occasional bad response and wrong for every response: a model that
+# systematically returns something unparseable would otherwise look, from
+# the outside, like a user who simply never sent a usable photo. After this
+# many unparseable responses IN A ROW (any successful parse resets the
+# count) the log line escalates from warning to error.
+VISION_PARSE_FAILURE_ESCALATION_THRESHOLD = 3
+RAW_RESPONSE_LOG_CHARS = 200
+_consecutive_parse_failures = 0
 
 _UNAVAILABLE_NOTE = "Vision analysis was unavailable — continuing without photo-derived pantry items."
 
@@ -74,15 +79,28 @@ def _empty_perception(note: str) -> VisionPerception:
     return VisionPerception(identified_items=[], total_items_found=0, photo_quality="unknown", notes=note)
 
 
-def _strip_code_fences(text: str) -> str:
-    stripped = text.strip()
-    match = _CODE_FENCE_RE.match(stripped)
-    return match.group(1).strip() if match else stripped
-
-
 def _parse_raw_response(text: str) -> RawVisionPerception:
-    data = json.loads(_strip_code_fences(text))
+    data = json.loads(strip_code_fences(text))
     return RawVisionPerception.model_validate(data)
+
+
+def _record_parse_failure(raw_text: str, exc: Exception) -> None:
+    global _consecutive_parse_failures
+    _consecutive_parse_failures += 1
+    head = raw_text[:RAW_RESPONSE_LOG_CHARS]
+    logger.warning(
+        "vision_response_unparseable",
+        error=str(exc),
+        raw_response_head=head,
+        consecutive_failures=_consecutive_parse_failures,
+    )
+    if _consecutive_parse_failures >= VISION_PARSE_FAILURE_ESCALATION_THRESHOLD:
+        logger.error(
+            "vision_parsing_failing_systematically",
+            consecutive_failures=_consecutive_parse_failures,
+            model=settings.VISION_MODEL,
+            raw_response_head=head,
+        )
 
 
 async def analyze_fridge_photo(
@@ -127,12 +145,19 @@ async def analyze_fridge_photo(
         logger.warning("vision_perception_image_rejected", reason=str(exc))
         return _empty_perception(str(exc))
 
+    global _consecutive_parse_failures
+    response_text = ""
     try:
         provider = get_vision_provider()
         response = await provider.analyze_image(image_bytes, VISION_PERCEPTION_PROMPT, settings.VISION_MODEL)
-        raw = _parse_raw_response(response.text)
-    except (ProviderError, json.JSONDecodeError, ValidationError) as exc:
+        response_text = response.text
+        raw = _parse_raw_response(response_text)
+        _consecutive_parse_failures = 0
+    except ProviderError as exc:
         logger.warning("vision_perception_provider_failed", error=str(exc))
+        return _empty_perception(_UNAVAILABLE_NOTE)
+    except (json.JSONDecodeError, ValidationError) as exc:
+        _record_parse_failure(response_text, exc)
         return _empty_perception(_UNAVAILABLE_NOTE)
     except Exception:
         logger.error("vision_perception_unexpected_failure", exc_info=True)
@@ -175,16 +200,23 @@ def to_pantry_item_inputs(perception: VisionPerception) -> list[PantryItemInput]
     freshness_status, defaulting to PantryItemInput's own "fresh"
     default when the model reported no freshness observation at all —
     never guessed at here either."""
-    return [
-        PantryItemInput(
-            name=item.name,
-            quantity=item.quantity,
-            unit=item.unit,
-            category=item.category,
-            **({"freshness_status": item.freshness} if item.freshness is not None else {}),
-        )
-        for item in perception.identified_items
-    ]
+    inputs: list[PantryItemInput] = []
+    for item in perception.identified_items:
+        if item.freshness is None:
+            observed = PantryItemInput(
+                name=item.name, quantity=item.quantity, unit=item.unit, category=item.category
+            )
+        else:
+            observed = PantryItemInput(
+                name=item.name,
+                quantity=item.quantity,
+                unit=item.unit,
+                category=item.category,
+                freshness_status=item.freshness,
+                freshness_observed=True,
+            )
+        inputs.append(observed)
+    return inputs
 
 
 _TRANSCRIPTION_UNAVAILABLE_NOTE = (
@@ -230,7 +262,7 @@ def _append_note(existing: str | None, note: str) -> str:
 
 
 def _postprocess_constraints(
-    raw: RawExtractedConstraints, synonym_map: Mapping[str, str]
+    raw: RawExtractedConstraints, synonym_map: Mapping[str, str], utterance: str = ""
 ) -> tuple[list[str], list[str], str | None]:
     """Shared by analyze_voice_memo and analyze_text_input — the exact
     same code path post-processing a RawExtractedConstraints, regardless
@@ -257,7 +289,27 @@ def _postprocess_constraints(
                 additional_context, f'Unrecognized dietary phrasing not applied: "{phrase}".'
             )
 
+    # Union with restrictions read straight from the user's words, and with
+    # the diet an avoid list implies (avoiding every nut IS nut-free). The
+    # model decides which field a restriction lands in and that choice varies
+    # between near-identical sentences; the union means it cannot lose one.
+    stated = detect_dietary_restrictions(utterance)
+    for restriction in [*stated, *implied_dietary_tags(canonical_avoid_ingredients)]:
+        if restriction not in normalized_dietary_restrictions:
+            normalized_dietary_restrictions.append(restriction)
+
     return canonical_avoid_ingredients, normalized_dietary_restrictions, additional_context
+
+
+def _canonical_on_hand(raw: RawExtractedConstraints, synonym_map: Mapping[str, str]) -> list[str]:
+    """Ingredients the speaker said they have, canonicalized the same way
+    avoid_ingredients are, de-duplicated, order kept."""
+    names: list[str] = []
+    for name in raw.ingredients_on_hand:
+        canonical = resolve_canonical(normalize_ingredient(name), synonym_map)
+        if canonical and canonical not in names:
+            names.append(canonical)
+    return names
 
 
 async def analyze_voice_memo(
@@ -339,7 +391,7 @@ async def analyze_voice_memo(
         synonym_map = await load_synonym_map(recipe_db or get_recipe_db())
 
     canonical_avoid_ingredients, normalized_dietary_restrictions, additional_context = (
-        _postprocess_constraints(raw, synonym_map)
+        _postprocess_constraints(raw, synonym_map, transcript)
     )
 
     return AudioPerception(
@@ -354,6 +406,7 @@ async def analyze_voice_memo(
         protein_preference=raw.protein_preference,
         occasion=raw.occasion,
         additional_context=additional_context,
+        ingredients_on_hand=_canonical_on_hand(raw, synonym_map),
     )
 
 
@@ -430,7 +483,7 @@ async def analyze_text_input(
         synonym_map = await load_synonym_map(recipe_db or get_recipe_db())
 
     canonical_avoid_ingredients, normalized_dietary_restrictions, additional_context = (
-        _postprocess_constraints(raw, synonym_map)
+        _postprocess_constraints(raw, synonym_map, text)
     )
 
     return TextPerception(
@@ -444,4 +497,5 @@ async def analyze_text_input(
         protein_preference=raw.protein_preference,
         occasion=raw.occasion,
         additional_context=additional_context,
+        ingredients_on_hand=_canonical_on_hand(raw, synonym_map),
     )

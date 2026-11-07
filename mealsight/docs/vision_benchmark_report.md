@@ -6,6 +6,14 @@
 
 Recall is reported two ways throughout: **raw recall** (against every ground-truth row) and **visibility-adjusted recall** (excluding items in `test_data/eval_cases/visibility_exclusions.csv` that are known not to be visible in frame — see that file for reasons).
 
+> **Read with the addendum at the end (2026-10-16).** Every table below was
+> produced by the matcher as it stood on 2026-08-22, which did not strip
+> parenthetical qualifiers. That understated every configuration except the
+> retired model's best one, and made prompt A look catastrophic on two photos
+> (0.00 F1) when it was about 0.66. The tables are left as published; the
+> addendum regenerates them from the same stored responses with the corrected
+> matcher.
+
 ## Scoring corrections
 
 The matcher used in the previous version of this report had three confirmed bugs: it didn't strip packaging words ("milk carton" failed to match "milk"), its synonym map only fired on an exact whole-phrase match (so "Butter (Chavroux brand)" never credited goat cheese even though the brand name is unambiguous), and it scored matches independently per item instead of as a one-to-one assignment (risking double counting when ground truth has both a general and a specific term, e.g. "potato" and "sweet potato"). All three are fixed here: container-word stripping, a two-tier synonym system (exact-phrase equivalences plus substring-safe brand names), and greedy most-specific-first bipartite assignment.
@@ -210,3 +218,161 @@ Here is the list of food items I can clearly see in the image:
 15. Jar of pickles | confidence: medium
 16. Carton of cream | confidence: high
 ```
+
+---
+
+# Addendum 2026-10-16: scorer and parser corrected, replacement models measured
+
+Everything above is the 2026-08-22 run and is unchanged. This addendum was
+appended by hand; regenerating the report with `scripts/benchmark_vision.py`
+overwrites the file and drops it. The same account, with the reasoning and
+audit detail, is in `docs/VISION_FINDINGS.md`.
+
+## Why
+
+`mistral-medium-2505`, the best model above (F1 0.64), was retired by Mistral.
+It returned HTTP 429 with `x-ratelimit-limit-req-minute: 0` from 2026-09-04
+(first observed) and is absent from `/v1/models`. Every medium, small and
+magistral model also returns 0 requests/minute on this account's free plan.
+
+## Account rate limits (live response headers, 2026-10-16)
+
+| model | TPM | RPS | status |
+|---|---|---|---|
+| mistral-medium-2604 | n/a | 0 | 429 on every call |
+| mistral-medium-latest | n/a | 0 | 429 on every call |
+| mistral-small-2603 | n/a | 0 | 429 on every call |
+| magistral-medium-latest | n/a | 0 | 429 on every call |
+| ministral-14b-2512 | 937,500 | 0.50 (30/min) | works |
+| ministral-8b-2512 | 625,000 | 3.13 (188/min) | works |
+
+## Scorer correction
+
+`normalize_words` now strips parenthetical qualifiers before matching
+(`PARENTHETICAL_RE`), in `scripts/benchmark_vision.py` and its port in
+`backend/eval/matching.py`. Brand synonyms are still looked up in the
+UNSTRIPPED text, because "Butter (Chavroux brand)" carries the brand only
+inside the parentheses (my first version of the fix stripped it and broke that
+case; see VISION_FINDINGS.md section 2). Near-miss pairs: 274 distinct (513
+occurrences) before, 119 (217) after.
+
+## The August grid, regenerated (same 135 stored responses, corrected scorer)
+
+These replace the corresponding tables above. Where today's ministral-8b
+B-conservative calls exist they are NOT mixed in here: this is the August data
+only.
+
+## Per-model aggregate (across all prompts, images, reps)
+
+| model | mean F1 (raw) | stddev | mean F1 (adj.) | stddev |
+|---|---|---|---|---|
+| mistral-medium-2505 | 0.61 | 0.11 | 0.62 | 0.11 |
+| pixtral-12b-latest | 0.52 | 0.10 | 0.53 | 0.10 |
+| ministral-8b-2512 | 0.50 | 0.07 | 0.50 | 0.07 |
+
+## Per-prompt aggregate (across all models, images, reps)
+
+| prompt | mean F1 (raw) | stddev | mean F1 (adj.) | stddev |
+|---|---|---|---|---|
+| A-current | 0.51 | 0.12 | 0.52 | 0.12 |
+| B-conservative | 0.57 | 0.10 | 0.57 | 0.10 |
+| C-grounded | 0.54 | 0.09 | 0.55 | 0.09 |
+
+## Ranked (model, prompt) pairs
+
+| rank | model | prompt | mean F1 (raw) | stddev | mean F1 (adj.) | stddev |
+|---|---|---|---|---|---|---|
+| 1 | mistral-medium-2505 | B-conservative | 0.64 | 0.08 | 0.65 | 0.07 |
+| 2 | mistral-medium-2505 | A-current | 0.59 | 0.11 | 0.60 | 0.11 |
+| 3 | mistral-medium-2505 | C-grounded | 0.59 | 0.13 | 0.60 | 0.13 |
+| 4 | pixtral-12b-latest | B-conservative | 0.54 | 0.12 | 0.55 | 0.12 |
+| 5 | pixtral-12b-latest | C-grounded | 0.52 | 0.07 | 0.53 | 0.07 |
+| 6 | ministral-8b-2512 | B-conservative | 0.52 | 0.05 | 0.52 | 0.05 |
+| 7 | ministral-8b-2512 | C-grounded | 0.51 | 0.04 | 0.52 | 0.04 |
+| 8 | pixtral-12b-latest | A-current | 0.49 | 0.10 | 0.50 | 0.10 |
+| 9 | ministral-8b-2512 | A-current | 0.46 | 0.10 | 0.47 | 0.10 |
+
+**Best configuration: `mistral-medium-2505` + `B-conservative` (mean F1 0.64).**
+
+## Per-image breakdown
+
+| photo | mean F1 (raw) | mean F1 (adj.) | best F1 achieved | flag |
+|---|---|---|---|---|
+| photo_01 | 0.51 | 0.56 | 0.67 |  |
+| photo_02 | 0.53 | 0.53 | 0.67 |  |
+| photo_03 | 0.57 | 0.57 | 0.79 |  |
+| photo_04 | 0.48 | 0.48 | 0.71 |  |
+| photo_05 | 0.61 | 0.61 | 0.79 |  |
+
+## Systematic misses
+
+**Ground-truth items no model ever identified, across any run:**
+
+- photo_01: flour, ham, potato, shrimp
+- photo_02: corn, flour, potato, shrimp
+- photo_03: shrimp, spinach
+- photo_04: corn, goat cheese, shrimp, spinach
+- photo_05: corn, flour, spinach
+
+**Items every model reported that are never in ground truth (hallucinated by all 3 models, in at least one run each):**
+
+- jar (possibly pickles or sauce)
+- Cucumber (in the bottom drawer)
+- Canned food (brand unclear, possibly tuna or similar)
+- Granola or cereal mix
+- Green leafy vegetables
+- Bottle of orange juice (or similar citrus juice)
+- Jar of pickles
+- red container (plant-based milk)
+- Sugar substitute packets
+
+## Re-measurement, 2026-10-16
+
+B-conservative, photo_01 to photo_05, 3 reps, temperature 0, fresh calls, 0
+failed, about 70,000 tokens for the 30 benchmark-format calls. Checkpoint:
+`.cache/vision_rebench_2026-10_checkpoint.jsonl`. `mistral-medium-2604` could
+not be called, so it has no row.
+
+### Benchmark methodology (pipe-format prompt; comparable to the 0.64 baseline)
+
+| model | F1 before fix | F1 after fix | stddev | adj. F1 | precision | recall (raw) |
+|---|---|---|---|---|---|---|
+| mistral-medium-2505 (retired, 2026-08-22) | 0.640 | 0.640 | 0.077 | 0.651 | 0.707 | 0.586 |
+| ministral-14b-2512 | 0.400 | 0.551 | 0.097 | 0.562 | 0.618 | 0.498 |
+| ministral-8b-2512 | 0.490 | 0.545 | 0.075 | 0.550 | 0.579 | 0.516 |
+| ministral-8b-2512 (2026-08-22 data) | 0.428 | 0.521 | 0.046 | 0.525 | n/a | n/a |
+
+Per-image (mean ± stddev across 3 reps). No cell exceeds a stddev of 0.10.
+
+| model | photo | precision | recall (raw) | recall (adj.) | F1 before fix | F1 after fix (raw) | F1 after fix (adj.) | flag |
+|---|---|---|---|---|---|---|---|---|
+| ministral-14b-2512 | photo_01 | 0.53±0.02 | 0.44±0.00 | 0.54±0.00 | 0.21 | 0.48±0.01 | 0.53±0.01 |  |
+| ministral-14b-2512 | photo_02 | 0.74±0.07 | 0.56±0.04 | 0.56±0.04 | 0.46 | 0.63±0.04 | 0.63±0.04 |  |
+| ministral-14b-2512 | photo_03 | 0.55±0.03 | 0.47±0.00 | 0.47±0.00 | 0.43 | 0.51±0.01 | 0.51±0.01 |  |
+| ministral-14b-2512 | photo_04 | 0.52±0.03 | 0.40±0.00 | 0.40±0.00 | 0.40 | 0.45±0.01 | 0.45±0.01 |  |
+| ministral-14b-2512 | photo_05 | 0.76±0.03 | 0.63±0.03 | 0.63±0.03 | 0.50 | 0.69±0.02 | 0.69±0.02 |  |
+| ministral-8b-2512 | photo_01 | 0.58±0.12 | 0.54±0.07 | 0.59±0.09 | 0.47 | 0.56±0.09 | 0.59±0.10 |  |
+| ministral-8b-2512 | photo_02 | 0.55±0.06 | 0.49±0.04 | 0.49±0.04 | 0.45 | 0.52±0.05 | 0.52±0.05 |  |
+| ministral-8b-2512 | photo_03 | 0.63±0.03 | 0.53±0.00 | 0.53±0.00 | 0.48 | 0.58±0.01 | 0.58±0.01 |  |
+| ministral-8b-2512 | photo_04 | 0.47±0.02 | 0.42±0.04 | 0.42±0.04 | 0.42 | 0.45±0.03 | 0.45±0.03 |  |
+| ministral-8b-2512 | photo_05 | 0.65±0.03 | 0.59±0.03 | 0.59±0.03 | 0.62 | 0.62±0.03 | 0.62±0.03 |  |
+
+### Production path (`analyze_fridge_photo`, production JSON prompt, fixed parser)
+
+| model | parsed | F1, model names | stddev | F1, after canonicalization | precision | recall (raw) |
+|---|---|---|---|---|---|---|
+| ministral-14b-2512 | 15/15 | 0.535 | 0.053 | 0.504 | 0.616 | 0.473 |
+| ministral-8b-2512 | 15/15 | 0.529 | 0.103 | 0.489 | 0.582 | 0.486 |
+
+The two models tie on F1 by both methods (differences of 0.006). The 8b figure
+of 0.103 is the spread across all 15 calls, mostly between photos; no single
+photo exceeds 0.08. Before the parser fix this path scored every photo 0
+(parse success 0/30; now 30/30).
+
+## Choice
+
+`ministral-8b-2512` + B-conservative, F1 0.545 (benchmark) / 0.529 (production
+path), 625,000 TPM, 3.13 RPS. ministral-14b-2512 ties on F1 with higher TPM but
+0.50 RPS; because the request rate is the binding limit for a multi-call
+recommendation, 8b has roughly four times the effective throughput. The cost
+against the retired model's 0.640 is roughly 0.10 F1.

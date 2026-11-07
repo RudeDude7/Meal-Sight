@@ -22,9 +22,7 @@ async def test_transaction_commits_on_success(pantry_db: Database) -> None:
     await init_database(pantry_db, pantry_db.schema_path)
 
     async with pantry_db.transaction() as connection:
-        await connection.execute(
-            "INSERT INTO pantry (name, category) VALUES (?, ?)", ("banana", "fruit")
-        )
+        await connection.execute("INSERT INTO pantry (name, category) VALUES (?, ?)", ("banana", "fruit"))
 
     row = await pantry_db.fetch_one("SELECT name FROM pantry WHERE name = ?", ("banana",))
     assert row is not None
@@ -39,9 +37,7 @@ async def test_transaction_rolls_back_on_exception(pantry_db: Database) -> None:
 
     try:
         async with pantry_db.transaction() as connection:
-            await connection.execute(
-                "INSERT INTO pantry (name, category) VALUES (?, ?)", ("banana", "fruit")
-            )
+            await connection.execute("INSERT INTO pantry (name, category) VALUES (?, ?)", ("banana", "fruit"))
             raise _BoomError("something went wrong after the insert")
     except _BoomError:
         pass

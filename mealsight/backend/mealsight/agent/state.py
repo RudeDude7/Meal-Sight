@@ -37,11 +37,19 @@ class MealSightState(TypedDict):
     # returns (a tool's own JSON result, already parsed) ---
     pantry_items: NotRequired[list[dict[str, Any]]]
     expiring_items: NotRequired[list[dict[str, Any]]]
+    # Pantry items further past their estimated shelf life than
+    # settings.expired_grace_days: not freshness opportunities but waste.
+    # Each carries days_overdue and log_waste_args (the existing log_waste
+    # tool's own arguments). Surfaced to the caller, never auto-logged.
+    waste_candidates: NotRequired[list[dict[str, Any]]]
     user_profile: NotRequired[dict[str, Any]]
     context_signals: NotRequired[dict[str, Any]]
     meal_history: NotRequired[list[dict[str, Any]]]
     recipe_candidates: NotRequired[list[dict[str, Any]]]
     matched_recipes: NotRequired[list[dict[str, Any]]]
+    # Candidates match_rank removed for breaking a dietary restriction or avoid list, each as
+    # "Recipe name (restriction: reason)". Evidence that an exclusion actually fired.
+    dietary_exclusions: NotRequired[list[str]]
 
     # Set by generate_output (node 9) ONLY on the cookable path: the
     # chosen recipe's own matched_items (from match_rank), cross-

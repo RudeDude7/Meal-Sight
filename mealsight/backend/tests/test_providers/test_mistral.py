@@ -12,7 +12,12 @@ from pydantic import BaseModel
 
 from mealsight.config.settings import MODEL_RATE_LIMITS, RateLimitSpec
 from mealsight.providers.exceptions import InvalidResponse
-from mealsight.providers.mistral import MistralProvider, _describe_schema
+from mealsight.providers.mistral import (
+    MistralProvider,
+    _describe_schema,
+    strip_code_fences,
+    strip_json_comments,
+)
 from mealsight.providers.rate_limiter import RateLimiter
 
 CHAT_URL = "https://api.mistral.ai/v1/chat/completions"
@@ -119,6 +124,58 @@ async def test_complete_json_strips_markdown_code_fences(provider: MistralProvid
     result = await provider.complete_json("list an ingredient", _Ingredient, TEST_MODEL)
 
     assert result == _Ingredient(name="flour", quantity=2)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ('```json\n{"a": 1}\n```', '{"a": 1}'),
+        ('```\n{"a": 1}\n```', '{"a": 1}'),
+        ('{"a": 1}\n```', '{"a": 1}'),  # lone trailing fence
+        ('```json\n{"a": 1}', '{"a": 1}'),  # lone leading fence
+        ('  {"a": 1}  ', '{"a": 1}'),
+        ('{"a": "x```y"}', '{"a": "x```y"}'),  # fence-like text inside a value is untouched
+    ],
+)
+def test_strip_code_fences_handles_each_end_independently(raw: str, expected: str) -> None:
+    assert strip_code_fences(raw) == expected
+
+
+@respx.mock
+async def test_complete_json_accepts_a_lone_trailing_fence_without_a_repair_retry(
+    provider: MistralProvider,
+) -> None:
+    route = respx.post(CHAT_URL).mock(return_value=_chat_response('{"name": "flour", "quantity": 2}\n```'))
+
+    result = await provider.complete_json("list an ingredient", _Ingredient, TEST_MODEL)
+
+    assert result == _Ingredient(name="flour", quantity=2)
+    assert route.call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ('{"a": ["x"  // why\n, "y"]}', '{"a": ["x"  \n, "y"]}'),
+        ('{"a": 1 /* note */, "b": 2}', '{"a": 1 , "b": 2}'),
+        ('{"url": "http://example.com/a//b"}', '{"url": "http://example.com/a//b"}'),
+        ('{"q": "say \\"//\\" ok"}', '{"q": "say \\"//\\" ok"}'),
+        ('{"a": 1} // trailing', '{"a": 1} '),
+    ],
+)
+def test_strip_json_comments_leaves_string_contents_alone(raw: str, expected: str) -> None:
+    assert strip_json_comments(raw) == expected
+
+
+@respx.mock
+async def test_complete_json_accepts_comments_without_a_repair_retry(provider: MistralProvider) -> None:
+    commented = '{"name": "flour",  // the main ingredient\n "quantity": 2}'
+    route = respx.post(CHAT_URL).mock(return_value=_chat_response(commented))
+
+    result = await provider.complete_json("list an ingredient", _Ingredient, TEST_MODEL)
+
+    assert result == _Ingredient(name="flour", quantity=2)
+    assert route.call_count == 1
 
 
 @respx.mock

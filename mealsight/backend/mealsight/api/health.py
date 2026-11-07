@@ -82,11 +82,15 @@ async def _probe_provider(
 async def _check_providers(client: httpx.AsyncClient) -> dict[str, Any]:
     mistral_result, groq_result = await asyncio.gather(
         _probe_provider(
-            client, "mistral", f"{MISTRAL_BASE_URL}/models",
+            client,
+            "mistral",
+            f"{MISTRAL_BASE_URL}/models",
             {"Authorization": f"Bearer {settings.mistral_api_key.get_secret_value()}"},
         ),
         _probe_provider(
-            client, "groq", f"{GROQ_BASE_URL}/models",
+            client,
+            "groq",
+            f"{GROQ_BASE_URL}/models",
             {"Authorization": f"Bearer {settings.groq_api_key.get_secret_value()}"},
         ),
     )
@@ -121,4 +125,3 @@ async def build_health_report(manager: MCPClientManager, http_client: httpx.Asyn
         "providers": providers,
         "recipe_database": recipe_database,
     }
-

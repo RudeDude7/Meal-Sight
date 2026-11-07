@@ -33,9 +33,7 @@ async def test_disliked_ingredients_append_and_deduplicate(user_db: Database) ->
 
 
 async def test_canonically_equivalent_dislikes_collapse_to_one_entry(user_db: Database) -> None:
-    await update_preferences(
-        "disliked_ingredients", "scallions", user_db=user_db, synonym_map=_SYNONYMS
-    )
+    await update_preferences("disliked_ingredients", "scallions", user_db=user_db, synonym_map=_SYNONYMS)
     profile = await update_preferences(
         "disliked_ingredients", "green onion", user_db=user_db, synonym_map=_SYNONYMS
     )
@@ -93,9 +91,7 @@ async def test_remove_dietary_restriction(user_db: Database) -> None:
 
 
 async def test_remove_disliked_ingredient_using_a_synonym_form(user_db: Database) -> None:
-    await update_preferences(
-        "disliked_ingredients", "scallions", user_db=user_db, synonym_map=_SYNONYMS
-    )
+    await update_preferences("disliked_ingredients", "scallions", user_db=user_db, synonym_map=_SYNONYMS)
     profile = await remove_preference(
         "disliked_ingredients", "green onion", user_db=user_db, synonym_map=_SYNONYMS
     )

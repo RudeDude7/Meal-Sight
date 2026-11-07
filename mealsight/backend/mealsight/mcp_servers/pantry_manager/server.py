@@ -296,9 +296,7 @@ async def get_grocery_list(list_id: int | None = None) -> dict[str, Any]:
 
 
 @mcp.tool
-async def log_waste(
-    item_name: str, quantity_wasted: float, unit: str | None, reason: str
-) -> dict[str, Any]:
+async def log_waste(item_name: str, quantity_wasted: float, unit: str | None, reason: str) -> dict[str, Any]:
     """Logs one instance of item_name being thrown out and DEDUCTS
     quantity_wasted from the pantry in the same call — a user throwing
     something out has already lost it, so there is no separate "now

@@ -86,9 +86,7 @@ def test_text_only_works() -> None:
 
 
 def test_conflicting_cook_times_take_the_lower_and_record_the_conflict() -> None:
-    result = merge_perceptions(
-        None, _audio(max_cook_time_minutes=45), _text(max_cook_time_minutes=20)
-    )
+    result = merge_perceptions(None, _audio(max_cook_time_minutes=45), _text(max_cook_time_minutes=20))
 
     assert result.max_cook_time_minutes == 20
     assert len(result.conflicts_detected) == 1
@@ -114,9 +112,7 @@ def test_agreeing_scalar_field_produces_no_conflict() -> None:
 
 
 def test_conflicting_cuisine_prefers_text_and_records_it() -> None:
-    result = merge_perceptions(
-        None, _audio(cuisine_preference="Mexican"), _text(cuisine_preference="Thai")
-    )
+    result = merge_perceptions(None, _audio(cuisine_preference="Mexican"), _text(cuisine_preference="Thai"))
 
     assert result.cuisine_preference == "Thai"
     assert len(result.conflicts_detected) == 1
@@ -127,17 +123,45 @@ def test_conflicting_cuisine_prefers_text_and_records_it() -> None:
     assert conflict.text_value == "Thai"
 
 
-def test_audio_mentioned_ingredient_absent_from_photo_is_flagged_unverified() -> None:
-    result = merge_perceptions(
-        _vision([_item("onion")]), _audio(protein_preference="salmon"), None
-    )
+def test_a_wanted_protein_is_not_added_as_an_ingredient_the_user_has() -> None:
+    # "I want salmon" says nothing about salmon being on hand. Treating it as
+    # an unverified pantry item made every salmon recipe look cookable.
+    result = merge_perceptions(_vision([_item("onion")]), _audio(protein_preference="salmon"), None)
+
+    assert [i.name for i in result.available_ingredients] == ["onion"]
+    assert result.protein_preference == "salmon"
+
+
+def test_a_stated_possession_reaches_matching_marked_unverified() -> None:
+    result = merge_perceptions(_vision([_item("onion")]), _audio(ingredients_on_hand=["salmon"]), None)
 
     unverified = [i for i in result.available_ingredients if not i.verified]
-    assert len(unverified) == 1
-    assert unverified[0].name == "salmon"
+    assert [i.name for i in unverified] == ["salmon"]
     assert unverified[0].source == "audio"
     assert unverified[0].note is not None
-    assert "off-camera" in unverified[0].note
+    assert "not seen in the photo" in unverified[0].note
+
+
+def test_a_possession_stated_in_text_is_also_carried_and_not_duplicated_with_vision() -> None:
+    result = merge_perceptions(
+        _vision([_item("salmon", category="protein")]), None, _text(ingredients_on_hand=["salmon", "lemon"])
+    )
+
+    assert [i.name for i in result.available_ingredients] == ["salmon", "lemon"]
+    assert [i.verified for i in result.available_ingredients] == [True, False]
+
+
+def test_want_and_have_for_the_same_food_keep_both_meanings() -> None:
+    result = merge_perceptions(None, None, _text(protein_preference="salmon", ingredients_on_hand=["salmon"]))
+
+    assert result.protein_preference == "salmon"
+    assert [i.name for i in result.available_ingredients] == ["salmon"]
+
+
+def test_a_preference_alone_adds_nothing_even_alongside_a_stated_possession_of_something_else() -> None:
+    result = merge_perceptions(None, None, _text(protein_preference="fish", ingredients_on_hand=["chicken"]))
+
+    assert [i.name for i in result.available_ingredients] == ["chicken"]
 
 
 def test_protein_preference_already_seen_in_photo_is_not_duplicated() -> None:
@@ -208,3 +232,65 @@ def test_freshness_alert_for_non_fresh_item() -> None:
 def test_fresh_item_produces_no_freshness_alert() -> None:
     result = merge_perceptions(_vision([_item("onion", freshness="fresh")]), None, None)
     assert result.freshness_alerts == []
+
+
+def _saved(**kwargs: object) -> UserProfile:
+    base: dict[str, object] = {
+        "dietary_restrictions": [],
+        "disliked_ingredients": [],
+        "preferred_cook_time_minutes": 30,
+        "household_size": 1,
+        "protein_preference": None,
+        "cooking_skill": "intermediate",
+        "budget_sensitivity": "moderate",
+        "cuisine_preferences": {},
+        "cuisine_preference_data_points": {},
+    }
+    base.update(kwargs)
+    return UserProfile(**base)  # type: ignore[arg-type]
+
+
+def test_saved_dietary_restrictions_reach_the_request_as_if_stated() -> None:
+    """Regression: a restriction saved on the profile (e.g. a nut allergy) was stored correctly and then
+    never applied, because fusion read only servings and cook time from the profile."""
+    profile = _saved(dietary_restrictions=["vegetarian", "nut_free", "Peanut Free"])
+    result = merge_perceptions(None, None, _text(), user_profile=profile)
+    assert result.dietary_restrictions == ["vegetarian", "nut-free", "peanut-free"]
+    assert result.restrictions_from_profile == ["vegetarian", "nut-free", "peanut-free"]
+
+
+def test_saved_and_stated_restrictions_are_a_union_without_duplicates() -> None:
+    profile = _saved(dietary_restrictions=["vegetarian"])
+    result = merge_perceptions(None, None, _text(dietary_restrictions=["gluten-free", "vegetarian"]), profile)
+    assert result.dietary_restrictions == ["gluten-free", "vegetarian"]
+    assert result.restrictions_from_profile == ["vegetarian"]
+
+
+def test_an_unrecognized_saved_restriction_is_kept_to_be_disclosed_not_dropped() -> None:
+    result = merge_perceptions(None, None, _text(), _saved(dietary_restrictions=["no pork"]))
+    assert result.dietary_restrictions == ["no-pork"]
+    assert result.unenforced_restrictions == ["no-pork"]
+
+
+def test_a_saved_restriction_goes_through_the_same_split_as_a_stated_one() -> None:
+    from mealsight.matching.diet import split_restrictions
+
+    result = merge_perceptions(
+        None, None, _text(), _saved(dietary_restrictions=["peanut-free", "vegan", "keto"])
+    )
+    split = split_restrictions(result.dietary_restrictions)
+    assert (split.tag_filters, split.ingredient, split.unenforced) == (["vegan"], ["peanut-free"], ["keto"])
+
+
+def test_no_profile_and_an_empty_profile_add_no_restrictions() -> None:
+    assert merge_perceptions(None, None, _text(), None).dietary_restrictions == []
+    assert merge_perceptions(None, None, _text(), _saved()).restrictions_from_profile == []
+
+
+def test_saved_protein_preference_is_a_default_that_a_stated_one_overrides() -> None:
+    profile = _saved(protein_preference="chicken")
+    defaulted = merge_perceptions(None, None, _text(), profile)
+    assert defaulted.protein_preference == "chicken" and defaulted.protein_preference_is_default is True
+    stated = merge_perceptions(None, None, _text(protein_preference="salmon"), profile)
+    assert stated.protein_preference == "salmon" and stated.protein_preference_is_default is False
+    assert merge_perceptions(None, None, _text(), _saved()).protein_preference is None

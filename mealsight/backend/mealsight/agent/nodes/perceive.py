@@ -244,12 +244,14 @@ async def perceive(state: MealSightState, runtime: Runtime[AgentContext]) -> dic
     text_input = state.get("text_input")
     stream = runtime.context.stream if runtime.context is not None else None
 
-    (vision_result, vision_message), (audio_result, audio_message), (text_result, text_message) = (
-        await asyncio.gather(
-            _run_vision(image_bytes, stream),
-            _run_audio(audio_bytes, stream),
-            _run_text(text_input, stream),
-        )
+    (
+        (vision_result, vision_message),
+        (audio_result, audio_message),
+        (text_result, text_message),
+    ) = await asyncio.gather(
+        _run_vision(image_bytes, stream),
+        _run_audio(audio_bytes, stream),
+        _run_text(text_input, stream),
     )
 
     update: dict[str, Any] = {

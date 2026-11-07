@@ -112,9 +112,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("api_stopped")
 
 
-def create_app(
-    *, lifespan_override: Callable[[FastAPI], Any] | None = None
-) -> FastAPI:
+def create_app(*, lifespan_override: Callable[[FastAPI], Any] | None = None) -> FastAPI:
     """lifespan_override exists solely for tests: the real lifespan
     starts three genuine subprocesses, which is correct for a real
     process but far too slow (and far too real) for a unit test — tests

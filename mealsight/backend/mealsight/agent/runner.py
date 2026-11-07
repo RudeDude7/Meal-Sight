@@ -87,9 +87,7 @@ async def run_recommendation(
         async with MCPClientManager() as owned_manager:
             final_state = cast(
                 MealSightState,
-                await graph.ainvoke(
-                    initial_state, context=AgentContext(mcp=owned_manager, stream=stream)
-                ),
+                await graph.ainvoke(initial_state, context=AgentContext(mcp=owned_manager, stream=stream)),
             )
 
     logger.info("recommendation_finished", trace_id=trace_id)

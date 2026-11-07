@@ -34,8 +34,13 @@ _NUMBERED_LINE_RE = re.compile(r"^\s*\d+[.):]?\s*")
 _BRACKETED_ITEM_RE = re.compile(r"^<([^>]+)>")
 _PAREN_RE = re.compile(r"\([^)]*\)")
 _PREAMBLE_PREFIXES = (
-    "here is", "here are", "the image shows", "based on",
-    "i can see", "i clearly see", "looking at",
+    "here is",
+    "here are",
+    "the image shows",
+    "based on",
+    "i can see",
+    "i clearly see",
+    "looking at",
 )
 
 

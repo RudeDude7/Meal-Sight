@@ -36,6 +36,12 @@ class SearchResults(BaseModel):
 
     results: list[RecipeSummary]
     total_matched: int
+    # Requested restrictions the engine could NOT check (mealsight.matching.diet.UNENFORCED, or any
+    # name it does not recognise). The results are NOT filtered by them; a caller must not mistake
+    # them for filtered results.
+    unenforced_restrictions: list[str] = []
+    # Recipes removed because their ingredient list broke an ingredient-enforced restriction.
+    excluded_by_ingredient_restrictions: int = 0
 
 
 class ReverseMatchedRecipe(BaseModel):

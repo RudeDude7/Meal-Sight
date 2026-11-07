@@ -37,15 +37,13 @@ async def test_scores_recompute_across_all_rated_meals_not_just_the_new_one(
 
     # Both ratings — the one from meal_one AND the new one from meal_two
     # — must both be reflected: data_points is 2, not 1.
-    assert scores["thai"][1] == 2
+    assert scores["Thai"][1] == 2
 
 
 async def test_low_data_points_shrinks_toward_neutral_more_than_high(
     user_db: Database, recipe_db: Database
 ) -> None:
-    solo = await log_meal(
-        None, "Solo", "italian", None, date.today(), user_db=user_db, recipe_db=recipe_db
-    )
+    solo = await log_meal(None, "Solo", "italian", None, date.today(), user_db=user_db, recipe_db=recipe_db)
     await rate_meal(solo.id, 5, user_db=user_db, recipe_db=recipe_db)
 
     for i in range(10):
@@ -55,8 +53,8 @@ async def test_low_data_points_shrinks_toward_neutral_more_than_high(
         await rate_meal(meal.id, 5, user_db=user_db, recipe_db=recipe_db)
 
     scores = await _cuisine_scores(user_db)
-    italian_score, italian_points = scores["italian"]
-    japanese_score, japanese_points = scores["japanese"]
+    italian_score, italian_points = scores["Italian"]
+    japanese_score, japanese_points = scores["Japanese"]
 
     assert italian_points == 1
     assert japanese_points == 10
@@ -68,14 +66,12 @@ async def test_low_data_points_shrinks_toward_neutral_more_than_high(
 
 async def test_unrated_meals_are_excluded_from_scoring(user_db: Database, recipe_db: Database) -> None:
     await log_meal(None, "Unrated", "mexican", None, date.today(), user_db=user_db, recipe_db=recipe_db)
-    rated = await log_meal(
-        None, "Rated", "mexican", None, date.today(), user_db=user_db, recipe_db=recipe_db
-    )
+    rated = await log_meal(None, "Rated", "mexican", None, date.today(), user_db=user_db, recipe_db=recipe_db)
     await rate_meal(rated.id, 4, user_db=user_db, recipe_db=recipe_db)
 
     scores = await _cuisine_scores(user_db)
 
-    assert scores["mexican"][1] == 1
+    assert scores["Mexican"][1] == 1
 
 
 async def test_protein_score_derived_from_recipe_ingredients(user_db: Database, recipe_db: Database) -> None:

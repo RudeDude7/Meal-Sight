@@ -118,3 +118,19 @@ async def test_health_check_failure_names_the_server_and_missing_tool(
         await manager.start()
 
     assert "update_pantry" in str(exc_info.value)
+
+
+def test_server_subprocesses_inherit_the_parents_environment_plus_any_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: the child used to start with only a few safe variables, so it could read an API key
+    from a .env file but not from a real environment variable, and every server failed to start under
+    CI or Docker."""
+    monkeypatch.setenv("MISTRAL_API_KEY", "from-the-parent")
+    monkeypatch.setenv("SOMETHING_ELSE", "kept")
+    env = MCPClientManager(
+        env={"PANTRY_DB_PATH": "/tmp/x.db", "SOMETHING_ELSE": "overridden"}
+    )._subprocess_env()
+    assert env["MISTRAL_API_KEY"] == "from-the-parent"
+    assert env["PANTRY_DB_PATH"] == "/tmp/x.db"
+    assert env["SOMETHING_ELSE"] == "overridden", "an explicit extra wins over the parent's value"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from mealsight.config.settings import settings
 from mealsight.db.connection import Database
 from mealsight.recipe_engine.nutrition import calculate_nutrition
@@ -116,7 +118,62 @@ async def test_tags_applied_when_coverage_exceeds_80_percent(recipe_db: Database
     assert "high_protein" in result.tags
 
 
-async def test_totals_are_divided_by_requested_servings(recipe_db: Database) -> None:
+async def test_per_serving_values_do_not_depend_on_requested_servings(recipe_db: Database) -> None:
+    await insert_nutrition(recipe_db, "rice", calories=130, protein=2.7, carbs=28.2, fat=0.3)
+    await insert_recipe(
+        recipe_db,
+        recipe_id="1",
+        name="Test",
+        servings_base=4,
+        ingredients=[
+            {
+                "name": "rice",
+                "quantity": 800.0,
+                "unit": "g",
+                "importance": "important",
+                "raw_measure": "800g",
+            },
+        ],
+    )
+
+    # 800g rice for 4 servings = 1,040 kcal for the dish = 260 kcal per
+    # serving, whether 1, 2 or 4 servings are requested. (Previously this
+    # divided the base-quantity total by the REQUESTED servings, giving
+    # 1,040 / 1 = 1,040 kcal "per serving" for a 1-serving request.)
+    for requested in (1, 2, 4):
+        result = await calculate_nutrition(recipe_db, "1", servings=requested)
+        assert result.calories == 260.0, requested
+        assert result.servings == requested
+
+
+@pytest.mark.parametrize("servings_base", [1, 2, 4, 6])
+async def test_per_serving_is_constant_across_servings_base_and_request(
+    recipe_db: Database, servings_base: int
+) -> None:
+    await insert_nutrition(recipe_db, "rice", calories=130, protein=2.7, carbs=28.2, fat=0.3)
+    await insert_recipe(
+        recipe_db,
+        recipe_id="1",
+        name="Test",
+        servings_base=servings_base,
+        ingredients=[
+            {
+                "name": "rice",
+                "quantity": 200.0 * servings_base,
+                "unit": "g",
+                "importance": "important",
+                "raw_measure": f"{200 * servings_base}g",
+            },
+        ],
+    )
+
+    # 200g of rice per base serving = 260 kcal per serving, always.
+    results = [await calculate_nutrition(recipe_db, "1", servings=n) for n in (1, 2, 3, 4)]
+
+    assert [r.calories for r in results] == [260.0, 260.0, 260.0, 260.0]
+
+
+async def test_servings_base_one_recipe_is_unchanged_by_scaling(recipe_db: Database) -> None:
     await insert_nutrition(recipe_db, "rice", calories=130, protein=2.7, carbs=28.2, fat=0.3)
     await insert_recipe(
         recipe_db,
@@ -134,7 +191,8 @@ async def test_totals_are_divided_by_requested_servings(recipe_db: Database) -> 
         ],
     )
 
-    # 200g rice = 260 kcal total; over 2 servings that's 130 kcal each.
+    # One serving is 200g rice = 260 kcal; two servings is 400g, still
+    # 260 kcal each.
     result = await calculate_nutrition(recipe_db, "1", servings=2)
 
-    assert result.calories == 130.0
+    assert result.calories == 260.0

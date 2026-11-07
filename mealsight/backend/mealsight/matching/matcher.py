@@ -67,8 +67,23 @@ def substitute_satisfies_dietary_restrictions(
     would fail to earn the dairy_free tag."""
     if not dietary_restrictions:
         return True
+    # Imported here: mealsight.matching.diet imports mealsight.perception, which imports this package.
+    from mealsight.matching.diet import INGREDIENT_ENFORCED, TAG_BACKED, ingredient_violations
+
     substitute_tags = set(derive_dietary_tags([substitute_name]))
-    return all(restriction in substitute_tags for restriction in dietary_restrictions)
+    for restriction in dietary_restrictions:
+        hyphenated = restriction.lower().replace("_", "-")
+        if hyphenated in INGREDIENT_ENFORCED:
+            # No corpus tag exists for these (peanut-free, pescatarian, halal ...): judge the substitute
+            # by the same ingredient rules that exclude recipes. Comparing against tags would reject
+            # EVERY substitute, the dead-tag-filter bug again.
+            if ingredient_violations(hyphenated, [substitute_name]):
+                return False
+        elif hyphenated in TAG_BACKED and hyphenated.replace("-", "_") not in substitute_tags:
+            return False
+        # Anything else (low-sodium, keto, paleo ... or a name this system does not know) cannot be
+        # verified for a substitute, so it does not veto one; it is disclosed as unenforced elsewhere.
+    return True
 
 
 def _best_eligible_substitute(
@@ -76,12 +91,17 @@ def _best_eligible_substitute(
     available_canonical: frozenset[str],
     synonym_map: Mapping[str, str],
     dietary_restrictions: Sequence[str],
+    avoid_ingredients: Sequence[str] = (),
 ) -> SubstitutionOption | None:
+    from mealsight.matching.avoid import ingredient_hits  # local: keeps matcher import-light
+
     eligible = [
         option
         for option in options
         if resolve_canonical(normalize_ingredient(option.substitute), synonym_map) in available_canonical
         and substitute_satisfies_dietary_restrictions(option.substitute, dietary_restrictions)
+        # A substitute containing something the user asked to avoid is no substitute at all.
+        and not ingredient_hits(list(avoid_ingredients), [option.substitute])
     ]
     if not eligible:
         return None
@@ -138,6 +158,7 @@ def match_recipe(
     substitution_map: Mapping[str, Sequence[SubstitutionOption]],
     synonym_map: Mapping[str, str],
     dietary_restrictions: Sequence[str] | None = None,
+    avoid_ingredients: Sequence[str] | None = None,
 ) -> MatchResult:
     """Matches one recipe's required ingredients against one pantry's
     available ingredients, returning a scored, typed result.
@@ -177,7 +198,9 @@ def match_recipe(
             continue
 
         options = substitution_map.get(canonical, ())
-        best = _best_eligible_substitute(options, available_canonical, synonym_map, restrictions_tuple)
+        best = _best_eligible_substitute(
+            options, available_canonical, synonym_map, restrictions_tuple, tuple(avoid_ingredients or ())
+        )
         if best is not None:
             substitutable_items.append(
                 SubstitutableItem(
@@ -264,6 +287,7 @@ async def match_recipe_by_id(
     pantry_items: Sequence[str],
     dietary_restrictions: Sequence[str] | None = None,
     context: MatchContext | None = None,
+    avoid_ingredients: Sequence[str] | None = None,
 ) -> MatchResult:
     """Convenience wrapper: fetches one recipe by id, parses its
     ingredients, and matches it against pantry_items. Raises ValueError if
@@ -280,4 +304,5 @@ async def match_recipe_by_id(
         context.substitution_map,
         context.synonym_map,
         dietary_restrictions,
+        avoid_ingredients,
     )

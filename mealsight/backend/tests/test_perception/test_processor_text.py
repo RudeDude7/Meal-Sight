@@ -40,7 +40,9 @@ async def test_text_extraction_matches_audio_behavior_on_identical_content(
     assert result.servings == 4
     assert result.max_cook_time_minutes == 45
     assert result.avoid_ingredients == ["peanut"]
-    assert result.dietary_restrictions == ["dairy-free"]
+    # The model listed only "no dairy"; the user's own "no peanuts" is added by the deterministic
+    # backstop (mealsight.perception.restrictions), so the stated peanut restriction cannot be lost.
+    assert result.dietary_restrictions == ["dairy-free", "peanut-free"]
 
 
 async def test_empty_text_short_circuits_without_an_api_call(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,3 +98,31 @@ async def test_extraction_failure_degrades_gracefully(monkeypatch: pytest.Monkey
     assert result.servings is None
     assert result.additional_context is not None
     assert "unavailable" in result.additional_context.lower()
+
+
+def test_extraction_prompt_states_polarity_rules_with_paired_examples() -> None:
+    # Regression for "Anything with chicken" being extracted as
+    # avoid_ingredients: ["chicken"] (and "Anything but chicken" as a
+    # preferred protein). The behavior itself needs a live model to check
+    # (scripts/measure_extraction_accuracy.py polarity); this pins the
+    # wording that fixed it so it can't be quietly edited away.
+    from mealsight.perception.prompt import build_extraction_prompt
+
+    prompt = build_extraction_prompt("anything")
+
+    assert "POLARITY" in prompt
+    assert "NEVER an avoid item" in prompt
+    assert '"Anything with beef" means beef is WANTED' in prompt
+    assert '"Anything but beef" means beef is AVOIDED' in prompt
+    assert "explicit exclusion cue" in prompt
+    assert "Never a protein they asked to avoid" in prompt
+    # servings is stated only when said; an unstated count stays null
+    assert "if they never say, it is null" in prompt
+
+
+def test_spoken_possessions_are_canonicalized_and_deduplicated() -> None:
+    from mealsight.perception.models import RawExtractedConstraints
+    from mealsight.perception.processor import _canonical_on_hand
+
+    raw = RawExtractedConstraints(ingredients_on_hand=["Chicken Thighs", "chicken thighs", "scallions", ""])
+    assert _canonical_on_hand(raw, {"scallion": "green onion"}) == ["chicken thigh", "green onion"]

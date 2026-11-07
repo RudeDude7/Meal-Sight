@@ -101,9 +101,7 @@ def _standard_manager(recipe_ids: list[tuple[str, str]], *, missing: dict[str, l
     return FakeManager(
         {
             ("pantry_manager", "get_pantry"): ToolCallResult(success=True, data={"items": [], "count": 0}),
-            ("pantry_manager", "flag_expiring"): ToolCallResult(
-                success=True, data={"items": [], "count": 0}
-            ),
+            ("pantry_manager", "flag_expiring"): ToolCallResult(success=True, data={"items": [], "count": 0}),
             ("user_intelligence", "get_user_profile"): ToolCallResult(
                 success=True, data={"cuisine_preferences": {}}
             ),
@@ -136,7 +134,10 @@ async def test_dietary_restrictions_are_passed_through_to_search_recipes() -> No
     manager = _standard_manager(recipe_ids, missing={})
 
     await generate_meal_plan(
-        days=3, servings=2, dietary_restrictions=["vegan"], manager=manager  # type: ignore[arg-type]
+        days=3,
+        servings=2,
+        dietary_restrictions=["vegan"],
+        manager=manager,  # type: ignore[arg-type]
     )
 
     search_call = next(args for server, tool, args in manager.calls if tool == "search_recipes")
@@ -160,7 +161,10 @@ async def test_avoid_ingredients_excludes_matching_candidates() -> None:
     manager = _standard_manager(recipe_ids, missing={"has-peanuts": ["peanuts"]})
 
     result = await generate_meal_plan(
-        days=2, servings=2, avoid_ingredients=["peanuts"], manager=manager  # type: ignore[arg-type]
+        days=2,
+        servings=2,
+        avoid_ingredients=["peanuts"],
+        manager=manager,  # type: ignore[arg-type]
     )
 
     chosen_ids = {day["recipe_id"] for day in result["days"]}
@@ -192,9 +196,7 @@ async def test_no_candidates_at_all_raises_honestly() -> None:
     manager = FakeManager(
         {
             ("pantry_manager", "get_pantry"): ToolCallResult(success=True, data={"items": [], "count": 0}),
-            ("pantry_manager", "flag_expiring"): ToolCallResult(
-                success=True, data={"items": [], "count": 0}
-            ),
+            ("pantry_manager", "flag_expiring"): ToolCallResult(success=True, data={"items": [], "count": 0}),
             ("user_intelligence", "get_user_profile"): ToolCallResult(
                 success=True, data={"cuisine_preferences": {}}
             ),

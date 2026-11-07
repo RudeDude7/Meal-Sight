@@ -66,7 +66,10 @@ async def search_recipes(
 
     dietary_filters (e.g. ["vegan", "gluten_free"]) is a hard constraint:
     a recipe missing even one requested tag is excluded outright, never
-    just ranked lower — there is no "close enough" match here. Omit
+    just ranked lower — there is no "close enough" match here. Any restriction
+    name is accepted ("peanut-free", "pescatarian", "keto"): tag-backed ones filter on the
+    tag, ingredient-enforced ones exclude on the ingredient list, and the rest come back in
+    "unenforced_restrictions" (the results are then NOT filtered by them). Omit
     max_cook_time to skip filtering on cook time entirely; when set, any
     recipe with an unknown cook time is also excluded, since there is no
     way to confirm it meets the limit.
@@ -136,6 +139,7 @@ async def match_ingredients(
     recipe_id: str,
     available_ingredients: list[str],
     dietary_restrictions: list[str] | None = None,
+    avoid_ingredients: list[str] | None = None,
 ) -> dict[str, Any]:
     """Checks whether a specific recipe is actually makeable with a given
     list of available ingredients (a pantry, or whatever a vision model
@@ -152,9 +156,10 @@ async def match_ingredients(
     "chicken thighs" — usable, but possibly not the exact cut wanted),
     missing_items, critical_missing (a shortlist of just the missing
     ingredients that block cooking entirely), and a human-readable
-    summary. dietary_restrictions (e.g. ["dairy_free"]) excludes any
-    substitute that itself violates the restriction — it does not affect
-    matched_items, since an ingredient already on hand is the user's own
+    summary. dietary_restrictions (tag spellings like "dairy_free" or names like
+    "peanut-free") excludes any substitute that itself violates the restriction,
+    and avoid_ingredients excludes any substitute containing one of them — neither
+    affects matched_items, since an ingredient already on hand is the user's own
     to decide about.
 
     Returns a structured {"error": "not_found", ...} result, not an
@@ -164,7 +169,11 @@ async def match_ingredients(
     try:
         db = get_recipe_db()
         result = await match_recipe_by_id(
-            db, recipe_id, available_ingredients, dietary_restrictions=dietary_restrictions
+            db,
+            recipe_id,
+            available_ingredients,
+            dietary_restrictions=dietary_restrictions,
+            avoid_ingredients=avoid_ingredients or [],
         )
         return match_result_to_dict(result)
     except ValueError:
@@ -213,7 +222,10 @@ async def scale_recipe(recipe_id: str, target_servings: int) -> dict[str, Any]:
 @mcp.tool
 async def calculate_nutrition(recipe_id: str, servings: int) -> dict[str, Any]:
     """Sums per-ingredient nutrition (calories, protein, carbs, fat,
-    fiber, sodium) for one recipe, divided by servings. ALWAYS check
+    fiber, sodium) PER SERVING for one recipe at the requested servings
+    (ingredient quantities are scaled from the recipe's own servings_base
+    to `servings`, then divided by `servings`, so the per-serving figures
+    are the same whatever servings you ask for). ALWAYS check
     ingredients_covered/ingredients_total/coverage_pct/coverage_note
     before treating the totals as complete or applying them to a
     recommendation — a result built from partial ingredient data says so

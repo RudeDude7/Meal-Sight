@@ -17,9 +17,24 @@ import re
 # phrases like "a can of chopped tomatoes" and carry no identity either.
 _CONTAINER_WORDS = frozenset(
     {
-        "carton", "jar", "jarred", "bottle", "bottled", "container", "tub",
-        "packet", "package", "packaged", "bag", "bagged", "box", "boxed",
-        "can", "canned", "of", "a",
+        "carton",
+        "jar",
+        "jarred",
+        "bottle",
+        "bottled",
+        "container",
+        "tub",
+        "packet",
+        "package",
+        "packaged",
+        "bag",
+        "bagged",
+        "box",
+        "boxed",
+        "can",
+        "canned",
+        "of",
+        "a",
     }
 )
 
@@ -27,8 +42,18 @@ _CONTAINER_WORDS = frozenset(
 # not what it is.
 _SPEC_PREP_MODIFIERS = frozenset(
     {
-        "chopped", "diced", "minced", "sliced", "fresh", "frozen", "cooked",
-        "raw", "large", "small", "boneless", "skinless",
+        "chopped",
+        "diced",
+        "minced",
+        "sliced",
+        "fresh",
+        "frozen",
+        "cooked",
+        "raw",
+        "large",
+        "small",
+        "boneless",
+        "skinless",
     }
 )
 
@@ -39,9 +64,26 @@ _SPEC_PREP_MODIFIERS = frozenset(
 # as the ones above, just not enumerated in the original spec list.
 _EXTRA_PREP_MODIFIERS = frozenset(
     {
-        "freshly", "cubed", "grated", "crushed", "ground", "peeled",
-        "shredded", "beaten", "chilled", "softened", "melted", "ripe",
-        "whole", "plain", "dried", "cold", "warm", "hot", "finely", "roughly",
+        "freshly",
+        "cubed",
+        "grated",
+        "crushed",
+        "ground",
+        "peeled",
+        "shredded",
+        "beaten",
+        "chilled",
+        "softened",
+        "melted",
+        "ripe",
+        "whole",
+        "plain",
+        "dried",
+        "cold",
+        "warm",
+        "hot",
+        "finely",
+        "roughly",
     }
 )
 
@@ -98,8 +140,16 @@ _WHITESPACE_RE = re.compile(r"\s+")
 # not plurals of some shorter word.
 _UNCOUNTABLE_EXCEPTIONS = frozenset(
     {
-        "hummus", "couscous", "asparagus", "molasses", "citrus", "chives",
-        "greens", "grits", "oats", "peas",
+        "hummus",
+        "couscous",
+        "asparagus",
+        "molasses",
+        "citrus",
+        "chives",
+        "greens",
+        "grits",
+        "oats",
+        "peas",
     }
 )
 

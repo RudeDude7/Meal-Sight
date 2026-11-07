@@ -41,6 +41,7 @@ def _reset_health_cache() -> None:
     # observe "down".
     reset_provider_cache()
 
+
 # importlib, not a plain import — matches this project's own established
 # reason for it (tests/test_agent/test_nodes.py's own comment): a
 # package __init__ re-exporting a submodule's attribute would otherwise
@@ -121,9 +122,7 @@ class FakeHealthHttpClient:
         return httpx.Response(self._status_code, request=httpx.Request("GET", url))
 
 
-def _lifespan_with(
-    manager: FakeManager, rate_limit: int = 100, http_status: int = 200
-) -> Any:
+def _lifespan_with(manager: FakeManager, rate_limit: int = 100, http_status: int = 200) -> Any:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.mcp_manager = manager
@@ -358,15 +357,11 @@ async def test_recipes_by_ingredients_proxies_mcp_data_and_is_matched_before_the
         }
     )
     async with running_client(manager) as (client, _manager):
-        response = await client.get(
-            "/api/recipes/by-ingredients", params={"ingredients": ["egg", "flour"]}
-        )
+        response = await client.get("/api/recipes/by-ingredients", params={"ingredients": ["egg", "flour"]})
 
     assert response.status_code == 200
     assert response.json()["total_matched"] == 1
-    call_args = next(
-        args for _, tool, args in manager.calls if tool == "get_recipe_by_ingredients"
-    )
+    call_args = next(args for _, tool, args in manager.calls if tool == "get_recipe_by_ingredients")
     assert call_args["ingredients"] == ["egg", "flour"]
     assert call_args["minimum_match_percentage"] == 0.6
 
@@ -475,9 +470,7 @@ def _meal_plan_manager(recipe_ids: list[tuple[str, str]]) -> FakeManager:
     return FakeManager(
         responses={
             ("pantry_manager", "get_pantry"): ToolCallResult(success=True, data={"items": [], "count": 0}),
-            ("pantry_manager", "flag_expiring"): ToolCallResult(
-                success=True, data={"items": [], "count": 0}
-            ),
+            ("pantry_manager", "flag_expiring"): ToolCallResult(success=True, data={"items": [], "count": 0}),
             ("user_intelligence", "get_user_profile"): ToolCallResult(
                 success=True, data={"cuisine_preferences": {}}
             ),
@@ -514,9 +507,7 @@ def _meal_plan_manager(recipe_ids: list[tuple[str, str]]) -> FakeManager:
             ("recipe_engine", "get_recipe"): ToolCallResult(
                 success=True, data={"servings_base": 2, "ingredients": []}
             ),
-            ("recipe_engine", "calculate_nutrition"): ToolCallResult(
-                success=True, data={"calories": 400.0}
-            ),
+            ("recipe_engine", "calculate_nutrition"): ToolCallResult(success=True, data={"calories": 400.0}),
             ("user_intelligence", "check_repetition"): ToolCallResult(
                 success=True, data={"repetition_score": 0.0, "recommendation": "acceptable"}
             ),
@@ -596,3 +587,24 @@ async def test_error_envelope_shape_is_consistent() -> None:
     body = response.json()
     assert set(body) == {"code", "message", "trace_id"}
     assert body["code"] == "not_found"
+
+
+async def test_recipe_search_takes_repeated_dietary_filters_and_passes_unenforced_through() -> None:
+    body = {
+        "results": [{"id": "1", "name": "A"}],
+        "total_matched": 1,
+        "unenforced_restrictions": ["keto"],
+        "excluded_by_ingredient_restrictions": 0,
+    }
+    manager = FakeManager(
+        responses={("recipe_engine", "search_recipes"): ToolCallResult(success=True, data=body)}
+    )
+    async with running_client(manager) as (client, _manager):
+        response = await client.get("/api/recipes/search?dietary_filters=keto&dietary_filters=peanut-free")
+
+    assert response.status_code == 200
+    assert response.json()["unenforced_restrictions"] == ["keto"]
+    sent = [c for c in manager.calls if c[1] == "search_recipes"][-1][2]
+    assert sent["dietary_filters"] == ["keto", "peanut-free"], (
+        "list query params must reach the engine as a list"
+    )

@@ -45,9 +45,7 @@ class SessionStream:
         synchronous and non-blocking (asyncio.Queue.put_nowait), so a
         node's own call site never needs to await it."""
         message_cls = MESSAGE_CLASSES_BY_TYPE[event_type]
-        message = message_cls(
-            session_id=self.session_id, timestamp=datetime.now(UTC), **fields
-        )
+        message = message_cls(session_id=self.session_id, timestamp=datetime.now(UTC), **fields)
         self._buffer.append(message)
         for queue in self._subscribers:
             queue.put_nowait(message)

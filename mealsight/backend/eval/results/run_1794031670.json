@@ -1,0 +1,1794 @@
+{
+  "run_id": "run_1794031670",
+  "timestamp": "2026-11-07T06:07:50.560256+00:00",
+  "git_commit": "b200bbb632335be6abd6468916937875cef7921f",
+  "model_ids": {
+    "vision_model": "ministral-8b-2512",
+    "reasoning_model": "ministral-8b-2512",
+    "extraction_model": "ministral-8b-2512"
+  },
+  "prompt_versions": {
+    "vision_perception_prompt": "29437d278060",
+    "reasoning_prompt": "9dba200a64ef",
+    "extraction_prompt": "5ab13971be57"
+  },
+  "component_versions": {
+    "diet_groups": "2b2536c5ce6c",
+    "dietary_vocabulary": "810ae50068a4",
+    "protein_lexicon": "411e56fc683f",
+    "cuisine_families": "3fd7ca3faa74",
+    "avoid_groups": "ce4fbf73ce94",
+    "restriction_backstop_patterns": "70c8a0f535df",
+    "matcher_normalization": "bdbd9df24021",
+    "matcher_thresholds": "806f0633de51",
+    "ranking_weights": "32fdb421c1d2"
+  },
+  "data_versions": {
+    "recipe_corpus": "e10cdd72f5a0",
+    "ingredient_synonyms": "7b33e1297cb5",
+    "substitutions": "feae021fe1d7",
+    "nutrition_reference": "270062fe3c2e"
+  },
+  "dimensions": [
+    {
+      "name": "dimension5_personalization",
+      "pass_threshold": 0.8,
+      "score": 1.0,
+      "passed": true,
+      "metrics": {
+        "cases_passed": 18,
+        "cases_total": 18,
+        "pass_threshold": 0.8,
+        "by_aspect_passed_of_total": {
+          "cuisine": "3/3",
+          "dislike": "3/3",
+          "dislike_fallback": "1/1",
+          "household": "2/2",
+          "protein": "2/2",
+          "quick": "1/1",
+          "repeat_protein": "1/1",
+          "repeat_recipe": "2/2",
+          "restriction": "2/2",
+          "soft_time": "1/1"
+        },
+        "verdicts": {
+          "aligned": 18
+        },
+        "misaligned": [],
+        "passed_without_scoring_support": [
+          "d5_04",
+          "d5_05",
+          "d5_16",
+          "d5_17"
+        ],
+        "ranking_matches_hand_count": 10,
+        "ranking_checked_count": 14,
+        "case_defects": [],
+        "ranking_aligned_but_final_not": [],
+        "profile_data_points": {
+          "d5_01": {
+            "Italian": 10,
+            "Japanese": 10
+          },
+          "d5_02": {
+            "Japanese": 10,
+            "Italian": 10
+          },
+          "d5_03": {
+            "Italian": 10,
+            "Japanese": 1
+          }
+        },
+        "real_data_untouched": true,
+        "real_db_fingerprints": {
+          "pantry": "a63f26a196f6dfdb",
+          "user_intelligence": "3fbfd6649a3f03b3",
+          "recipes": "99a675fa000f7402"
+        }
+      },
+      "case_count": 18,
+      "api_calls": 18,
+      "total_tokens": 67778,
+      "wall_clock_seconds": 174.2407685420476,
+      "image_results": [],
+      "case_results": [],
+      "match_case_results": [],
+      "scenario_case_results": [
+        {
+          "case_id": "d5_01",
+          "description": "cuisine preference learned from ratings: Italian loved, Japanese disliked",
+          "paths": [
+            "cuisine"
+          ],
+          "expected": {
+            "aligned": [
+              "Spaghetti alla Carbonara"
+            ],
+            "servings": null,
+            "aspect": "cuisine=Italian"
+          },
+          "actual": {
+            "recommended": "Spaghetti alla Carbonara",
+            "recommended_composite": 0.8827,
+            "servings": 1,
+            "scaled_to": 1,
+            "hand_ranking": [
+              [
+                "Spaghetti alla Carbonara",
+                0.8827
+              ],
+              [
+                "Honey Teriyaki Salmon",
+                0.7673
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Spaghetti alla Carbonara",
+                0.8826923076923077,
+                "Italian",
+                15
+              ],
+              [
+                "Honey Teriyaki Salmon",
+                0.7673076923076924,
+                "Japanese",
+                30
+              ],
+              [
+                "Feteer Meshaltet",
+                0.315,
+                "Egyptian",
+                38
+              ],
+              [
+                "Pizza Express Margherita",
+                0.29631230769230765,
+                "Italian",
+                37
+              ]
+            ],
+            "cookable_count": 2
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "Spaghetti alla Carbonara honours the cuisine signal (Italian).",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 1,
+              "preferred_cook_time_minutes": 30,
+              "disliked_ingredients": [],
+              "protein_preference": null,
+              "cuisine_scores": {
+                "Italian": 0.8846153846153847,
+                "Japanese": 0.11538461538461539
+              },
+              "cuisine_data_points": {
+                "Italian": 10,
+                "Japanese": 10
+              }
+            },
+            "ranking_first_aligned": true,
+            "system_ranking_matches_hand": true,
+            "reason_message": "[reason] Recommending: Spaghetti alla Carbonara was chosen for being cookable with what you have.",
+            "pantry": [
+              "spaghetti",
+              "egg yolk",
+              "salt",
+              "bacon",
+              "pecorino",
+              "black pepper",
+              "salmon",
+              "olive oil",
+              "soy sauce",
+              "sake",
+              "sesame seed"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d5_02",
+          "description": "the same pair with the OPPOSITE profile: Japanese loved, Italian disliked",
+          "paths": [
+            "cuisine",
+            "opposite_pair"
+          ],
+          "expected": {
+            "aligned": [
+              "Honey Teriyaki Salmon"
+            ],
+            "servings": null,
+            "aspect": "cuisine=Japanese"
+          },
+          "actual": {
+            "recommended": "Honey Teriyaki Salmon",
+            "recommended_composite": 0.8827,
+            "servings": 1,
+            "scaled_to": 1,
+            "hand_ranking": [
+              [
+                "Honey Teriyaki Salmon",
+                0.8827
+              ],
+              [
+                "Spaghetti alla Carbonara",
+                0.7673
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Honey Teriyaki Salmon",
+                0.8826923076923077,
+                "Japanese",
+                30
+              ],
+              [
+                "Spaghetti alla Carbonara",
+                0.7673076923076924,
+                "Italian",
+                15
+              ],
+              [
+                "Feteer Meshaltet",
+                0.315,
+                "Egyptian",
+                38
+              ],
+              [
+                "Salmon Avocado Salad",
+                0.22499999999999998,
+                "British",
+                4
+              ]
+            ],
+            "cookable_count": 2
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "Honey Teriyaki Salmon honours the cuisine signal (Japanese).",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 1,
+              "preferred_cook_time_minutes": 30,
+              "disliked_ingredients": [],
+              "protein_preference": null,
+              "cuisine_scores": {
+                "Japanese": 0.8846153846153847,
+                "Italian": 0.11538461538461539
+              },
+              "cuisine_data_points": {
+                "Japanese": 10,
+                "Italian": 10
+              }
+            },
+            "ranking_first_aligned": true,
+            "system_ranking_matches_hand": true,
+            "reason_message": "[reason] Recommending: Honey Teriyaki Salmon was chosen for being cookable with what you have.",
+            "pantry": [
+              "spaghetti",
+              "egg yolk",
+              "salt",
+              "bacon",
+              "pecorino",
+              "black pepper",
+              "salmon",
+              "olive oil",
+              "soy sauce",
+              "sake",
+              "sesame seed"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d5_03",
+          "description": "one rating must not outweigh ten: 10 Italian five-stars vs a single Japanese five-star",
+          "paths": [
+            "cuisine",
+            "confidence"
+          ],
+          "expected": {
+            "aligned": [
+              "Spaghetti alla Carbonara"
+            ],
+            "servings": null,
+            "aspect": "cuisine=Italian"
+          },
+          "actual": {
+            "recommended": "Spaghetti alla Carbonara",
+            "recommended_composite": 0.8827,
+            "servings": 1,
+            "scaled_to": 1,
+            "hand_ranking": [
+              [
+                "Spaghetti alla Carbonara",
+                0.8827
+              ],
+              [
+                "Honey Teriyaki Salmon",
+                0.8438
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Spaghetti alla Carbonara",
+                0.8826923076923077,
+                "Italian",
+                15
+              ],
+              [
+                "Honey Teriyaki Salmon",
+                0.84375,
+                "Japanese",
+                30
+              ],
+              [
+                "Feteer Meshaltet",
+                0.315,
+                "Egyptian",
+                38
+              ],
+              [
+                "Pizza Express Margherita",
+                0.29631230769230765,
+                "Italian",
+                37
+              ]
+            ],
+            "cookable_count": 2
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "Spaghetti alla Carbonara honours the cuisine signal (Italian).",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 1,
+              "preferred_cook_time_minutes": 30,
+              "disliked_ingredients": [],
+              "protein_preference": null,
+              "cuisine_scores": {
+                "Italian": 0.8846153846153847,
+                "Japanese": 0.625
+              },
+              "cuisine_data_points": {
+                "Italian": 10,
+                "Japanese": 1
+              }
+            },
+            "ranking_first_aligned": true,
+            "system_ranking_matches_hand": true,
+            "reason_message": "[reason] Recommending: Spaghetti alla Carbonara was chosen for being cookable with what you have and its nutrition. The closest alternative was Honey Teriyaki Salmon.",
+            "pantry": [
+              "spaghetti",
+              "egg yolk",
+              "salt",
+              "bacon",
+              "pecorino",
+              "black pepper",
+              "salmon",
+              "olive oil",
+              "soy sauce",
+              "sake",
+              "sesame seed"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d5_04",
+          "description": "disliked ingredient in the recipe the default scoring would pick",
+          "paths": [
+            "dislike"
+          ],
+          "expected": {
+            "aligned": [
+              "Chicken Enchilada Casserole"
+            ],
+            "servings": null,
+            "aspect": "dislike=bacon"
+          },
+          "actual": {
+            "recommended": "Chicken Enchilada Casserole",
+            "recommended_composite": 0.675,
+            "servings": 1,
+            "scaled_to": 1,
+            "hand_ranking": [
+              [
+                "Spaghetti alla Carbonara",
+                0.825
+              ],
+              [
+                "Chicken Enchilada Casserole",
+                0.675
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Chicken Enchilada Casserole",
+                0.6749999999999999,
+                "Mexican",
+                45
+              ],
+              [
+                "Chick-Fil-A Sandwich",
+                0.20357999999999998,
+                "United States",
+                32
+              ],
+              [
+                "Feteer Meshaltet",
+                0.195,
+                "Egyptian",
+                38
+              ],
+              [
+                "Pizza Express Margherita",
+                0.18408,
+                "Italian",
+                37
+              ]
+            ],
+            "cookable_count": 2
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "Chicken Enchilada Casserole honours the dislike signal (bacon).",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 1,
+              "preferred_cook_time_minutes": 30,
+              "disliked_ingredients": [
+                "bacon"
+              ],
+              "protein_preference": null,
+              "cuisine_scores": {},
+              "cuisine_data_points": {}
+            },
+            "ranking_first_aligned": true,
+            "system_ranking_matches_hand": false,
+            "reason_message": "[reason] Recommending: Chicken Enchilada Casserole was chosen for being cookable with what you have and its nutrition.",
+            "pantry": [
+              "spaghetti",
+              "egg yolk",
+              "salt",
+              "bacon",
+              "pecorino",
+              "black pepper",
+              "enchilada sauce",
+              "monterey jack cheese",
+              "corn tortilla",
+              "chicken breast"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d5_05",
+          "description": "disliked main ingredient: salmon",
+          "paths": [
+            "dislike"
+          ],
+          "expected": {
+            "aligned": [
+              "Chicken Enchilada Casserole"
+            ],
+            "servings": null,
+            "aspect": "dislike=salmon"
+          },
+          "actual": {
+            "recommended": "Chicken Enchilada Casserole",
+            "recommended_composite": 0.675,
+            "servings": 1,
+            "scaled_to": 1,
+            "hand_ranking": [
+              [
+                "Honey Teriyaki Salmon",
+                0.825
+              ],
+              [
+                "Chicken Enchilada Casserole",
+                0.675
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Chicken Enchilada Casserole",
+                0.6749999999999999,
+                "Mexican",
+                45
+              ],
+              [
+                "Chicken Karaage",
+                0.27498,
+                "Japanese",
+                60
+              ],
+              [
+                "Kung Pao Chicken",
+                0.21348,
+                "Chinese",
+                30
+              ],
+              [
+                "Teriyaki Chicken Casserole",
+                0.20832,
+                "Japanese",
+                55
+              ]
+            ],
+            "cookable_count": 2
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "Chicken Enchilada Casserole honours the dislike signal (salmon).",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 1,
+              "preferred_cook_time_minutes": 30,
+              "disliked_ingredients": [
+                "salmon"
+              ],
+              "protein_preference": null,
+              "cuisine_scores": {},
+              "cuisine_data_points": {}
+            },
+            "ranking_first_aligned": true,
+            "system_ranking_matches_hand": false,
+            "reason_message": "[reason] Recommending: Chicken Enchilada Casserole was chosen for being cookable with what you have and its nutrition.",
+            "pantry": [
+              "salmon",
+              "olive oil",
+              "soy sauce",
+              "sake",
+              "sesame seed",
+              "enchilada sauce",
+              "monterey jack cheese",
+              "corn tortilla",
+              "chicken breast"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d5_06",
+          "description": "disliked ingredient: cream",
+          "paths": [
+            "dislike"
+          ],
+          "expected": {
+            "aligned": [
+              "Mbuzi Choma (Roasted Goat)"
+            ],
+            "servings": null,
+            "aspect": "dislike=cream"
+          },
+          "actual": {
+            "recommended": "Mbuzi Choma (Roasted Goat)",
+            "recommended_composite": 0.675,
+            "servings": 1,
+            "scaled_to": 1,
+            "hand_ranking": [
+              [
+                "Fettucine alfredo",
+                0.825
+              ],
+              [
+                "Mbuzi Choma (Roasted Goat)",
+                0.675
+              ],
+              [
+                "Baingan Bharta",
+                0.5584
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Mbuzi Choma (Roasted Goat)",
+                0.6749999999999999,
+                "Kenyan",
+                60
+              ],
+              [
+                "Baingan Bharta",
+                0.55836,
+                "India",
+                8
+              ],
+              [
+                "Garides Saganaki",
+                0.3,
+                "Greek",
+                40
+              ],
+              [
+                "Kumpir",
+                0.27498,
+                "Turkish",
+                25
+              ]
+            ],
+            "cookable_count": 3
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "Mbuzi Choma (Roasted Goat) honours the dislike signal (cream).",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 1,
+              "preferred_cook_time_minutes": 30,
+              "disliked_ingredients": [
+                "cream"
+              ],
+              "protein_preference": null,
+              "cuisine_scores": {},
+              "cuisine_data_points": {}
+            },
+            "ranking_first_aligned": true,
+            "system_ranking_matches_hand": true,
+            "reason_message": "[reason] Recommending: Mbuzi Choma (Roasted Goat) was chosen for being cookable with what you have.",
+            "pantry": [
+              "clotted cream",
+              "butter",
+              "corn flour",
+              "parmesan",
+              "nutmeg",
+              "fettuccine",
+              "parsley",
+              "goat meat",
+              "tomato",
+              "salt",
+              "onion",
+              "green chilli",
+              "cilantro"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d5_07",
+          "description": "protein preference (profile): chicken",
+          "paths": [
+            "protein"
+          ],
+          "expected": {
+            "aligned": [
+              "Chicken Enchilada Casserole"
+            ],
+            "servings": null,
+            "aspect": "protein=chicken"
+          },
+          "actual": {
+            "recommended": "Chicken Enchilada Casserole",
+            "recommended_composite": 0.825,
+            "servings": 1,
+            "scaled_to": 1,
+            "hand_ranking": [
+              [
+                "Chicken Enchilada Casserole",
+                0.825
+              ],
+              [
+                "Baked salmon with fennel & tomatoes",
+                0.675
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Chicken Enchilada Casserole",
+                0.825,
+                "Mexican",
+                45
+              ],
+              [
+                "Baked salmon with fennel & tomatoes",
+                0.6749999999999999,
+                "British",
+                35
+              ],
+              [
+                "Honey Teriyaki Salmon",
+                0.315,
+                "Japanese",
+                30
+              ],
+              [
+                "Lamb and Lemon Souvlaki",
+                0.24641999999999997,
+                "Greek",
+                152
+              ]
+            ],
+            "cookable_count": 2
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "Chicken Enchilada Casserole honours the protein signal (chicken).",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 1,
+              "preferred_cook_time_minutes": 30,
+              "disliked_ingredients": [],
+              "protein_preference": "chicken",
+              "cuisine_scores": {},
+              "cuisine_data_points": {}
+            },
+            "ranking_first_aligned": true,
+            "system_ranking_matches_hand": true,
+            "reason_message": "[reason] Recommending: Chicken Enchilada Casserole was chosen for being cookable with what you have and matching your protein preference.",
+            "pantry": [
+              "enchilada sauce",
+              "monterey jack cheese",
+              "corn tortilla",
+              "chicken breast",
+              "fennel",
+              "parsley",
+              "lemon",
+              "cherry tomato",
+              "olive oil",
+              "salmon",
+              "black olive"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d5_08",
+          "description": "protein preference (profile): salmon -- the opposite of d5_07 on the same pantry",
+          "paths": [
+            "protein",
+            "opposite_pair"
+          ],
+          "expected": {
+            "aligned": [
+              "Baked salmon with fennel & tomatoes"
+            ],
+            "servings": null,
+            "aspect": "protein=salmon"
+          },
+          "actual": {
+            "recommended": "Baked salmon with fennel & tomatoes",
+            "recommended_composite": 0.825,
+            "servings": 1,
+            "scaled_to": 1,
+            "hand_ranking": [
+              [
+                "Baked salmon with fennel & tomatoes",
+                0.825
+              ],
+              [
+                "Chicken Enchilada Casserole",
+                0.675
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Baked salmon with fennel & tomatoes",
+                0.825,
+                "British",
+                35
+              ],
+              [
+                "Chicken Enchilada Casserole",
+                0.6749999999999999,
+                "Mexican",
+                45
+              ],
+              [
+                "Honey Teriyaki Salmon",
+                0.315,
+                "Japanese",
+                30
+              ],
+              [
+                "Lamb and Lemon Souvlaki",
+                0.24641999999999997,
+                "Greek",
+                152
+              ]
+            ],
+            "cookable_count": 2
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "Baked salmon with fennel & tomatoes honours the protein signal (salmon).",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 1,
+              "preferred_cook_time_minutes": 30,
+              "disliked_ingredients": [],
+              "protein_preference": "salmon",
+              "cuisine_scores": {},
+              "cuisine_data_points": {}
+            },
+            "ranking_first_aligned": true,
+            "system_ranking_matches_hand": true,
+            "reason_message": "[reason] Recommending: Baked salmon with fennel & tomatoes was chosen for being cookable with what you have and matching your protein preference.",
+            "pantry": [
+              "enchilada sauce",
+              "monterey jack cheese",
+              "corn tortilla",
+              "chicken breast",
+              "fennel",
+              "parsley",
+              "lemon",
+              "cherry tomato",
+              "olive oil",
+              "salmon",
+              "black olive"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d5_09",
+          "description": "household size drives servings",
+          "paths": [
+            "household"
+          ],
+          "expected": {
+            "aligned": [],
+            "servings": 4,
+            "aspect": "household=4"
+          },
+          "actual": {
+            "recommended": "Boulangère Potatoes",
+            "recommended_composite": 0.675,
+            "servings": 4,
+            "scaled_to": 4,
+            "hand_ranking": [
+              [
+                "Boulangère Potatoes",
+                0.675
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Boulangère Potatoes",
+                0.6749999999999999,
+                "France",
+                60
+              ],
+              [
+                "Kumpir",
+                0.34500000000000003,
+                "Turkish",
+                25
+              ],
+              [
+                "Creamy Tomato Soup",
+                0.25961999999999996,
+                "British",
+                28
+              ],
+              [
+                "Spanish Tortilla",
+                -0.823,
+                "Spanish",
+                52
+              ]
+            ],
+            "cookable_count": 1
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "servings 4 (expected 4); recipe scaled to 4.",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 4,
+              "preferred_cook_time_minutes": 30,
+              "disliked_ingredients": [],
+              "protein_preference": null,
+              "cuisine_scores": {},
+              "cuisine_data_points": {}
+            },
+            "ranking_first_aligned": null,
+            "system_ranking_matches_hand": null,
+            "reason_message": "[reason] Recommending: Boulangère Potatoes was chosen for being cookable with what you have, its nutrition and adding variety.",
+            "pantry": [
+              "onion",
+              "thyme",
+              "olive oil",
+              "potato",
+              "vegetable stock"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d5_10",
+          "description": "a stated number of people overrides the stored household size",
+          "paths": [
+            "household",
+            "override"
+          ],
+          "expected": {
+            "aligned": [],
+            "servings": 2,
+            "aspect": "household=2"
+          },
+          "actual": {
+            "recommended": "Boulangère Potatoes",
+            "recommended_composite": 0.675,
+            "servings": 2,
+            "scaled_to": 2,
+            "hand_ranking": [
+              [
+                "Boulangère Potatoes",
+                0.675
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Boulangère Potatoes",
+                0.6749999999999999,
+                "France",
+                60
+              ],
+              [
+                "Kumpir",
+                0.34500000000000003,
+                "Turkish",
+                25
+              ],
+              [
+                "Creamy Tomato Soup",
+                0.25961999999999996,
+                "British",
+                28
+              ],
+              [
+                "Spanish Tortilla",
+                -0.823,
+                "Spanish",
+                52
+              ]
+            ],
+            "cookable_count": 1
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "servings 2 (expected 2); recipe scaled to 2.",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 4,
+              "preferred_cook_time_minutes": 30,
+              "disliked_ingredients": [],
+              "protein_preference": null,
+              "cuisine_scores": {},
+              "cuisine_data_points": {}
+            },
+            "ranking_first_aligned": null,
+            "system_ranking_matches_hand": null,
+            "reason_message": "[reason] Recommending: Boulangère Potatoes was chosen for being cookable with what you have and its nutrition.",
+            "pantry": [
+              "onion",
+              "thyme",
+              "olive oil",
+              "potato",
+              "vegetable stock"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d5_11",
+          "description": "preferred cook time (soft default) favours the quick recipe",
+          "paths": [
+            "cook_time"
+          ],
+          "expected": {
+            "aligned": [
+              "Spaghetti alla Carbonara"
+            ],
+            "servings": null,
+            "aspect": "quick=20"
+          },
+          "actual": {
+            "recommended": "Spaghetti alla Carbonara",
+            "recommended_composite": 0.825,
+            "servings": 1,
+            "scaled_to": 1,
+            "hand_ranking": [
+              [
+                "Spaghetti alla Carbonara",
+                0.825
+              ],
+              [
+                "Kumpir",
+                0.675
+              ],
+              [
+                "Bubble & Squeak",
+                0.625
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Spaghetti alla Carbonara",
+                0.825,
+                "Italian",
+                15
+              ],
+              [
+                "Kumpir",
+                0.6749999999999999,
+                "Turkish",
+                25
+              ],
+              [
+                " Bubble & Squeak",
+                0.6250199999999999,
+                "British",
+                6
+              ],
+              [
+                "Lasagna Sandwiches",
+                0.34164,
+                "United States",
+                25
+              ]
+            ],
+            "cookable_count": 3
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "Spaghetti alla Carbonara honours the quick signal (20).",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 1,
+              "preferred_cook_time_minutes": 20,
+              "disliked_ingredients": [],
+              "protein_preference": null,
+              "cuisine_scores": {},
+              "cuisine_data_points": {}
+            },
+            "ranking_first_aligned": true,
+            "system_ranking_matches_hand": true,
+            "reason_message": "[reason] Recommending: Spaghetti alla Carbonara was chosen for being cookable with what you have. The closest alternative was Kumpir.",
+            "pantry": [
+              "potato",
+              "butter",
+              "cheese",
+              "onion",
+              "red pepper",
+              "red chilli flake",
+              "spaghetti",
+              "egg yolk",
+              "salt",
+              "bacon",
+              "pecorino",
+              "black pepper"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d5_12",
+          "description": "preferred cook time is a default, not a limit: only slow recipes are possible",
+          "paths": [
+            "cook_time",
+            "soft_default"
+          ],
+          "expected": {
+            "aligned": [],
+            "servings": null,
+            "aspect": "soft_time=20"
+          },
+          "actual": {
+            "recommended": "Boulangère Potatoes",
+            "recommended_composite": 0.675,
+            "servings": 1,
+            "scaled_to": 1,
+            "hand_ranking": [
+              [
+                "Boulangère Potatoes",
+                0.675
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Boulangère Potatoes",
+                0.6749999999999999,
+                "France",
+                60
+              ],
+              [
+                "Kumpir",
+                0.34500000000000003,
+                "Turkish",
+                25
+              ],
+              [
+                "Creamy Tomato Soup",
+                0.25961999999999996,
+                "British",
+                28
+              ],
+              [
+                "Spanish Tortilla",
+                -0.823,
+                "Spanish",
+                52
+              ]
+            ],
+            "cookable_count": 1
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "Recommended Boulangère Potatoes (60 min) despite a 20-minute preference.",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 1,
+              "preferred_cook_time_minutes": 20,
+              "disliked_ingredients": [],
+              "protein_preference": null,
+              "cuisine_scores": {},
+              "cuisine_data_points": {}
+            },
+            "ranking_first_aligned": null,
+            "system_ranking_matches_hand": null,
+            "reason_message": "[reason] Recommending: Boulangère Potatoes was chosen for being cookable with what you have and adding variety.",
+            "pantry": [
+              "onion",
+              "thyme",
+              "olive oil",
+              "potato",
+              "vegetable stock"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d5_13",
+          "description": "repetition: the recipe cooked yesterday should not be recommended again (Carbonara)",
+          "paths": [
+            "repetition"
+          ],
+          "expected": {
+            "aligned": [
+              "Honey Teriyaki Salmon"
+            ],
+            "servings": null,
+            "aspect": "repeat_recipe=52982"
+          },
+          "actual": {
+            "recommended": "Honey Teriyaki Salmon",
+            "recommended_composite": 0.825,
+            "servings": 1,
+            "scaled_to": 1,
+            "hand_ranking": [
+              [
+                "Honey Teriyaki Salmon",
+                0.825
+              ],
+              [
+                "Spaghetti alla Carbonara",
+                0.725
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Honey Teriyaki Salmon",
+                0.825,
+                "Japanese",
+                30
+              ],
+              [
+                "Spaghetti alla Carbonara",
+                0.725,
+                "Italian",
+                15
+              ],
+              [
+                "Feteer Meshaltet",
+                0.315,
+                "Egyptian",
+                38
+              ],
+              [
+                "Pizza Express Margherita",
+                0.23862,
+                "Italian",
+                37
+              ]
+            ],
+            "cookable_count": 2
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "Honey Teriyaki Salmon honours the repeat_recipe signal (52982).",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 1,
+              "preferred_cook_time_minutes": 30,
+              "disliked_ingredients": [],
+              "protein_preference": null,
+              "cuisine_scores": {},
+              "cuisine_data_points": {}
+            },
+            "ranking_first_aligned": true,
+            "system_ranking_matches_hand": true,
+            "reason_message": "[reason] Recommending: Honey Teriyaki Salmon was chosen for being cookable with what you have.",
+            "pantry": [
+              "spaghetti",
+              "egg yolk",
+              "salt",
+              "bacon",
+              "pecorino",
+              "black pepper",
+              "salmon",
+              "olive oil",
+              "soy sauce",
+              "sake",
+              "sesame seed"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d5_14",
+          "description": "repetition, opposite: the Salmon was cooked yesterday",
+          "paths": [
+            "repetition",
+            "opposite_pair"
+          ],
+          "expected": {
+            "aligned": [
+              "Spaghetti alla Carbonara"
+            ],
+            "servings": null,
+            "aspect": "repeat_recipe=52773"
+          },
+          "actual": {
+            "recommended": "Spaghetti alla Carbonara",
+            "recommended_composite": 0.825,
+            "servings": 1,
+            "scaled_to": 1,
+            "hand_ranking": [
+              [
+                "Spaghetti alla Carbonara",
+                0.825
+              ],
+              [
+                "Honey Teriyaki Salmon",
+                0.725
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Spaghetti alla Carbonara",
+                0.825,
+                "Italian",
+                15
+              ],
+              [
+                "Honey Teriyaki Salmon",
+                0.725,
+                "Japanese",
+                30
+              ],
+              [
+                "Feteer Meshaltet",
+                0.315,
+                "Egyptian",
+                38
+              ],
+              [
+                "Pizza Express Margherita",
+                0.23862,
+                "Italian",
+                37
+              ]
+            ],
+            "cookable_count": 2
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "Spaghetti alla Carbonara honours the repeat_recipe signal (52773).",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 1,
+              "preferred_cook_time_minutes": 30,
+              "disliked_ingredients": [],
+              "protein_preference": null,
+              "cuisine_scores": {},
+              "cuisine_data_points": {}
+            },
+            "ranking_first_aligned": true,
+            "system_ranking_matches_hand": true,
+            "reason_message": "[reason] Recommending: Spaghetti alla Carbonara was chosen for being cookable with what you have and its nutrition.",
+            "pantry": [
+              "spaghetti",
+              "egg yolk",
+              "salt",
+              "bacon",
+              "pecorino",
+              "black pepper",
+              "salmon",
+              "olive oil",
+              "soy sauce",
+              "sake",
+              "sesame seed"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d5_15",
+          "description": "protein repetition: four chicken meals this week",
+          "paths": [
+            "repetition",
+            "protein"
+          ],
+          "expected": {
+            "aligned": [
+              "Baked salmon with fennel & tomatoes"
+            ],
+            "servings": null,
+            "aspect": "repeat_protein=chicken"
+          },
+          "actual": {
+            "recommended": "Baked salmon with fennel & tomatoes",
+            "recommended_composite": 0.675,
+            "servings": 1,
+            "scaled_to": 1,
+            "hand_ranking": [
+              [
+                "Baked salmon with fennel & tomatoes",
+                0.675
+              ],
+              [
+                "Chicken Enchilada Casserole",
+                0.605
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Baked salmon with fennel & tomatoes",
+                0.6749999999999999,
+                "British",
+                35
+              ],
+              [
+                "Chicken Enchilada Casserole",
+                0.605,
+                "Mexican",
+                45
+              ],
+              [
+                "Honey Teriyaki Salmon",
+                0.315,
+                "Japanese",
+                30
+              ],
+              [
+                "Lamb and Lemon Souvlaki",
+                0.24641999999999997,
+                "Greek",
+                152
+              ]
+            ],
+            "cookable_count": 2
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "Baked salmon with fennel & tomatoes honours the repeat_protein signal (chicken).",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 1,
+              "preferred_cook_time_minutes": 30,
+              "disliked_ingredients": [],
+              "protein_preference": null,
+              "cuisine_scores": {},
+              "cuisine_data_points": {}
+            },
+            "ranking_first_aligned": true,
+            "system_ranking_matches_hand": true,
+            "reason_message": "[reason] Recommending: Baked salmon with fennel & tomatoes was chosen for being cookable with what you have and its nutrition.",
+            "pantry": [
+              "enchilada sauce",
+              "monterey jack cheese",
+              "corn tortilla",
+              "chicken breast",
+              "fennel",
+              "parsley",
+              "lemon",
+              "cherry tomato",
+              "olive oil",
+              "salmon",
+              "black olive"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d5_16",
+          "description": "SAFETY: a saved vegetarian restriction is honoured with nothing stated in the request",
+          "paths": [
+            "restriction",
+            "profile_safety"
+          ],
+          "expected": {
+            "aligned": [
+              "Boulangère Potatoes"
+            ],
+            "servings": null,
+            "aspect": "restriction=vegetarian"
+          },
+          "actual": {
+            "recommended": "Boulangère Potatoes",
+            "recommended_composite": 0.675,
+            "servings": 1,
+            "scaled_to": 1,
+            "hand_ranking": [
+              [
+                "Honey Teriyaki Salmon",
+                0.825
+              ],
+              [
+                "Spaghetti alla Carbonara",
+                0.825
+              ],
+              [
+                "Boulangère Potatoes",
+                0.675
+              ],
+              [
+                "Bubble & Squeak",
+                0.595
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Boulangère Potatoes",
+                0.6749999999999999,
+                "France",
+                60
+              ],
+              [
+                "Kumpir",
+                0.34500000000000003,
+                "Turkish",
+                25
+              ],
+              [
+                "Feteer Meshaltet",
+                0.315,
+                "Egyptian",
+                38
+              ],
+              [
+                "Pilchard puttanesca",
+                0.27498,
+                "Italian",
+                4
+              ]
+            ],
+            "cookable_count": 4
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "Boulangère Potatoes honours the restriction signal (vegetarian).",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 1,
+              "preferred_cook_time_minutes": 30,
+              "disliked_ingredients": [],
+              "protein_preference": null,
+              "cuisine_scores": {},
+              "cuisine_data_points": {}
+            },
+            "ranking_first_aligned": true,
+            "system_ranking_matches_hand": false,
+            "reason_message": "[reason] Recommending: Boulangère Potatoes was chosen for being cookable with what you have, its nutrition and adding variety.",
+            "pantry": [
+              "spaghetti",
+              "egg yolk",
+              "salt",
+              "bacon",
+              "pecorino",
+              "black pepper",
+              "salmon",
+              "olive oil",
+              "soy sauce",
+              "sake",
+              "sesame seed",
+              "onion",
+              "thyme",
+              "potato",
+              "vegetable stock"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d5_17",
+          "description": "SAFETY: a saved peanut-free restriction (no corpus tag; enforced on ingredients)",
+          "paths": [
+            "restriction",
+            "profile_safety",
+            "ingredient_enforced"
+          ],
+          "expected": {
+            "aligned": [
+              "Boulangère Potatoes"
+            ],
+            "servings": null,
+            "aspect": "restriction=peanut_free"
+          },
+          "actual": {
+            "recommended": "Boulangère Potatoes",
+            "recommended_composite": 0.675,
+            "servings": 1,
+            "scaled_to": 1,
+            "hand_ranking": [
+              [
+                "Peanut Butter Cookies",
+                0.825
+              ],
+              [
+                "Boulangère Potatoes",
+                0.675
+              ],
+              [
+                "Home-made Mandazi",
+                0.525
+              ],
+              [
+                "Spanish Tortilla",
+                0.417
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Boulangère Potatoes",
+                0.6749999999999999,
+                "France",
+                60
+              ],
+              [
+                "Spanish Tortilla",
+                0.417,
+                "Spanish",
+                52
+              ],
+              [
+                "Pierogi (Polish Dumplings)",
+                0.36954,
+                "Polish",
+                19
+              ],
+              [
+                "Chocolate Gateau",
+                0.34500000000000003,
+                "France",
+                65
+              ]
+            ],
+            "cookable_count": 4
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "Boulangère Potatoes honours the restriction signal (peanut_free).",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 1,
+              "preferred_cook_time_minutes": 30,
+              "disliked_ingredients": [],
+              "protein_preference": null,
+              "cuisine_scores": {},
+              "cuisine_data_points": {}
+            },
+            "ranking_first_aligned": true,
+            "system_ranking_matches_hand": false,
+            "reason_message": "[reason] Recommending: Boulangère Potatoes was chosen for being cookable with what you have and its nutrition.",
+            "pantry": [
+              "peanut butter",
+              "sugar",
+              "egg",
+              "onion",
+              "thyme",
+              "olive oil",
+              "potato",
+              "vegetable stock"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        },
+        {
+          "case_id": "d5_18",
+          "description": "a saved dislike is not an allergy: with no alternative, recommend anyway",
+          "paths": [
+            "dislike",
+            "fallback"
+          ],
+          "expected": {
+            "aligned": [],
+            "servings": null,
+            "aspect": "dislike_fallback=bacon"
+          },
+          "actual": {
+            "recommended": "Spaghetti alla Carbonara",
+            "recommended_composite": 0.825,
+            "servings": 1,
+            "scaled_to": 1,
+            "hand_ranking": [
+              [
+                "Spaghetti alla Carbonara",
+                0.825
+              ]
+            ],
+            "system_ranking": [
+              [
+                "Spaghetti alla Carbonara",
+                0.825,
+                "Italian",
+                15
+              ],
+              [
+                "Lasagna Sandwiches",
+                0.20832,
+                "United States",
+                25
+              ],
+              [
+                "Feteer Meshaltet",
+                0.195,
+                "Egyptian",
+                38
+              ],
+              [
+                "Pizza Express Margherita",
+                0.18408,
+                "Italian",
+                37
+              ]
+            ],
+            "cookable_count": 1
+          },
+          "verdict": "aligned",
+          "passed": true,
+          "explanation": "Recommended Spaghetti alla Carbonara although it contains the disliked ingredient, because nothing else was cookable.",
+          "case_defect": null,
+          "diagnostics": {
+            "profile_readback": {
+              "household_size": 1,
+              "preferred_cook_time_minutes": 30,
+              "disliked_ingredients": [
+                "bacon"
+              ],
+              "protein_preference": null,
+              "cuisine_scores": {},
+              "cuisine_data_points": {}
+            },
+            "ranking_first_aligned": null,
+            "system_ranking_matches_hand": null,
+            "reason_message": "[reason] Recommending: Spaghetti alla Carbonara is the best available match. The compromise is its cook time and its nutrition.",
+            "pantry": [
+              "spaghetti",
+              "egg yolk",
+              "salt",
+              "bacon",
+              "pecorino",
+              "black pepper"
+            ]
+          },
+          "reset_verification": {
+            "tables_after_reset": 10,
+            "all_empty": true
+          }
+        }
+      ]
+    }
+  ],
+  "passed": true,
+  "pantry": {
+    "fixture": "demo_pantry.json",
+    "fixture_sha256": "756090ab287f",
+    "photo_sources": {
+      "photo_05": 15,
+      "photo_09": 18,
+      "photo_12": 18,
+      "photo_15": 20,
+      "photo_22": 14,
+      "photo_29": 20
+    },
+    "photo_items_note": "raw analyze_fridge_photo output, uncurated; duplicates across photos collapse to one row",
+    "staples_added_by_hand": [
+      "olive oil",
+      "vegetable oil",
+      "salt",
+      "black pepper",
+      "all purpose flour",
+      "sugar",
+      "paprika",
+      "ground cumin",
+      "dried oregano",
+      "chili powder",
+      "cinnamon",
+      "garlic powder",
+      "onion powder",
+      "dried thyme"
+    ],
+    "staples_note": "oil, salt, pepper, flour, sugar and common dried spices; no eggs, rice, pasta or proteins were added",
+    "rows_at_run_start": 64,
+    "pantry_content_sha256": "c975c014058a"
+  },
+  "notes": [
+    "Dimension 1 baseline SUPERSEDES the earlier F1 0.64 (mistral-medium-2505) and 0.55 (ministral-8b-2512) figures. Two scorer corrections make those numbers non-comparable, and both can only lower a score: (1) a photo where the model identified nothing now counts as a zero instead of being dropped from the mean; (2) 'green onion' no longer matches ground-truth 'onion' (a scallion is not a bulb onion). A lower number than 0.55 is therefore not by itself a model regression.",
+    "Dimension 2 now enforces hand-authored constraints (eval/cases.py) in addition to what the pipeline extracted, whole-word avoid matching, and a dimension verdict that requires every case to pass.",
+    "Dimension 2 corrections after run_1793926853: expectations for d2_10, d2_12 and d2_30 were corrected (see eval/cases.py CORRECTIONS); only a user-STATED cook-time limit is enforced by the scorer, not the profile default. The pipeline changed too: stated-vs-default cook time, relaxation on 'nothing cookable', code-level avoid-list exclusion, and a deterministic dietary-restriction backstop. Compare this run to run_1793926853 with those changes in mind; they are not like-for-like.",
+    "Dimension 3 (match accuracy) checks the matcher's arithmetic against hand-derived values, 32 cases; Dimensions 4 and 5 run each case against a throwaway pantry/profile database (eval/isolation.py), reset and verified empty between cases, and fingerprint the real pantry, user and recipe databases before and after (they must be unchanged). The pass thresholds for 4 and 5 (0.80) were fixed before their first run. Dimension 5 also reports cases that passed on outcome while the system's own scoring did not reflect the profile (passed_without_scoring_support): those passes came from tie-breaking or the language model."
+  ],
+  "git_dirty": true,
+  "git_diff_sha256": "b7896e76ab51"
+}

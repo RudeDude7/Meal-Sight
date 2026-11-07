@@ -74,10 +74,11 @@ jobs:
           enable-cache: true
           cache-dependency-glob: mealsight/backend/uv.lock
       - run: uv sync --frozen
-      - name: Build the reference databases from the pinned snapshot (offline, deterministic)
+      - name: Build the databases from committed fixtures (offline, deterministic)
         run: |
           mkdir -p ../data
           uv run python -m mealsight.seed.seed_all --from-snapshot
+          uv run env PYTHONPATH=. python ../scripts/reset_demo_pantry.py
       - name: Run Dimension 3 (no API calls)
         run: uv run env PYTHONPATH=. python -m eval dimension3
       - name: Regression gate against the recorded baseline

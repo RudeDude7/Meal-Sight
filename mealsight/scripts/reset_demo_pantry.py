@@ -55,16 +55,27 @@ def _live_processes() -> list[str]:
 
 async def _reset() -> int:
     from mealsight.config.settings import settings
-    from mealsight.db import get_pantry_db, get_recipe_db
+    from mealsight.db import close_all, get_pantry_db, get_recipe_db
     from mealsight.matching.normalize import normalize_ingredient
     from mealsight.matching.synonyms import load_synonym_map, resolve_canonical
     from mealsight.pantry.models import PantryItemInput
     from mealsight.pantry.update import update_pantry
 
+    from mealsight.db.init import init_all_databases
+    from mealsight.seed.load_shelf_life import load_shelf_life
+
     live = _live_processes()
     if live:
         print("Refusing to reset while these are running (kill them first):", *live, sep="\n  ")
         return 1
+
+    # A fresh checkout (CI, a new clone) has no database files at all. Applying the schemas is idempotent
+    # and touches no existing rows, so this is a no-op on a machine that already has them.
+    Path(settings.pantry_db_path).parent.mkdir(parents=True, exist_ok=True)
+    await init_all_databases()
+    # Shelf-life estimates come from the pantry database's own reference table, which a fresh checkout does
+    # not have. Reloading it from the committed JSON is an idempotent INSERT OR REPLACE.
+    await load_shelf_life(get_pantry_db())
 
     db_path = Path(settings.pantry_db_path)
     if db_path.exists():
@@ -95,8 +106,7 @@ async def _reset() -> int:
     print(f"Pantry reset: {result.added_count} rows from {len(fixture['photos'])} photos + "
           f"{len(fixture['staples'])} staples (fixture: {FIXTURE.name}).")
     await pantry_db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    await pantry_db.close()
-    await get_recipe_db().close()
+    await close_all()  # every singleton, including the user database that schema init opened
     return 0
 
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -62,13 +63,31 @@ def describe_pantry_fixture(path: Path = DEMO_PANTRY_FIXTURE) -> dict[str, Any]:
 
 
 async def pantry_snapshot() -> dict[str, Any]:
-    rows = await get_pantry_db().fetch_all(
-        "SELECT name, quantity, estimated_shelf_days FROM pantry ORDER BY name"
-    )
+    """The pantry the run started from. A missing pantry database or table is RECORDED, not raised: the
+    deterministic matcher dimension carries its own pantry state and must not need this one, and a run on
+    a machine with no pantry should say so in the scorecard. The hash is None then (never a hash of
+    nothing), and the regression gate treats an absent pantry as a mismatch against the baseline."""
+    try:
+        rows = await get_pantry_db().fetch_all(
+            "SELECT name, quantity, estimated_shelf_days FROM pantry ORDER BY name"
+        )
+    except sqlite3.OperationalError as exc:  # aiosqlite re-raises sqlite3's own error
+        return {
+            **describe_pantry_fixture(),
+            "pantry_present": False,
+            "rows_at_run_start": None,
+            "pantry_content_sha256": None,
+            "pantry_absent_reason": f"{type(exc).__name__}: {exc}",
+        }
     digest = hashlib.sha256(
         json.dumps([[r["name"], r["quantity"], r["estimated_shelf_days"]] for r in rows]).encode()
     ).hexdigest()[:12]
-    return {**describe_pantry_fixture(), "rows_at_run_start": len(rows), "pantry_content_sha256": digest}
+    return {
+        **describe_pantry_fixture(),
+        "pantry_present": True,
+        "rows_at_run_start": len(rows),
+        "pantry_content_sha256": digest,
+    }
 
 
 SCORER_NOTES = [

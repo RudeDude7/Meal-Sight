@@ -180,6 +180,26 @@ def compare(
                     )
                 else:
                     notes.append("provenance differs: " + line)
+    # The pantry the run started from. Dimensions 1, 2, 4 and 5 depend on it, so a different or absent
+    # pantry makes the comparison meaningless. Dimension 3 carries its own pantry state and does not.
+    expected = baseline.get("provenance", {}).get("pantry_content_sha256")
+    pantry = scorecard.get("pantry") or {}
+    actual = pantry.get("pantry_content_sha256")
+    pantry_dims = [n for n in baseline["dimensions"] if _short(n) != "dimension3"]
+    ran_pantry_dependent = any(
+        n in by_name and (not only or _short(n) in only or n in only) for n in pantry_dims
+    )
+    if expected and actual != expected:
+        line = (
+            f"pantry content: baseline {expected} ({baseline['provenance'].get('pantry_rows')} rows) -> "
+            f"scorecard {actual} ({pantry.get('rows_at_run_start')} rows"
+            + ("" if pantry.get("pantry_present", True) else ", pantry ABSENT")
+            + ")"
+        )
+        if strict_data and ran_pantry_dependent:
+            findings.append(Finding("provenance", REGRESSION, line + " (not the pantry the baseline used)"))
+        else:
+            notes.append("provenance differs: " + line)
     return Report(findings, notes)
 
 
@@ -226,7 +246,10 @@ def build_baseline_update(scorecard: dict[str, Any], baseline: dict[str, Any], r
         g: scorecard.get(g, {})
         for g in ("model_ids", "prompt_versions", "component_versions", "data_versions")
     }
-    new["provenance"]["pantry_fixture_sha256"] = (scorecard.get("pantry") or {}).get("fixture_sha256")
+    pantry = scorecard.get("pantry") or {}
+    new["provenance"]["pantry_fixture_sha256"] = pantry.get("fixture_sha256")
+    new["provenance"]["pantry_content_sha256"] = pantry.get("pantry_content_sha256")
+    new["provenance"]["pantry_rows"] = pantry.get("rows_at_run_start")
     return new
 
 

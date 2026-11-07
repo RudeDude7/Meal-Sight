@@ -39,7 +39,16 @@ def _scorecard(**overrides: Any) -> dict[str, Any]:
         }
         d.update(overrides.get(name, {}))
         dims.append(d)
-    return {"run_id": "run_test", **copy.deepcopy(BASELINE["provenance"]), "dimensions": dims, "pantry": {}}
+    return {
+        "run_id": "run_test",
+        **copy.deepcopy(BASELINE["provenance"]),
+        "dimensions": dims,
+        "pantry": {
+            "pantry_present": True,
+            "rows_at_run_start": BASELINE["provenance"]["pantry_rows"],
+            "pantry_content_sha256": BASELINE["provenance"]["pantry_content_sha256"],
+        },
+    }
 
 
 def _status(report: Any, name: str) -> str:
@@ -155,3 +164,23 @@ def test_the_committed_baseline_is_well_formed() -> None:
         assert {"score", "threshold", "case_count", "tolerance", "status", "reason"} <= set(base), name
     assert BASELINE["dimensions"][D1]["status"] == "known_failing"
     assert BASELINE["dimensions"][D3]["tolerance"] == 0.0
+
+
+def test_an_absent_or_different_pantry_fails_the_pantry_dependent_dimensions_strictly() -> None:
+    absent = _scorecard()
+    absent["pantry"] = {"pantry_present": False, "rows_at_run_start": None, "pantry_content_sha256": None}
+    strict = compare(absent, BASELINE, strict_data=True)
+    assert not strict.passed
+    assert "ABSENT" in next(f.detail for f in strict.findings if f.dimension == "provenance")
+    other = _scorecard()
+    other["pantry"]["pantry_content_sha256"] = "000000000000"
+    assert not compare(other, BASELINE, strict_data=True).passed
+
+
+def test_the_matcher_gate_does_not_need_a_pantry() -> None:
+    """Dimension 3 carries its own pantry state: an absent pantry is a note there, never a failure."""
+    absent = _scorecard()
+    absent["pantry"] = {"pantry_present": False, "rows_at_run_start": None, "pantry_content_sha256": None}
+    report = compare(absent, BASELINE, only={"dimension3"}, strict_data=True)
+    assert report.passed
+    assert any("pantry content" in n for n in report.notes)

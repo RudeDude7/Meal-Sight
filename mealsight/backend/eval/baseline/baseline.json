@@ -32,7 +32,9 @@
       "substitutions": "feae021fe1d7",
       "nutrition_reference": "270062fe3c2e"
     },
-    "pantry_fixture_sha256": "756090ab287f"
+    "pantry_fixture_sha256": "756090ab287f",
+    "pantry_content_sha256": "c975c014058a",
+    "pantry_rows": 64
   },
   "dimensions": {
     "dimension1_ingredient_recognition": {

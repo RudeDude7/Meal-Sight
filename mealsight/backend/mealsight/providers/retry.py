@@ -24,6 +24,7 @@ from typing import Any
 import httpx
 
 from mealsight.config.settings import settings
+from mealsight.providers import outcomes
 from mealsight.providers.exceptions import ProviderTimeout, ProviderUnavailable, RateLimitExceeded
 
 RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
@@ -64,6 +65,7 @@ async def request_with_retry(
             response = await make_request()
         except httpx.TimeoutException as exc:
             if attempt >= max_retries:
+                outcomes.record(provider, outcomes.PROVIDER_ERROR)
                 raise ProviderTimeout(
                     f"{provider} timed out after {attempt + 1} attempt(s)",
                     provider=provider,
@@ -83,6 +85,7 @@ async def request_with_retry(
             continue
         except httpx.HTTPError as exc:
             if attempt >= max_retries:
+                outcomes.record(provider, outcomes.PROVIDER_ERROR)
                 raise ProviderUnavailable(
                     f"{provider} unreachable after {attempt + 1} attempt(s): {exc}",
                     provider=provider,
@@ -102,15 +105,21 @@ async def request_with_retry(
             continue
 
         if response.status_code not in RETRYABLE_STATUS_CODES:
+            if response.status_code < 300:
+                outcomes.record(provider, outcomes.OK)
+            elif response.status_code in (401, 403):
+                outcomes.record(provider, outcomes.AUTH_ERROR)
             return response
 
         if attempt >= max_retries:
             if response.status_code == 429:
+                outcomes.record(provider, outcomes.RATE_LIMITED)
                 raise RateLimitExceeded(
                     f"{provider} rate limit exceeded after {attempt + 1} attempt(s)",
                     provider=provider,
                     model_id=model_id,
                 )
+            outcomes.record(provider, outcomes.PROVIDER_ERROR)
             raise ProviderUnavailable(
                 f"{provider} returned HTTP {response.status_code} after {attempt + 1} attempt(s)",
                 provider=provider,

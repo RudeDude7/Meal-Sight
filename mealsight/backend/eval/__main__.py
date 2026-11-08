@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
 
 from eval.runner import DIMENSIONS, run_eval
+
+EXIT_ABORTED = 3  # infrastructure failure: 0 passed, 1 suite FAIL, 3 the run was aborted and not scored
 
 
 def _parse_args() -> argparse.Namespace:
@@ -43,6 +46,9 @@ def main() -> None:
     args = parser_args
     dimensions = tuple(args.dimensions) if args.dimensions else DIMENSIONS
     scorecard = asyncio.run(run_eval(dimensions=dimensions, case_limit=args.limit, sampled=args.sampled))
+    if scorecard.aborted:
+        print(f"ABORTED: {scorecard.abort_reason}", file=sys.stderr)
+        raise SystemExit(EXIT_ABORTED)
     raise SystemExit(0 if scorecard.passed else 1)
 
 

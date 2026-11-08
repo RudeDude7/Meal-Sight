@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import time
 
+from eval.circuit import breaker
 from eval.matching import IMAGES_DIR, load_ground_truth_all, mean, score_image
 from eval.models import DimensionResult, ImageResult
 from mealsight.config.settings import settings
@@ -61,7 +62,9 @@ async def run_dimension1(case_limit: int | None = None) -> DimensionResult:
     total_tokens = 0
     start = time.monotonic()
 
+    breaker.start(NAME)
     for photo_id in photo_ids:
+        breaker.check()
         image_path = IMAGES_DIR / f"{photo_id}.jpg"
         if not image_path.exists():
             image_results.append(
@@ -125,6 +128,8 @@ async def run_dimension1(case_limit: int | None = None) -> DimensionResult:
                 )
             )
 
+    breaker.check()
+    breaker.stop()
     wall_clock = time.monotonic() - start
 
     aggregate = aggregate_images(image_results)

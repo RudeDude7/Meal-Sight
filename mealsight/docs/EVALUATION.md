@@ -255,6 +255,13 @@ also found and corrected during preparation.
 
 ---
 
+## 7a. Provider free-tier change (2026-11-07)
+After the final scorecard, the provider's free tier was restructured. Live `x-ratelimit` headers now give `ministral-8b-2512` **2 requests/minute and 40,000 tokens/minute** (the Phase 1 console reading, used throughout the evaluation work, was 3.13 RPS and 625,000 TPM). Whisper on Groq reports 2,000 requests/day in its headers; its 20 requests/minute figure is console-sourced and unverified. Consequences:
+- The runs recorded here were made under the old, faster allowance; the scores are unchanged by the tier, but a full five-dimension run at the current allowance would need about an hour of rate-limit waiting (118 calls at one per 30 s) and cannot finish inside the CI job timeout. The scheduled nightly is therefore disabled (manual dispatch remains).
+- Dimension 3 needs no API calls and still runs on every PR.
+- Tokens are not the constraint: ~426,000 per full run is about 4 cents against the $10 monthly allowance, with pay-as-you-go disabled. Throughput is.
+- Per-recommendation latency changed as well; see the README's operating characteristics.
+
 ## 8. Running it
 
 ```

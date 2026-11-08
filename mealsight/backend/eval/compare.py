@@ -17,6 +17,8 @@ WHAT FAILS THE GATE (each is reported with the numbers):
     the
     real databases being touched);
   * the scorecard or the baseline cannot be read (a broken gate must not read as a passing one).
+  * an ABORTED scorecard (infrastructure failure, eval/circuit.py) is refused outright, exit 2: it is never
+    compared and never accepted as a baseline.
 
 WHAT DOES NOT: a score within the tolerance band (model nondeterminism), a known-failing dimension at its
   known
@@ -276,6 +278,15 @@ def main(argv: list[str] | None = None) -> int:
         baseline = json.loads(args.baseline.read_text())
     except (OSError, json.JSONDecodeError) as exc:
         print(f"GATE ERROR: cannot read the scorecard or the baseline: {exc}", file=sys.stderr)
+        return 2
+
+    if scorecard.get("aborted"):
+        print(
+            "GATE ERROR: this run was ABORTED by the infrastructure circuit breaker and was never scored: "
+            f"{scorecard.get('abort_reason')}. The gate will not compare against it or record it as a "
+            "baseline.",
+            file=sys.stderr,
+        )
         return 2
 
     if args.update:

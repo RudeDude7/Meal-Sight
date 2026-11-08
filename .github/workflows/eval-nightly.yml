@@ -1,12 +1,30 @@
-# Full five-dimension evaluation: nightly and on demand. Uses real API calls (~118 calls, ~426k tokens).
+# Full five-dimension evaluation, MANUAL DISPATCH ONLY. The nightly schedule is disabled.
+#
+# WHY: the provider reduced free-tier throughput mid-project. ministral-8b-2512 went from 3.13 requests/s
+# and 625,000 tokens/min to 2 requests/minute (0.033 RPS) and 40,000 tokens/min, measured from live
+# x-ratelimit headers on 2026-11-07. The suite makes ~118 calls, which at 2 per minute is about an hour
+# of rate-limit waiting alone, longer than this job's timeout. That is a change in what the provider
+# allows, NOT a defect in the suite or the pipeline. Tokens are not the constraint (~426,000 per run
+# is about 4 cents against a $10 monthly allowance); throughput is.
+#
+# TO RE-ENABLE: when the preflight (python -m eval.preflight) shows >= 10 requests/minute again, restore
+#   schedule:
+#     - cron: "17 3 * * *"
+# under `on:`. Until then a manual run fails the preflight on purpose, in seconds, unless you pass a lower
+# min_rpm (and accept a very long run; raise the step timeout too).
+#
 # The job passes or fails on the REGRESSION gate against eval/baseline/baseline.json, never on the
 # suite's own overall verdict (Dimension 1 is a documented, known failure; see docs/EVALUATION.md).
-name: Eval nightly
+# Dimension 3 (no API calls) still runs on every PR in ci.yml.
+name: Eval (manual)
 
 on:
-  schedule:
-    - cron: "17 3 * * *"
   workflow_dispatch:
+    inputs:
+      min_rpm:
+        description: "Minimum requests/minute the preflight demands (default 10; the key currently allows 2)"
+        default: "10"
+        required: false
 
 permissions:
   contents: read
@@ -19,7 +37,7 @@ jobs:
   eval:
     name: Full evaluation + regression gate
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: mealsight/backend
@@ -40,9 +58,21 @@ jobs:
           mkdir -p ../data
           uv run python -m mealsight.seed.seed_all --from-snapshot
           uv run env PYTHONPATH=. python ../scripts/reset_demo_pantry.py
+      - name: Preflight (one trivial call per provider; fails in seconds on a bad secret)
+        # Reports each key's LENGTH and whether it has leading/trailing whitespace; never the key itself.
+        timeout-minutes: 3
+        env:
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+        run: uv run env PYTHONPATH=. python -m eval.preflight --min-rpm "${{ inputs.min_rpm || '10' }}"
       - name: Run all five dimensions
-        # Secrets are exposed to this one step only. The suite exits 1 on its own overall FAIL, which is
-        # expected today; the gate below decides pass/fail. A missing scorecard still fails the job.
+        # A real run takes 11-17 minutes; 30 minutes is about 2x the slowest observed. Secrets are exposed to
+        # this step (and the preflight) only. The suite exits 1 on its own overall FAIL, which is expected
+        # today; the gate below decides pass/fail. Exit 3 means the run was ABORTED by the circuit breaker
+        # (systemic rate limiting or provider errors): that is an infrastructure failure and fails the job
+        # here, without being scored. A missing scorecard also fails the job.
+        timeout-minutes: 30
         env:
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -50,7 +80,9 @@ jobs:
         run: |
           set +e
           uv run env PYTHONPATH=. python -m eval
-          echo "suite exit code: $? (1 = overall FAIL, informational)"
+          code=$?
+          echo "suite exit code: $code (0 pass, 1 overall FAIL = informational, 3 ABORTED)"
+          if [ "$code" -eq 3 ]; then echo "::error::evaluation ABORTED by the infrastructure circuit breaker; nothing was scored"; exit 3; fi
           ls eval/results/run_*.json >/dev/null 2>&1 || { echo "::error::no scorecard was written"; exit 2; }
       - name: Regression gate against the recorded baseline
         run: |

@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from eval.circuit import InfrastructureFailure, breaker
 from eval.dimension1 import run_dimension1
 from eval.dimension2 import run_dimension2
 from eval.dimension3 import run_dimension3
@@ -157,6 +158,8 @@ def _print_summary(scorecard: Scorecard) -> None:
     for note in scorecard.notes:
         print(f"note: {note}")
     overall = "PASS" if scorecard.passed else "FAIL"
+    if scorecard.aborted:
+        overall = "ABORTED (infrastructure failure, not scored)"
     print(f"\n=== overall: {overall} ===\n")
 
 
@@ -168,18 +171,24 @@ async def run_eval(
     results: list[DimensionResult] = []
     pantry = await pantry_snapshot()
 
-    if "dimension1" in dimensions:
-        results.append(await run_dimension1(case_limit=case_limit))
-    if "dimension2" in dimensions:
-        results.append(await run_dimension2(case_limit=case_limit, sampled=sampled))
-    if "dimension3" in dimensions:
-        results.append(await run_dimension3(case_limit=case_limit))
-    if "dimension4" in dimensions:
-        results.append(await run_dimension4(case_limit=case_limit))
-    if "dimension5" in dimensions:
-        from eval.dimension5 import run_dimension5
+    aborted: InfrastructureFailure | None = None
+    try:
+        if "dimension1" in dimensions:
+            results.append(await run_dimension1(case_limit=case_limit))
+        if "dimension2" in dimensions:
+            results.append(await run_dimension2(case_limit=case_limit, sampled=sampled))
+        if "dimension3" in dimensions:
+            results.append(await run_dimension3(case_limit=case_limit))
+        if "dimension4" in dimensions:
+            results.append(await run_dimension4(case_limit=case_limit))
+        if "dimension5" in dimensions:
+            from eval.dimension5 import run_dimension5
 
-        results.append(await run_dimension5(case_limit=case_limit))
+            results.append(await run_dimension5(case_limit=case_limit))
+    except InfrastructureFailure as failure:
+        aborted = failure
+    finally:
+        breaker.stop()
 
     run_id = f"run_{int(time.time())}"
     git_dirty, git_diff_sha256 = _git_state()
@@ -196,11 +205,14 @@ async def run_eval(
         component_versions=component_versions(),
         data_versions=await data_versions(),
         dimensions=results,
-        passed=all(d.passed for d in results),
+        passed=aborted is None and all(d.passed for d in results),
         pantry=pantry,
         notes=SCORER_NOTES,
         git_dirty=git_dirty,
         git_diff_sha256=git_diff_sha256,
+        aborted=aborted is not None,
+        abort_reason=aborted.reason if aborted else None,
+        abort_detail=aborted.detail if aborted else {},
     )
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)

@@ -10,6 +10,7 @@ from typing import Any
 
 from eval.analysis import Candidate, analyse, canonical, composite, load_corpus
 from eval.cases5 import PERSONALIZATION_CASES, Aspect, PersonalizationCase
+from eval.circuit import breaker
 from eval.dimension2 import ingredient_hits, restriction_violations
 from eval.isolation import IsolatedWorld, PantrySeed, file_fingerprints
 from eval.models import DimensionResult, ScenarioCaseResult
@@ -266,10 +267,14 @@ async def run_dimension5(case_limit: int | None = None) -> DimensionResult:
     corpus = await load_corpus()
     world = IsolatedWorld()
     results: list[ScenarioCaseResult] = []
+    breaker.start(NAME)
     try:
         for case in cases:
+            breaker.check()
             results.append(await _run_case(case, world, corpus))
+        breaker.check()
     finally:
+        breaker.stop()
         await world.cleanup()
     after = file_fingerprints()
     untouched = before == after

@@ -22,15 +22,19 @@ type StepStatus = 'active' | 'done'
 interface StepState {
   status: StepStatus
   durationMs: number | null
+  /** The latest in-progress update for a running step (replaced, never appended). */
+  detail: string | null
 }
 
 function deriveStepStates(messages: WSMessage[]): Map<string, StepState> {
   const states = new Map<string, StepState>()
   for (const message of messages) {
     if (message.type === 'node_start') {
-      states.set(message.node, { status: 'active', durationMs: null })
+      // A node_start carrying `detail` is a progress update for a node that is already running: keep the
+      // latest one only, so a 30-second wait is one line whose text changes, not thirty lines.
+      states.set(message.node, { status: 'active', durationMs: null, detail: message.detail ?? null })
     } else if (message.type === 'node_complete') {
-      states.set(message.node, { status: 'done', durationMs: message.duration_ms })
+      states.set(message.node, { status: 'done', durationMs: message.duration_ms, detail: null })
     }
   }
   return states
@@ -78,7 +82,7 @@ export function PipelineProgress({ messages }: PipelineProgressProps) {
                 ? formatDuration(state.durationMs)
                 : '…'
             }
-            message={label}
+            message={state.status === 'active' && state.detail ? `${label} — ${state.detail}` : label}
           />
         )
       })}

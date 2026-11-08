@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # backend/mealsight/config/settings.py -> backend/mealsight -> backend -> repo root
@@ -30,10 +30,20 @@ class RateLimitSpec(BaseModel):
     tpm: int
 
 
-# Sourced from the Mistral console (and Groq, for Whisper) for this account.
-# These are real limits, not placeholders — the rate limiter must respect them.
+# MEASURED 2026-11-07 from live x-ratelimit response headers (python -m eval.preflight prints them), NOT
+# copied from a console reading.
+#
+# RE-VERIFY THESE; DO NOT TRUST THEM. Mistral restructured its free tier mid-project. The original Phase 1
+# console reading for ministral-8b-2512 was 3.13 RPS / 625,000 TPM. The live headers now say
+# x-ratelimit-limit-req-minute: 2 and x-ratelimit-limit-tokens-minute: 40000, i.e. 2/60 = 0.0333 RPS and
+# 40,000 TPM: about 94x fewer requests and 15.6x fewer tokens. Between those two readings the limiter here
+# was pacing far too fast, which caused 429 retry storms, stalls and single-call hangs.
+#
+# whisper-large-v3-turbo (Groq): the 20-requests-a-minute figure is from the Groq console and is NOT
+# exposed in response headers, so it is unverified. What the headers do show is x-ratelimit-limit-requests:
+# 2000 (per day, one request refilling every 43.2 s), a ceiling this limiter does not model.
 MODEL_RATE_LIMITS: dict[str, RateLimitSpec] = {
-    "ministral-8b-2512": RateLimitSpec(rps=3.13, tpm=625_000),
+    "ministral-8b-2512": RateLimitSpec(rps=2 / 60, tpm=40_000),
     "whisper-large-v3-turbo": RateLimitSpec(rps=20 / 60, tpm=0),
 }
 
@@ -62,6 +72,19 @@ class Settings(BaseSettings):
     # --- Optional / deferred secrets ---------------------------------------
     openweather_api_key: SecretStr | None = None
 
+    @field_validator("mistral_api_key", "groq_api_key", "openweather_api_key", mode="before")
+    @classmethod
+    def _strip_secret_whitespace(cls, value: object) -> object:
+        """A key pasted into a CI secret or a .env file often carries a trailing newline or space. It is
+        invisible, and it makes every authenticated call fail, so secrets are stripped at load time. A key
+        that is only whitespace becomes empty, which the blank-secret check in load_settings rejects (or,
+        for the optional weather key, which is treated as unset)."""
+        raw = value.get_secret_value() if isinstance(value, SecretStr) else value
+        if isinstance(raw, str):
+            stripped = raw.strip()
+            return stripped
+        return value
+
     # --- Model configuration (benchmark-derived, see docs/VISION_FINDINGS.md) ---
     # Field names are ALL_CAPS by design, matching the Phase 1.1 spec exactly
     # (VISION_MODEL / EXTRACTION_MODEL / REASONING_MODEL / AUDIO_MODEL) — later
@@ -74,14 +97,15 @@ class Settings(BaseSettings):
     # corrected scorer: mean F1 0.545 (stddev 0.075) under the benchmark
     # script's methodology, 0.529 (stddev 0.103) through the production
     # analyze_fridge_photo path. ministral-14b-2512 ties it (0.551 / 0.535).
-    # 625,000 TPM / 3.13 RPS. The model returns a stray trailing ``` fence
+    # (Rate limits: see MODEL_RATE_LIMITS; the 625,000 TPM / 3.13 RPS read here in Phase 1 is out of date.)
+    # The model returns a stray trailing ``` fence
     # after its JSON; providers.mistral.strip_code_fences handles it (it did
     # not before 2026-10-16, which silently emptied every vision result).
     # Full history in docs/VISION_FINDINGS.md.
     VISION_MODEL: str = "ministral-8b-2512"
-    EXTRACTION_MODEL: str = "ministral-8b-2512"  # 3.13 RPS, sufficient for structured extraction
+    EXTRACTION_MODEL: str = "ministral-8b-2512"  # limits: see MODEL_RATE_LIMITS
     # Same model as VISION_MODEL, so both roles share one rate-limit bucket
-    # (625,000 TPM / 3.13 RPS). 2026-10-16: end-to-end runs validated
+    # (see MODEL_RATE_LIMITS). 2026-10-16: end-to-end runs validated
     # against RecipeDecision with no repair retry or fallback; the reasoning
     # text was separately checked for faithfulness (docs/VISION_FINDINGS.md).
     REASONING_MODEL: str = "ministral-8b-2512"

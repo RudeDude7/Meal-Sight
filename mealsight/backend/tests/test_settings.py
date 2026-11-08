@@ -124,7 +124,9 @@ def test_rate_limit_specs_retrievable_per_model(monkeypatch: pytest.MonkeyPatch)
     settings = load_settings(env_file=None)
 
     extraction = settings.get_rate_limit("ministral-8b-2512")
-    assert extraction == RateLimitSpec(rps=3.13, tpm=625_000)
+    # Measured from live x-ratelimit headers on 2026-11-07 (2 requests/minute, 40,000 tokens/minute). Mistral
+    # restructured the free tier mid-project (it was 3.13 RPS / 625,000 TPM); re-verify, do not trust.
+    assert extraction == RateLimitSpec(rps=2 / 60, tpm=40_000)
 
     # Retired by Mistral (2026-10); deliberately no longer configured.
     with pytest.raises(KeyError, match="mistral-medium-2505"):

@@ -5,7 +5,7 @@ entirely) to stand in for the real thing.
 
 Makes 3 sequential calls to settings.REASONING_MODEL through the normal
 provider factory, then 3 sequential calls to settings.EXTRACTION_MODEL.
-(Both are currently ministral-8b-2512, 3.13 RPS, so the second pass
+(Both are currently ministral-8b-2512 at 2 requests/minute, so the second pass
 re-exercises the same bucket.) For each model, prints the elapsed time since the model's first call
 for every call, the wall-clock delta between consecutive calls, and which
 bucket (RPS or TPM) the limiter's own state says was binding — then a

@@ -13,7 +13,7 @@ an always-empty one.
 Concurrency: each model has its own asyncio.Lock, not a single global
 lock, so waiting on one model's slow budget (e.g. a 0.5 RPS ministral-14b
 call) never blocks a concurrent call to a different model with a much
-faster budget (e.g. ministral-8b-2512 at 3.13 RPS). Two
+faster budget (the Whisper endpoint). Two
 concurrent callers for the *same* model do serialize — that's the point
 of the lock: the bucket only has room for one call near its refill
 boundary, and holding the lock across the wait is what makes "check, wait,
@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 from mealsight.config.settings import settings
@@ -42,6 +43,20 @@ class WaitInfo:
     request_wait_seconds: float
     token_wait_seconds: float
     binding_bucket: str  # "rps", "tpm", "both", or "none"
+    started_at: float = 0.0  # time.monotonic() when this wait began, so a caller can compute what remains
+
+
+class WaitTracker:
+    """Records the limiter wait of the calls made under it. last_wait() is per MODEL, so with two concurrent
+    calls on one model it reports whichever acquired last, which can describe the wrong call. A caller that
+    needs to say honestly what ITS call is doing creates a tracker, makes it current (current_wait_tracker)
+    before starting the call, and reads .info later."""
+
+    def __init__(self) -> None:
+        self.info: WaitInfo | None = None
+
+
+current_wait_tracker: ContextVar[WaitTracker | None] = ContextVar("current_wait_tracker", default=None)
 
 
 class _Bucket:
@@ -115,12 +130,17 @@ class RateLimiter:
             else:
                 binding_bucket = "tpm"
 
-            self._last_wait[model_id] = WaitInfo(
+            info = WaitInfo(
                 wait_seconds=wait_seconds,
                 request_wait_seconds=request_wait,
                 token_wait_seconds=token_wait,
                 binding_bucket=binding_bucket,
+                started_at=time.monotonic(),
             )
+            self._last_wait[model_id] = info
+            tracker = current_wait_tracker.get()
+            if tracker is not None:
+                tracker.info = info
 
             if wait_seconds > 0:
                 logger.debug(
@@ -150,13 +170,17 @@ class RateLimiter:
         and what the provider actually reported afterward. If the estimate
         was too high, the surplus is given back to the token bucket; if it
         was too low, the deficit is taken out of it (a future acquire()
-        for this model will simply wait a little longer)."""
-        async with self._lock_for(model_id):
-            _, token_bucket = self._buckets_for(model_id)
-            if token_bucket is None:
-                return
-            difference = estimated_tokens - actual_tokens
-            if difference >= 0:
-                token_bucket.give_back(float(difference))
-            else:
-                token_bucket.consume(float(-difference))
+        for this model will simply wait a little longer).
+
+        Deliberately takes NO lock. acquire() holds the model's lock across its whole wait, so a lock here
+        made a FINISHED call sit blocked behind another call's 30 s sleep: its result was ready in a few
+        seconds but not delivered for ~30 (observed with a photo and a text request sharing one model).
+        The body is synchronous arithmetic with no await, and asyncio runs it atomically anyway."""
+        _, token_bucket = self._buckets_for(model_id)
+        if token_bucket is None:
+            return
+        difference = estimated_tokens - actual_tokens
+        if difference >= 0:
+            token_bucket.give_back(float(difference))
+        else:
+            token_bucket.consume(float(-difference))

@@ -36,8 +36,14 @@ class BaseWSMessage(BaseModel):
 
 
 class NodeStartMessage(BaseWSMessage):
+    """A node began, OR (when `detail` is set) a node that is still running has a progress update. The
+    second use is how a long wait inside a node (for example the reasoning call queued behind the free-tier
+    rate limit) keeps the UI alive without a new message type: clients that ignore `detail` see a node that
+    is still active, which is true."""
+
     type: Literal["node_start"] = "node_start"
     node: str
+    detail: str | None = None
 
 
 class NodeCompleteMessage(BaseWSMessage):

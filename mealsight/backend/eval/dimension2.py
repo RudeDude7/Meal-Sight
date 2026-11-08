@@ -35,6 +35,7 @@ import time
 from typing import Any
 
 from eval.cases import CASES, Case
+from eval.circuit import breaker
 from eval.matching import normalize_words
 from eval.models import CaseResult, DimensionResult, Violation
 from mealsight.agent.mcp_client import MCPClientManager
@@ -490,7 +491,9 @@ async def run_dimension2(case_limit: int | None = None, sampled: bool = False) -
     start = time.monotonic()
 
     async with MCPClientManager() as manager:
+        breaker.start(NAME)
         for case in cases:
+            breaker.check()
             trace_id = f"eval-dimension2-{case.case_id}"
             final_state = await run_recommendation(
                 text_input=case.text_input,
@@ -499,6 +502,8 @@ async def run_dimension2(case_limit: int | None = None, sampled: bool = False) -
             )
             api_calls += 1
             case_results.append(_check_case(case, final_state))
+        breaker.check()
+    breaker.stop()
 
     wall_clock = time.monotonic() - start
     total_tokens = sum(

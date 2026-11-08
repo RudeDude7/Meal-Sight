@@ -62,6 +62,7 @@ from mealsight.agent.reasoning_facts import expiring_used_by as _expiring_used_b
 from mealsight.agent.reasoning_facts import item_names as _item_names
 from mealsight.agent.reasoning_facts import names_with_importance as _with_importance
 from mealsight.agent.state import MealSightState
+from mealsight.agent.wait_status import run_with_heartbeat
 from mealsight.config.settings import settings
 from mealsight.matching.cuisine import cuisines_match, lookup_cuisine_score
 from mealsight.pantry.expiring import usable_pantry_names
@@ -392,6 +393,20 @@ Context:
 Choose one recipe id from the candidates above (or null if none is acceptable) and explain the tradeoff."""
 
 
+_REASON_IDLE_TEXTS = (
+    "Asking the model to weigh the candidates against your pantry, history and context.",
+    "The model is still choosing between the candidates.",
+    "Almost there: the model is writing up why it picked this recipe.",
+)
+
+
+def _emit_progress(stream: Any, text: str) -> None:
+    """A progress line for the still-running reason node, sent as a node_start carrying `detail` (no new
+    message type): the UI replaces the step's line in place instead of stacking text."""
+    if stream is not None:
+        stream.emit("node_start", node=NODE_NAME, detail=text)
+
+
 def _emit_recommendation(stream: Any, *, recipe_id: str | None, summary: str, available: bool) -> None:
     if stream is not None:
         stream.emit("recommendation", recipe_id=recipe_id, summary=summary, available=available)
@@ -648,12 +663,17 @@ async def reason(state: MealSightState, runtime: Runtime[AgentContext]) -> dict[
     result: dict[str, Any]
     try:
         provider = get_text_provider()
-        decision = await provider.complete_json(
-            prompt,
-            RecipeDecision,
-            settings.REASONING_MODEL,
-            system=SYSTEM_PROMPT,
-            temperature=0.0,
+        decision = await run_with_heartbeat(
+            provider.complete_json(
+                prompt,
+                RecipeDecision,
+                settings.REASONING_MODEL,
+                system=SYSTEM_PROMPT,
+                temperature=0.0,
+            ),
+            model_id=settings.REASONING_MODEL,
+            emit=lambda text: _emit_progress(stream, text),
+            idle_texts=_REASON_IDLE_TEXTS,
         )
 
         candidates_by_id = {c["recipe_id"]: c for c in candidates}

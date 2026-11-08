@@ -71,7 +71,6 @@ about stream_messages' own length stays true unchanged.
 from __future__ import annotations
 
 import asyncio
-import itertools
 from collections.abc import Awaitable
 from typing import Any, TypeVar
 
@@ -79,6 +78,8 @@ from langgraph.runtime import Runtime
 
 from mealsight.agent.context import AgentContext, StreamSink
 from mealsight.agent.state import MealSightState
+from mealsight.agent.wait_status import run_with_heartbeat
+from mealsight.config.settings import settings
 from mealsight.perception.models import AudioPerception, TextPerception, VisionPerception
 from mealsight.perception.processor import analyze_fridge_photo, analyze_text_input, analyze_voice_memo
 from mealsight.utils.logging import get_logger
@@ -91,7 +92,7 @@ NODE_NAME = "perceive"
 # comfortably undercut the real vision call's own observed 8-9s
 # duration — no gap longer than this should ever go by without SOME
 # progress signal, for any modality.
-HEARTBEAT_INTERVAL_SECONDS = 3.0
+HEARTBEAT_INTERVAL_SECONDS = 2.5  # was 3.0: a 3.0 s tick lands a hair over the 3 s maximum gap
 
 T = TypeVar("T")
 
@@ -162,20 +163,29 @@ def _emit(stream: StreamSink | None, modality: str, message: str) -> None:
         stream.emit("ingredient_found", modality=modality, message=message)
 
 
+_MODALITY_MODEL = {
+    "vision": lambda: settings.VISION_MODEL,
+    "audio": lambda: settings.AUDIO_MODEL,
+    "text": lambda: settings.EXTRACTION_MODEL,
+}
+
+
 async def _run_with_heartbeat(modality: str, stream: StreamSink | None, awaitable: Awaitable[T]) -> T:
-    """Runs awaitable to completion, emitting a periodic heartbeat every
-    HEARTBEAT_INTERVAL_SECONDS while it's still in flight. asyncio.wait
-    with a timeout only ever PEEKS at whether the task has finished — it
-    never cancels or otherwise interferes with it, so this changes
-    nothing about the real call's own behavior, only how often this
-    function reports back while waiting."""
-    task: asyncio.Task[T] = asyncio.ensure_future(awaitable)
-    heartbeat_texts = itertools.cycle(_HEARTBEAT_MESSAGES[modality])
-    while True:
-        done, _pending = await asyncio.wait({task}, timeout=HEARTBEAT_INTERVAL_SECONDS)
-        if task in done:
-            return await task
-        _emit(stream, modality, next(heartbeat_texts))
+    """Runs awaitable to completion, emitting a progress line every HEARTBEAT_INTERVAL_SECONDS while it is
+    still in flight. When the call is really queued behind the rate limiter the line says so, with a
+    countdown (mealsight.agent.wait_status); otherwise it is one of the modality's genuine in-flight
+    descriptions. Peeks at the task; never cancels or alters it."""
+
+    def say(text: str) -> None:
+        _emit(stream, modality, text if text.startswith("[") else f"[{NODE_NAME}] {text}")
+
+    return await run_with_heartbeat(
+        awaitable,
+        model_id=_MODALITY_MODEL[modality](),
+        emit=say,
+        idle_texts=_HEARTBEAT_MESSAGES[modality],
+        interval=HEARTBEAT_INTERVAL_SECONDS,
+    )
 
 
 async def _run_vision(

@@ -16,6 +16,12 @@ interface BaseWSMessage {
 export interface NodeStartMessage extends BaseWSMessage {
   type: 'node_start'
   node: string
+  /**
+   * Set when the node is ALREADY running and this is a progress update (for example the reasoning call
+   * queued behind the free-tier rate limit: "Waiting for the rate limit ... About 21s to go."). Absent on
+   * the real start. Each update replaces the previous one for that node, so the feed never stacks text.
+   */
+  detail?: string | null
 }
 
 export interface NodeCompleteMessage extends BaseWSMessage {

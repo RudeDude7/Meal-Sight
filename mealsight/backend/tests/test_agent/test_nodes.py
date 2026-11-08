@@ -281,10 +281,8 @@ async def test_perceive_runs_groq_and_mistral_concurrently(monkeypatch: pytest.M
 async def test_perceive_runs_vision_and_text_concurrently(monkeypatch: pytest.MonkeyPatch) -> None:
     # Reopened this phase (see perceive's own module docstring): the
     # rate limiter keys buckets per model id, not per provider. Vision
-    # and text extraction now both run on ministral-8b-2512 (3.13 RPS),
-    # so they share one bucket, which is ample for one call each —
-    # running them sequentially was still pure wasted wall-clock time,
-    # not a real safety measure.
+    # and text extraction now both run on ministral-8b-2512, so they share
+    # one bucket (the test mocks the calls, so the real limit is not in play).
     timeline: list[tuple[str, float]] = []
 
     async def slow_vision(image_bytes: bytes, **kwargs: object) -> VisionPerception:

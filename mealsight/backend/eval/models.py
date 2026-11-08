@@ -167,3 +167,8 @@ class Scorecard(BaseModel):
     # working tree has uncommitted changes.
     git_dirty: bool = False
     git_diff_sha256: str = ""
+    # An aborted run is an infrastructure failure (eval/circuit.py), never a quality result. The regression
+    # gate refuses to compare against it or to record it as a baseline.
+    aborted: bool = False
+    abort_reason: str | None = None
+    abort_detail: dict[str, Any] = {}

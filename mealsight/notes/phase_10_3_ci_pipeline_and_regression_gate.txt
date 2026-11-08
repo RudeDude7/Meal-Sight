@@ -360,3 +360,388 @@ A: Make tests mypy-clean and add them to the check; run the nightly on
 - A large amount of previously uncommitted work, including eval result
   JSON files that the .gitignore says should be untracked, went into the
   commit; that is housekeeping debt, not design.
+
+
+=====================================================================
+ADDENDA TO PHASE 10.3 (added after the notes above were written)
+=====================================================================
+
+Nothing above this line was removed or edited. Everything below is what
+happened AFTER those notes: four follow-up changes, each triggered by
+something the real world did to the pipeline. Section A2.0 is a map from
+each change to the earlier sections of this file it affects, so you can
+see which statements above are now out of date and why.
+
+Order of events:
+  A1. First hosted run: matcher-gate job fails (no such table: pantry).
+  A2. First hosted nightly run: 45 minutes burned, cancelled (429s).
+  A3. Root cause of A2 found: the provider cut its free tier.
+  A4. The cut made a photo recommendation take ~62 s with silent stretches.
+
+---------------------------------------------------------------------
+A2.0 HOW THESE CHANGES AFFECT THE EARLIER SECTIONS
+---------------------------------------------------------------------
+
+  Earlier statement (section)                      Now
+  -----------------------------------------------  ---------------------------------
+  "Both jobs seed with seed_all --from-snapshot"   Also seed the pantry (A1). The
+  (1, 2.5)                                         snapshot alone was NOT enough.
+  "Nightly: 03:17 UTC + manual dispatch" (1)       Manual dispatch only (A3).
+  "~4-6% of the 625k tokens/min budget" (2.6, 7)   Wrong: the limit is 40k tokens/min
+                                                   and 2 requests/min (A3).
+  "Monthly cap unknown; weekly cron is the dial"   Moot: throughput, not tokens, is
+  (2.6)                                            the constraint (A3).
+  "Gate fails on: missing dimension, threshold,    Also: an ABORTED scorecard is
+  case count, score, invariants, unreadable file"  refused, exit 2 (A2).
+  (2.4)
+  "Total sequential 45 s" (7)                      Still true for fast checks; the
+                                                   eval itself is now far slower (A3).
+  "Tests: 950 passed" (7)                          977 passed after the follow-ups.
+  "Hidden-dependency failures: 10" (7)             Add one more class found by a real
+                                                   runner: unseeded pantry DB (A1).
+  Section 9 "not exercised before the push"        The first hosted runs happened and
+                                                   found A1 and A2 immediately.
+
+---------------------------------------------------------------------
+A1. THE CLEAN-RUNNER PANTRY BUG (second "works on my machine" defect)
+---------------------------------------------------------------------
+
+WHAT HAPPENED. The first hosted run of the matcher-gate job failed with
+sqlite3.OperationalError: no such table: pantry.
+
+ROOT CAUSE. eval/runner.py calls pantry_snapshot() at the start of every
+run, to record a provenance hash of the pantry. That queries the pantry
+table. CI seeded recipes.db from the snapshot but never created or
+seeded pantry.db. Locally it worked only because the database files had
+existed for months. Same shape as the MCP environment bug in section 4.1:
+a hidden dependency on state that only my machine had.
+
+THE DESIGN DECISION (a good interview story): fix it in BOTH places.
+  - Make the runner tolerant. Dimension 3 carries its own pantry state in
+    its cases and needs no pantry, so requiring a seeded pantry just to
+    record a hash coupled a dimension to data it never uses. If the
+    pantry is absent the runner now RECORDS it honestly:
+    pantry_present: false, rows_at_run_start: null, content hash: null,
+    plus the error text. It never writes the hash of nothing.
+  - But also seed the pantry in CI, because Dimensions 1, 2, 4, 5 do need
+    the demo pantry, and a provenance record with no pantry is weaker.
+  - And make the gate enforce it: the baseline now stores the pantry
+    content hash (c975c014058a) and row count (64). With --strict-data an
+    absent or different pantry FAILS any run containing a pantry-dependent
+    dimension; for a Dimension-3-only run it is only a note. So tolerance
+    in the runner never turns into silent acceptance in the gate.
+
+WHAT ELSE WAS MISSING (found by running on a truly clean directory):
+  - scripts/reset_demo_pantry.py assumed the schemas existed. It now
+    creates the data folder and applies all three schemas (idempotent).
+  - The shelf_life_reference table lives in the PANTRY database and
+    nothing seeded it on a fresh checkout. Without it the shelf-day
+    numbers, and therefore the pantry hash, would have differed even with
+    the table created. The script now loads it from committed JSON.
+  - The script hung at exit because schema init opened the user database
+    and nothing closed it (same family as the eval-runner hang in section
+    3 step 5). It now calls close_all().
+
+HOW I PROVED IT. Fresh directory containing exactly what a commit would
+contain: zero database files, zero .env, no venv. Ran every ci.yml step
+in order with env-var placeholders only. Result: pantry hash
+c975c014058a, 64 rows, matching the baseline. Also re-created the
+original failure (pantry.db absent): the run completes, records the
+absence, and the Dimension 3 gate still passes.
+
+AUDIT FOR OTHER FRESH-CHECKOUT ASSUMPTIONS. Searched for anything that
+assumes a database file, cache dir or .env already exists. Everything
+else was already safe: .env optional (env vars win), data dir created on
+demand, vision checkpoint file skipped if absent, TheMealDB cache dir
+created when needed, test images tracked in git.
+
+LESSON. Two defects of the same shape (env inheritance, unseeded DB) means
+the shape is the lesson: a pipeline's first job is to be a machine that
+has none of your accumulated local state. I should have asked "what does
+a runner have that my laptop has?" before the first push, not after.
+
+TESTS ADDED: absent/different pantry fails strictly for pantry-dependent
+dimensions; Dimension-3-only gate does not need a pantry; runner records a
+missing pantry and never hashes nothing.
+
+---------------------------------------------------------------------
+A2. PREFLIGHT, CIRCUIT BREAKER, SECRET HYGIENE, STEP TIMEOUT
+---------------------------------------------------------------------
+
+WHAT HAPPENED. The first hosted nightly burned 45 minutes and was
+cancelled. Every Dimension 1 call returned 429 on its first attempt, was
+retried four times with 2/5/10 s backoff, then failed. The same key
+returned 200 locally. My first suspect: a trailing newline pasted into
+the GitHub secret.
+
+FOUR LAYERS OF DEFENCE (each added for a distinct failure mode):
+
+1. Whitespace stripped at load (settings). A pasted newline is invisible
+   and breaks authentication. Secrets are now stripped when loaded. A
+   whitespace-only required key still fails as "blank".
+
+2. Preflight step (python -m eval.preflight). Before any dimension runs it
+   makes ONE trivial call per provider and prints the status plus every
+   rate-limit header, and reports each key's LENGTH and whether it has
+   leading/trailing whitespace. It never prints a key. It fails the job in
+   seconds on 429, 401/403, 5xx, unreachable, or too-low throughput. Padding
+   alone warns (the strip already neutralises it) but does not fail.
+   Verified with a real key plus a deliberate "\n": reported as length 33,
+   TRAILING whitespace, control character; settings loaded it as 32.
+
+3. Circuit breaker (eval/circuit.py). KEY INSIGHT: the provider layer
+   retries and the perception/reasoning layers above deliberately swallow
+   failures into fallbacks, so a run where every call 429s used to
+   produce a scorecard with Dimension 1 near zero. That is an
+   INFRASTRUCTURE failure recorded as a QUALITY score, and if the gate
+   ever accepted it as a baseline it would poison every later comparison.
+   Fix: the provider layer now publishes the FINAL outcome of each call
+   (ok / rate_limited / provider_error / auth_error) to an observer
+   (providers/outcomes.py); the eval harness subscribes. Within one
+   dimension, once at least 5 calls have finished, if 50% or more failed
+   after retries, the run ABORTS.
+     Threshold reasoning: each counted failure already survived 4
+     attempts, so it is outage-grade, not a blip; 5 is the smallest sample
+     where "half failed" is not one unlucky call and it bounds the cost of
+     an outage to ~5 calls of retry time (about 90 s) instead of the whole
+     run; 50% leaves room for a few real transient failures in a long
+     dimension.
+   On abort: scorecard records aborted:true + the reason and counts, the
+   suite exits 3 (0 pass, 1 suite FAIL, 3 aborted), the workflow fails
+   immediately with an error, and eval.compare REFUSES the scorecard
+   (exit 2) including for --update. An outage can never become a score or
+   a baseline.
+   Tested with real retry code and mocked responses: a 100-call loop of
+   429s stops after exactly 5 calls (20 mocked attempts, zero real I/O).
+
+4. Timeouts. Suite step 30 min (~2x the slowest observed real run of 17),
+   preflight step 3 min, job 40 min (was 45 with no step limit).
+
+THE PLOT TWIST. The preflight's first real run showed the headers
+x-ratelimit-limit-req-minute: 2. The 429s were probably NOT the newline:
+the key was genuinely limited to 2 requests a minute. The preflight was
+extended to fail when a provider allows fewer than 10 requests/minute
+(a full run needs ~9/min), with a --min-rpm flag. That is A3.
+
+LESSON. I built the defence against the hypothesis I was handed (bad
+secret) and the tool I built immediately showed the real cause was
+different. Building diagnostics that report facts, not just verdicts, is
+what let the evidence overrule the hypothesis.
+
+MISTAKE TO ADMIT. I truncated eval/preflight.py by opening it for
+writing before reading it in the same statement; I noticed because a grep
+returned nothing, and rewrote it in full. Shows why verifying edits
+matters even for "trivial" one-liners.
+
+---------------------------------------------------------------------
+A3. THE PROVIDER CUT ITS FREE TIER: RATE LIMITS, NIGHTLY DISABLED
+---------------------------------------------------------------------
+
+THE FACTS, MEASURED (live x-ratelimit headers, 2026-11-07):
+  ministral-8b-2512   2 requests/min (0.033 RPS), 40,000 tokens/min
+  was (Phase 1 console reading used for the whole project):
+                      3.13 RPS, 625,000 TPM   -> ~94x fewer requests,
+                                                 ~15.6x fewer tokens
+  whisper-large-v3-turbo (Groq): headers show 2,000 requests/DAY; the
+  20 requests/min figure is console-sourced and UNVERIFIED (headers do not
+  expose it). I left it and said so.
+Only two models are used by the system.
+
+WHAT I DID.
+  - Updated MODEL_RATE_LIMITS to rps=2/60, tpm=40_000 with a dated
+    comment: measured from headers, restructured mid-project, RE-VERIFY
+    DO NOT TRUST. Removed stale "3.13 RPS" mentions in comments and the
+    settings test (which now asserts the measured values).
+  - Nightly eval: removed the cron schedule, kept the workflow and manual
+    dispatch, with a header comment: the provider reduced throughput
+    mid-project, not a defect in the suite; how to re-enable. Manual runs
+    take a min_rpm input; at 2 requests/min the preflight fails in
+    seconds, on purpose.
+  - Dimension 3 still runs on every PR: no API calls, <1 s, a genuine
+    regression gate on matcher arithmetic. The fast-check pipeline is
+    entirely unaffected by the tier change.
+
+THE COST PICTURE (a nuance interviewers like). A full run is ~426,000
+tokens, about 4 cents against the $10 monthly included allowance (figure
+from the account; pay-as-you-go disabled so no charge is possible).
+TOKENS ARE NOT THE CONSTRAINT; THROUGHPUT IS. 118 calls at one per 30 s is
+about an hour of rate-limit waiting, longer than the job timeout. This
+reverses my earlier section-2.6 analysis, which assumed the old limits.
+Be ready to say so plainly: the earlier analysis was correct for the
+numbers I had and wrong for the numbers that existed.
+
+WHAT THE OLD LIMITER WAS DOING. It was pacing ~100x too fast, so it let
+calls through that the provider then 429'd, and the retry/backoff layer
+turned each into long stalls. This explains the "single-call hangs" seen
+during development. Measured: a text-only recommendation that worked at
+2.7 s on a fresh minute budget; an earlier attempt after the budget was
+spent did not finish in 14.6 minutes and I killed it.
+
+PRODUCT IMPACT, MEASURED END TO END AFTER THE CORRECTION:
+  text only     2 provider calls   32.6 s   (28.7 s limiter wait, 3.4 s API)
+  photo + text  3 provider calls   61.8 s   (58.5 s limiter wait, 7.8 s API)
+Phase 8 measured 11.3 s. This is a real operating characteristic and is
+documented plainly in the README ("a demo, not an interactive tool; the
+wait is rate limiting, not computation; a paid tier removes it").
+
+DOCS UPDATED: docs/CI.md (tier change, new limits, why nightly is off,
+how to re-enable), docs/EVALUATION.md (new section 7a: scores recorded
+under the old allowance), README (operating characteristics).
+
+LESSON. A number copied from a console once is a claim with a date on it.
+The fix was not only changing the number but changing the process:
+the number is now measured from headers by a tool (the preflight) that can
+be re-run, and the comment tells the next person not to trust it.
+
+---------------------------------------------------------------------
+A4. HEARTBEAT COVERAGE FOR EVERY WAITING STAGE
+---------------------------------------------------------------------
+
+THE PROBLEM. Phase 7.2 set a standard: no gap longer than 3 s without a
+progress signal. Heartbeats existed only in the perception stage. After
+A3 the reasoning stage sat silent for ~31 s while waiting on the limiter.
+
+AUDIT RESULT. The only stage making a provider call without a heartbeat
+was reasoning. Perception had heartbeats but, during a rate-limit wait,
+said "still analyzing" while idle, which is a small lie. Other stages
+make no provider calls (the weather call has a 10 s timeout).
+
+DESIGN (honest, no new message type).
+  - mealsight/agent/wait_status.py: a shared run_with_heartbeat that every
+    provider-calling stage uses. Every 2.5 s it emits either a limiter
+    COUNTDOWN ("Waiting for the rate limit, not computing: the free tier
+    allows 2 requests a minute (one every 30s). About 21s to go.") when
+    the call is genuinely queued, or a real in-flight description.
+  - Countdown beats a one-off explanation: the UI replaces the previous
+    line in place, so a changing number is visible proof of life and
+    never stacks into a wall of text.
+  - Message type: reused node_start with a new OPTIONAL `detail` field for
+    reasoning (a client ignoring `detail` just sees a node still running,
+    which is true); perception keeps ingredient_found. No new type, schema
+    change is additive.
+  - Interval lowered 3.0 -> 2.5 s: a 3.0 s tick lands a hair OVER a 3 s
+    maximum; honouring the standard needed margin.
+
+TWO REAL BUGS FOUND BY MEASURING (not by thinking):
+  1. last_wait() is per MODEL. With a photo and a text request on the same
+     model, it described whichever acquired last, so the in-flight photo
+     call was labelled "rate limited". Added a per-call WaitTracker
+     (ContextVar set before the task is created so the task inherits it)
+     so only the call that is really queued says so. last_wait() itself is
+     unchanged.
+  2. HEAD-OF-LINE BLOCKING in the rate limiter. acquire() holds the model's
+     lock across its whole sleep; reconcile() (which settles token counts
+     after a call) took the same lock. A call that had FINISHED in a few
+     seconds sat blocked behind another call's 30 s sleep: the photo
+     result was ready at ~9 s but delivered at ~30 s. reconcile() is
+     pure synchronous arithmetic with no await, so it needs no lock.
+     After the fix the photo result arrives at 9.9 s. Total time is
+     unchanged (the second call still needs its slot) but the UI is
+     informed 20 s sooner. Test added: a finished call is not blocked
+     behind another's wait.
+
+RE-MEASURED over a real HTTP POST + WebSocket run: 65 messages in 64.3 s,
+LONGEST GAP 2.51 s (target <= 3 s). Three runs: 62.2-64.3 s total.
+
+FRONTEND. PipelineProgress now keeps only the LATEST detail per running
+step ("Reasoning about the best fit - Waiting for the rate limit ... About
+13s to go."), LiveFeed already kept one line per input type. Verified by
+driving the real UI in headless Chrome over the DevTools protocol (attach
+photo, type text, click, screenshots at 4/12/22/33/40/50/60/68 s): no wall
+of repeated text across the minute. Cosmetic leftover (pre-existing): the
+"[perceive]" prefix is still visible in live-feed lines.
+
+NOT DONE / HONEST LIMITS: the reason node's heartbeat has no unit test of
+its own (the shared helper is tested, and the live trace covers the
+node); vision and text on the same model still serialise, so three calls
+always cost two waits; heartbeats make the wait visible, they do not
+shorten it.
+
+---------------------------------------------------------------------
+A5. UPDATED NUMBERS CHEAT SHEET (replaces the figures in section 7 where
+    they conflict)
+---------------------------------------------------------------------
+
+Tests: 977 passed, 3 deselected (was 950).
+Pantry on a clean seed: 64 rows, content hash c975c014058a.
+Preflight limits: fail below 10 requests/min (a full run needs ~9/min).
+Circuit breaker: >=5 finished calls and >=50% failed after retries.
+Exit codes: eval 0 pass / 1 suite FAIL / 3 aborted; gate 0 / 1 regression /
+  2 gate cannot run or scorecard aborted.
+Timeouts: preflight 3 min, suite step 30 min, job 40 min.
+ministral-8b-2512 NOW: 2 requests/min, 40,000 tokens/min (was 3.13 RPS,
+  625,000 TPM).
+Recommendation wall-clock now: 32.6 s text-only, ~62-64 s with a photo
+  (was 11.3 s in Phase 8); ~58 s of the photo case is limiter waiting.
+Longest UI silence: 2.51 s (target 3 s).
+Full eval run: ~118 calls, ~426k tokens, ~4 cents, but ~1 hour of rate
+  limiting, hence manual-only.
+
+---------------------------------------------------------------------
+A6. ADDITIONAL INTERVIEW QUESTIONS
+---------------------------------------------------------------------
+
+Q: Your first hosted run failed. What did you learn?
+A: That I had removed hidden state from the tests but not from the seed
+   step. The runner depended on a pantry table that only existed on my
+   machine. I fixed it at both layers (runner tolerant and honest, CI
+   seeding the real fixture, gate enforcing the hash) and proved it on a
+   directory with no databases at all.
+
+Q: How do you stop an outage becoming a bad benchmark?
+A: A circuit breaker on final provider outcomes. The pipeline swallows
+   failures into fallbacks, so scores alone can't tell "the product was
+   wrong" from "the provider was down". Aborted runs are marked, never
+   scored, and the gate refuses them, including as a baseline.
+
+Q: The provider changed its limits mid-project. What did you do?
+A: Measured the live headers instead of trusting my notes, updated the
+   limiter, dated the comment with a re-verify warning, disabled the
+   scheduled eval (keeping manual dispatch and the free per-PR matcher
+   gate), measured the real product impact (11 s to 62 s), and put that in
+   the README instead of hiding it.
+
+Q: Tokens or throughput?
+A: Throughput. ~426k tokens is about 4 cents, but 118 calls at one per 30
+   s is an hour. My earlier cost analysis used the old limits; the
+   conclusion flipped when the numbers did.
+
+Q: How do you keep a user informed during a 60 s wait?
+A: A heartbeat every 2.5 s that says what is true: a countdown when the
+   call is queued behind the rate limiter, a real description when it is
+   in flight. It reuses an existing message type, replaces text in place,
+   and was verified against a real WebSocket trace and the real UI.
+
+Q: Did measuring find anything thinking would not have?
+A: Two bugs: a per-model wait record that mislabelled concurrent calls,
+   and a limiter lock that blocked finished calls behind another call's
+   30 s sleep, delaying a ready result by ~20 s.
+
+---------------------------------------------------------------------
+A7. ADDITIONAL "DO NOT OVERCLAIM" ITEMS
+---------------------------------------------------------------------
+
+- The 4-cent-per-run figure comes from the account, not from pricing I
+  verified.
+- Groq's 20 requests/min is unverified; only its 2,000/day is measured.
+- The monthly allowance and any future tier changes are unknown; the
+  limits will need re-measuring, which is the point of the comment.
+- A photo recommendation is ~1 minute: usable as a demo, not as an
+  interactive tool. Say so.
+- The heartbeat makes waiting visible; it does not make it shorter.
+- "No gap above 3 s" is measured on one workflow (photo + text) in three
+  runs, not on every input combination.
+- The circuit breaker thresholds (5 calls, 50%) are reasoned, not tuned
+  from outage data; I had one real outage to reason from.
+- The first-run failures were found by the hosted runner, not by my local
+  clean-directory test, because I had not yet included the pantry seed in
+  that test. Own that.
+
+---------------------------------------------------------------------
+A8. WORKFLOW RENAMED (later change)
+---------------------------------------------------------------------
+eval-nightly.yml was renamed eval-full.yml (git mv, history kept) because
+it no longer has a schedule; its workflow name is now "Eval (full, manual)"
+and its concurrency group "eval-full". Earlier sections of this file that
+say eval-nightly.yml describe the file as it was named then. README badge,
+docs/CI.md and docs/EVALUATION.md were updated to the new name.

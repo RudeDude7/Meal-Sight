@@ -16,7 +16,7 @@
 # The job passes or fails on the REGRESSION gate against eval/baseline/baseline.json, never on the
 # suite's own overall verdict (Dimension 1 is a documented, known failure; see docs/EVALUATION.md).
 # Dimension 3 (no API calls) still runs on every PR in ci.yml.
-name: Eval (manual)
+name: Eval (full, manual)
 
 on:
   workflow_dispatch:
@@ -30,7 +30,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: eval-nightly
+  group: eval-full
   cancel-in-progress: false
 
 jobs:

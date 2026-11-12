@@ -1,0 +1,416 @@
+PHASE 10.5 STUDY NOTES: DEPLOYING A RATE-LIMITED, SINGLE-USER DEMO
+(DOCKER BACKEND ON HUGGING FACE SPACES, VITE FRONTEND ON VERCEL)
+=====================================================================
+
+AUDIENCE AND PURPOSE. Interview preparation. Deployment is where a
+project meets constraints it was not designed around: ephemeral
+storage, a sleeping host, a provider that shrank its free tier, and
+cross-origin browsers. The interesting part is not the Dockerfile. It
+is what I verified, how, what I could not verify, and how I made the
+deployed app honest about being slow. Sections: 0 pitch, 1 what was
+produced, 2 constraints and decisions, 3 verification (two stages),
+4 frontend work, 5 CORS and the WebSocket, 6 the rate limit as a
+deployment constraint, 7 mistakes, 8 principles, 9 numbers, 10
+interview questions, 11 what NOT to overclaim.
+
+Companion files: Dockerfile, .dockerignore, deploy/huggingface/
+(SPACE_README.md, make_space_bundle.sh), frontend/vercel.json,
+frontend/.env.example, docs/DEPLOYMENT.md, docs/KNOWN_ISSUES.md (item 3),
+and the earlier notes for 10.3 (CI, rate limits, heartbeats).
+
+
+---------------------------------------------------------------------
+0. THE PITCH
+---------------------------------------------------------------------
+
+THIRTY SECONDS.
+"I prepared MealSight for deployment: a Docker image for Hugging Face
+Spaces and a Vercel config for the frontend. Three things shaped it.
+Spaces storage is ephemeral, so I seed the databases at image build time
+from committed fixtures, which means every start is the same known state
+and the demo honestly resets. The provider limits the whole deployment to
+two requests a minute, so I made the app say that before a visitor waits,
+using numbers read live from the backend. And a free Space sleeps, so the
+frontend shows a 'waking up' notice and retries instead of an error. I
+verified the image for real: built it, ran it with keys only as
+environment variables, checked all three MCP servers, the pantry hash and
+a full recommendation. What I haven't done is the Hugging Face build
+itself, and I say so."
+
+TWO MINUTES (add):
+"Two stories. First, verification in two stages. Before Docker was
+installed I ran the Dockerfile's exact steps natively in a scrubbed
+environment (no .env, only environment variables) because the last time
+keys came from environment variables it broke the MCP subprocesses in CI.
+That caught nothing new but proved the condition. Then with Docker I
+repeated it for real. Second, the ffmpeg line: I was asked to install it,
+found no backend code uses it, flagged that, and when told to remove it
+the image dropped from 1.2 GB to 616 MB, with a voice-memo run proving
+nothing depended on it."
+
+ONE-LINE TAKEAWAY: "Deploy to the constraints you have, tell the visitor
+about them, and separate what you verified from what you only prepared."
+
+
+---------------------------------------------------------------------
+1. WHAT WAS PRODUCED
+---------------------------------------------------------------------
+
+BACKEND PACKAGING
+  - Dockerfile: python:3.11-slim, procps, uv (pinned image tag), UID 1000
+    (what Spaces runs), same folder layout as the repo (settings finds
+    data/ relative to the folder above backend/), one uvicorn worker,
+    port 7860, --proxy-headers.
+  - .dockerignore: keeps local databases, .env, tests, results, the
+    frontend and docs out of the build context.
+  - deploy/huggingface/SPACE_README.md: the Space README with the YAML
+    frontmatter Spaces requires (sdk: docker, app_port: 7860).
+  - deploy/huggingface/make_space_bundle.sh: assembles exactly the files
+    the image needs into dist/hf-space (git-ignored), so the GitHub
+    README is not polluted by Space frontmatter.
+FRONTEND PACKAGING
+  - frontend/vercel.json: framework, install/build commands, output dir,
+    and a rewrite of every path to /index.html so deep links work.
+  - frontend/.env.example: documents VITE_API_BASE_URL (baked in at build
+    time; the WebSocket URL is derived from it, https becomes wss).
+PRODUCT CHANGES FOR THE DEPLOYED CONDITIONS
+  - /health gained a "demo" block: active_runs and seconds_between_requests
+    (derived from the live rate-limit spec, not hard-coded).
+  - Frontend: a waking-up notice, a demo notice, a disabled submit while
+    waking (details in section 4).
+  - scripts/reset_demo_pantry.py: tolerates a missing pgrep (a slim
+    container has none).
+DOCS: docs/DEPLOYMENT.md (architecture, decisions, measured facts, the
+manual steps), docs/KNOWN_ISSUES.md item 3 (WebSocket origin gap),
+README doc index.
+
+
+---------------------------------------------------------------------
+2. CONSTRAINTS AND DECISIONS
+---------------------------------------------------------------------
+
+2.1 EPHEMERAL STORAGE: SEED AT BUILD, LET THE DEMO RESET.
+Free Spaces lose runtime writes on restart or sleep/wake. Options:
+persistent storage (paid or external), or accept the reset. I seed the
+databases during `docker build` from committed fixtures
+(seed_all --from-snapshot, then reset_demo_pantry.py). Every start is a
+fresh copy of the image: the same 250 recipes and the same 64-row demo
+pantry (content hash c975c014058a, the value the eval baseline was
+recorded against). Honest and simple. The demo notice tells visitors
+anything they save is temporary. Build-time seeding also keeps start-up
+fast (no seeding on boot).
+
+2.2 SECRETS ONLY AS ENVIRONMENT VARIABLES. Settings refuses to import
+without the three keys, so the seeding RUN step sets placeholder keys
+inline (not ENV), so they are not in the running container. At runtime
+Spaces injects real secrets as env vars. The image has no .env and no
+key. This is the exact condition that broke CI earlier (MCP subprocesses
+not inheriting the environment); it was fixed in 10.3, and this phase
+re-verified it in the same condition for real.
+
+2.3 ONE WORKER, ON PURPOSE. The provider rate limiter and the MCP client
+manager are per process. A second worker would double the request rate the
+provider allows and cause 429s. One worker also means concurrent visitors
+share one limiter, which is the point of section 6.
+
+2.4 --proxy-headers. Spaces sits behind a proxy. Without it every visitor
+appears to share one client IP and the per-client submission limit (10 a
+minute) would be global. With it the limit sees real addresses.
+
+2.5 PUBLIC SPACE. The Vercel frontend calls the backend from the visitor's
+browser, so the Space must be public.
+
+2.6 THE BUNDLE SCRIPT INSTEAD OF PUSHING THE REPO. The Space needs a
+README with YAML frontmatter at its repo root; putting that in the main
+README would clutter GitHub. A script assembles the minimal file set
+(about 178 files, 2.6 MB) with the Space README, and the user pushes that.
+
+2.7 NO BAKING OF THE VERCEL DOMAIN. The Vercel origin is unknown until the
+project exists, so CORS_ALLOWED_ORIGINS is a Space variable set after
+Vercel assigns a domain. The manual steps have an order for that
+chicken-and-egg: create the Space first (to know its URL), then Vercel
+(needs the Space URL), then set CORS on the Space and restart it.
+
+
+---------------------------------------------------------------------
+3. VERIFICATION IN TWO STAGES
+---------------------------------------------------------------------
+
+STAGE 1 (no Docker installed). I could not build the image, and I said so
+plainly rather than claim otherwise. Instead I ran the Dockerfile's exact
+steps natively in a scrubbed environment (env -i: only PATH, HOME, the
+three keys and the CORS variable; no .env file existed in the tree) on
+the exact file set the bundle script produces. Results: build-equivalent
+steps 8 s; pantry hash c975c014058a with 64 rows; server healthy in about
+6 s with all three MCP servers up; a real recommendation completed from
+a browser on a different origin. The README of that phase stated that the
+Dockerfile itself was unbuilt.
+
+STAGE 2 (Docker Desktop installed, arm64). The real thing:
+  - Build: 66 s cold, 28 s with cached base layers; image 1,199.8 MB with
+    ffmpeg, 615.5 MB without. No warnings; the seeding step reported
+    "No warnings: all targets met".
+  - Run with the three keys passed only as environment variables (-e NAME
+    forwards the value; it is not on the command line, in a file or
+    printed). Inspection: 0 mounts, 0 .env files in the image, UID 1000.
+  - /health: HTTP 200, healthy; recipe_engine 7 tools, pantry_manager 8,
+    user_intelligence 11; 250 recipes; both providers up.
+  - Pantry hash inside the container: c975c014058a, 64 rows.
+  - Full photo-plus-text recommendation: 65.8 s with ffmpeg, 62.3 s without;
+    65 to 66 WebSocket messages; longest gap 2.52 s.
+  - Cold start, image already on disk: 6.70, 6.52, 6.68 s from docker run
+    to first successful /health (and 7.27 and 8.13 s on the first runs of
+    each image); a stop then docker start took 6.38 s.
+
+WHY STAGE 1 WAS WORTH DOING. It exercised the failure condition (env vars
+only) with the real file set before a container existed, so Stage 2 was
+confirmation rather than discovery. It also kept the claim honest: the
+phase that could not build the image did not pretend to have built it.
+
+THE FFMPEG DECISION. The brief asked for ffmpeg in the image. A search
+found no backend code calling it (only scripts/check_environment.py,
+which checks the developer's machine). Voice memos are validated with
+mutagen and transcribed by Groq's API. I installed it as asked and flagged
+it; when asked to remove it I did, and tested the one path it could
+matter for: a voice-memo recommendation ran fine (transcribed text came
+back, run completed). Saving: 584 MB (the apt layer was 422 MB; ffmpeg
+pulls many libraries). I kept procps because the pantry reset guard uses
+pgrep.
+
+
+---------------------------------------------------------------------
+4. FRONTEND WORK
+---------------------------------------------------------------------
+
+4.1 COLD START WITHOUT AN ERROR. A sleeping free host answers with an
+HTML wake page, a timeout or a network error. A provider (lib/backendStatus)
+polls GET /health: anything that is not a health report means "waking".
+The UI shows a Strip (the existing design-system element) with a ticking
+seconds counter and the message that free hosting is waking up, disables
+the submit button with a plain reason, retries every 4 s and unlocks by
+itself. A 503 that still carries a health report counts as reachable (the
+backend is up; a provider is degraded). After a healthy response it keeps
+polling every 15 s while the tab is visible, so the demo notice shows live
+data, and it needs two consecutive failures before flipping a healthy
+backend back to "waking" (one failure is a blip).
+Verified in a real browser (headless Chrome over the DevTools protocol)
+against a backend that was OFF then started: the notice appeared, submit
+was disabled, and the notice cleared by itself 4.1 s after the backend
+came up, with no reload.
+
+4.2 SAY IT BEFORE THEY WAIT. A "Free demo, so it is slow" notice above the
+submit button: "The AI provider lets one request start every 30 seconds. A
+text-only request makes two, so allow at least 30 seconds; with a photo it
+makes three, so allow at least 60 seconds. Nothing else is running right
+now. The demo also resets whenever it restarts, so anything you save is
+temporary." Numbers come from /health. The arithmetic is derived: the
+first request is immediate and each further one waits one interval, so the
+floor is (requests minus 1) times the interval. I show a floor ("at
+least"), because API time is extra.
+
+4.3 DESIGN SYSTEM, NO NEW PATTERNS. Reused Strip (waking) and Well
+(notice). A queue-position widget was considered and rejected: everyone
+shares one limiter, so "N already running; yours waits behind them" says
+all there is to say.
+
+
+---------------------------------------------------------------------
+5. CORS AND THE WEBSOCKET
+---------------------------------------------------------------------
+
+REST: CORS_ALLOWED_ORIGINS is a JSON array. Verified against the deployed
+file set: preflight from the allowed origin returns access-control-allow-
+origin; another origin gets 400 "Disallowed CORS origin".
+
+WEBSOCKET (the common production-only failure): a real browser on one
+origin (localhost:5173) ran a full recommendation against a backend on
+another origin (127.0.0.1:7860), REST through CORS and the WebSocket
+upgrade cross-origin, to "Recommendation ready".
+
+THE GAP I FOUND AND RECORDED (KNOWN_ISSUES item 3). CORS middleware only
+covers HTTP, browsers do not apply CORS to WebSocket handshakes, and the
+backend does not check the Origin header of an upgrade. So the allow-list
+protects REST but not the socket: any origin that knows a session id can
+subscribe. Mitigation in practice: session ids are random UUID4s returned
+only to the client that started the run, and a session carries only that
+run's progress and result. Deferred because the risk is low for a
+single-user demo and an Origin check is easy to get subtly wrong (non-
+browser clients send none; preview deployments are not on the list). Fix:
+read the Origin header before accept(), close with 1008 when present and
+not allowed, reuse the same list, decide explicitly about a missing
+Origin, add tests; if sessions ever carry user data, add a per-session
+token because Origin is not a credential.
+Also noted: Vercel preview deployments have different origins and will be
+blocked by CORS unless added.
+
+
+---------------------------------------------------------------------
+6. THE RATE LIMIT AS A DEPLOYMENT CONSTRAINT
+---------------------------------------------------------------------
+
+At 2 provider requests a minute the whole deployment is one queue.
+Measured with two simultaneous text-only visitors against the container's
+file set: visitor A finished at 61.6 s, visitor B at 91.8 s; /health
+reported active_runs 2, then 1, then 0. Concurrent runs do not fail, they
+queue; each extra visitor adds roughly 30 to 60 s. I confirmed the shared,
+lifespan-managed MCP manager serves concurrent runs correctly.
+
+How it is disclosed: the demo notice (4.2), built from /health, which in
+turn is built from the live limiter spec and the count of sessions that are
+pending or running (SessionStore.active_count). Because the numbers are
+derived, the notice stays true if the provider changes its limits again,
+which it already did once (see the 10.3 notes).
+
+Honest framing for an interviewer: this is a demo that serves roughly one
+recommendation a minute globally. It demonstrates the system; it is not a
+production service, and I do not present it as one.
+
+
+---------------------------------------------------------------------
+7. MISTAKES AND NEAR-MISSES
+---------------------------------------------------------------------
+
+- I overwrote frontend/.env.example with a redirect instead of editing it.
+  It already existed, with documentation and a VITE_BACKEND_ORIGIN
+  variable, which my version dropped. I noticed in git status ("M" on a
+  file I thought was new), restored it from git and added my note to it.
+  Lesson: check whether a file exists before writing to it; git status
+  after a batch of writes is a cheap safety net.
+- zsh does not word-split an unquoted variable, so my first scrubbed-
+  environment commands failed with "no such file or directory" (again; the
+  same class of slip as 10.3). I moved the commands into a bash script
+  using an array.
+- uv lived in ~/.local/bin, not /opt/homebrew/bin; my scrubbed PATH hid it.
+  A scrubbed environment is only a useful test if it is scrubbed of
+  accidents, not of tools the step needs.
+- My browser test's "run finished" detection looked for the wrong button
+  text, so it waited 90 s and reported "page shows a result: False" while
+  the screenshot clearly showed "Recommendation ready". I trusted the
+  screenshot over the script's boolean and reported the real state. A
+  failed assertion in my own harness is not a failure of the system.
+- The first Dockerfile was written and shipped to the user unbuilt, with
+  that stated up front. That was the honest option but it left a gap that
+  Stage 2 then closed. It would have been better to flag "untested" in the
+  Dockerfile's own header too.
+- I installed ffmpeg because the brief said to, before checking whether
+  anything used it. Cheap to check first.
+
+
+---------------------------------------------------------------------
+8. PRINCIPLES
+---------------------------------------------------------------------
+
+1. Verify in the condition that failed before (env vars only, no .env).
+2. When you cannot do the real verification, do the closest honest one and
+   label it as a substitute.
+3. Deploy to the constraints: ephemeral disk means seed at build and
+   reset, not hope.
+4. Tell the visitor about the limitation before they wait, with numbers
+   read from the system, not typed into copy.
+5. A sleeping backend is a state, not an error.
+6. Reuse the design system's existing elements.
+7. Record security gaps you find, with why they are low risk and what a
+   fix involves, instead of silently ignoring or overselling them.
+8. Remove what nothing uses (ffmpeg), but prove the one path that might
+   need it.
+9. One worker when state and rate limits are per process.
+10. Separate "verified", "prepared" and "unverified" in the same document.
+
+
+---------------------------------------------------------------------
+9. NUMBERS CHEAT SHEET
+---------------------------------------------------------------------
+
+Image: 1,199.8 MB with ffmpeg; 615.5 MB without (saved 584 MB; apt layer
+  422 MB). Build 66 s cold, 28 s cached.
+Container: UID 1000, 0 mounts, 0 .env files, one worker, port 7860.
+Health: 7 + 8 + 11 = 26 MCP tools, 250 recipes, both providers up.
+Pantry hash in the container: c975c014058a, 64 rows.
+Recommendation (photo + text) in the container: 65.8 s and 62.3 s; longest
+  gap 2.52 s.
+Concurrency (two text-only visitors): A at 61.6 s, B at 91.8 s.
+Cold start (local, image on disk): 6.5 to 6.7 s typical (8.1 s first run);
+  6.4 s for a docker start after a stop.
+Native (no-Docker) start: about 6 s; build-equivalent steps 8 s.
+Space bundle: about 178 files, 2.6 MB.
+CORS: allowed origin gets the header; other origin gets 400.
+Waking notice: cleared 4.1 s after the backend came up; retries every 4 s;
+  ready polling every 15 s.
+Tests: 978 passed (one new test for the /health demo block).
+Demo notice: first request immediate, each further waits 30 s; floor =
+  (requests minus 1) x 30 s: 30 s text-only, 60 s with a photo.
+
+
+---------------------------------------------------------------------
+10. LIKELY INTERVIEW QUESTIONS
+---------------------------------------------------------------------
+
+Q: How did you handle the free tier's ephemeral filesystem?
+A: Seeded at image build from committed fixtures, so every start is an
+   identical fresh copy, and told visitors the demo resets. No persistent
+   storage; honesty over pretence.
+
+Q: How did you make sure it works with secrets only as environment
+   variables?
+A: That exact condition had broken MCP subprocesses in CI. I ran the
+   Dockerfile's steps natively with env -i first, then built and ran the
+   real image passing keys only with -e, with no mounts and no .env in
+   the image, and checked that all three servers came up with 7, 8 and 11
+   tools.
+
+Q: What did you verify and what didn't you?
+A: Verified: image build, run, health, pantry hash, a full recommendation,
+   cross-origin REST and WebSocket in a browser, the waking path. Not
+   verified: the Hugging Face build on x86, their wake time, and the
+   Vercel deployment. The docs say so.
+
+Q: The provider allows two requests a minute. What does a visitor see?
+A: A notice before they submit, with the interval and how many runs are
+   already ahead of them, derived from the backend so it stays true if the
+   limits change. Two simultaneous visitors queued: 61.6 s and 91.8 s.
+
+Q: What if the backend is asleep?
+A: The frontend treats a non-answer from /health as "waking": a ticking
+   notice, submit disabled with a reason, retry every 4 s, unlock on its
+   own. Verified against a backend that was started mid-test.
+
+Q: Why only one worker?
+A: The rate limiter and the MCP manager are per process; more workers
+   would multiply the request rate against a fixed provider limit.
+
+Q: Is the WebSocket secure across origins?
+A: Not enforced by CORS and not checked by the backend; session ids are
+   unguessable UUIDs so it isn't exploitable in practice. It is recorded
+   in known issues with a concrete fix.
+
+Q: Why did you remove ffmpeg?
+A: Nothing in the backend calls it. Removing it cut 584 MB, and I tested
+   the voice-memo path to confirm nothing depended on it.
+
+Q: What would you do next?
+A: Do the Hugging Face deploy and measure the real wake time; add the
+   WebSocket Origin check; consider a paid tier or a request-budget
+   guard for public traffic; add a smoke test that builds the image in CI.
+
+
+---------------------------------------------------------------------
+11. WHAT NOT TO OVERCLAIM
+---------------------------------------------------------------------
+
+- The Hugging Face build, the Space, and the Vercel deployment do not
+  exist yet. Only the image and the frontend behaviours were verified,
+  locally.
+- Cold start was measured locally in Docker (about 6.5 s). The real Space
+  wake time is unmeasured and will be longer.
+- The image was built and run on arm64. Hugging Face runs x86; a
+  platform-specific dependency problem is possible though unlikely.
+- The waking behaviour was verified by starting and stopping the backend
+  process, not by waking a real sleeping Space.
+- The concurrency measurement used two text-only visitors on one run, not
+  a load test.
+- The demo notice gives a floor ("at least"), not a prediction.
+- The WebSocket Origin gap is real and unfixed.
+- "No backend code uses ffmpeg" rests on a search of the code plus a
+  working voice-memo run, not on a proof for every possible input format.
+- A public demo shares one pantry, one profile and one rate limit, with no
+  authentication, so it is not a multi-user service.

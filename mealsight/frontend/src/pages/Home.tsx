@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { postRecommend } from '@/api/recommend'
 import { ApiError } from '@/api/client'
 import { Button } from '@/components/primitives/Button'
+import { DemoNotice } from '@/components/recommend/DemoNotice'
 import { LiveFeed } from '@/components/recommend/LiveFeed'
 import { PhotoInput } from '@/components/recommend/PhotoInput'
 import { PipelineProgress } from '@/components/recommend/PipelineProgress'
@@ -11,6 +12,7 @@ import { TextInput } from '@/components/recommend/TextInput'
 import { VoiceInput } from '@/components/recommend/VoiceInput'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { useActiveSession } from '@/lib/activeSessionContext'
+import { useBackendStatus } from '@/lib/backendStatusContext'
 import { MAX_TEXT_LENGTH } from '@/lib/inputLimits'
 
 type AppState = 'idle' | 'submitting' | 'streaming' | 'complete' | 'error'
@@ -37,6 +39,7 @@ export function Home() {
 
   const ws = useWebSocket(appState === 'idle' ? null : sessionId)
   const { setTraceId } = useActiveSession()
+  const backend = useBackendStatus()
 
   // The masthead's own ticket number (NavShell) shows this real
   // session_id — the same id the backend uses as the agent run's own
@@ -50,7 +53,8 @@ export function Home() {
 
   const blockedReason = useMemo(() => disabledReason(photo, audio, text), [photo, audio, text])
   const isBusy = appState === 'submitting' || appState === 'streaming'
-  const canSubmit = blockedReason === null && !isBusy
+  const backendWaking = backend.phase === 'waking'
+  const canSubmit = blockedReason === null && !isBusy && !backendWaking
 
   // Session-level transitions driven by the WebSocket's own terminal
   // messages: a "complete" message means the run finished (ws.result
@@ -118,6 +122,7 @@ export function Home() {
           </div>
 
           <div className="mt-6 flex flex-col gap-2">
+            <DemoNotice />
             <Button variant="primary" onClick={handleSubmit} disabled={!canSubmit}>
               {appState === 'submitting' ? 'Starting…' : 'Get a recommendation'}
             </Button>
@@ -126,6 +131,11 @@ export function Home() {
                 unavailable until the reason is addressed. */}
             {blockedReason && appState === 'idle' && (
               <p className="text-label text-steel-400">{blockedReason}</p>
+            )}
+            {backendWaking && appState === 'idle' && (
+              <p className="text-label text-steel-400">
+                The backend is still waking up. This unlocks by itself as soon as it answers.
+              </p>
             )}
             {submitError && <p className="text-label text-signal-negative">{submitError}</p>}
           </div>

@@ -1,0 +1,24 @@
+# Keep the build context small and free of local state.
+**/.venv
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/*.pyc
+.env
+**/.env
+data
+frontend
+docs
+notes
+backend/tests
+backend/eval/results
+backend/.cache
+scripts/*
+!scripts/reset_demo_pantry.py
+test_data/*
+!test_data/demo_pantry.json
+Dockerfile
+deploy
+backend/seed_meal_history_tmp.py

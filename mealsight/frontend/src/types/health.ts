@@ -27,4 +27,9 @@ export interface HealthReport {
     groq: ProviderHealth
   }
   recipe_database: RecipeDatabaseHealth
+  /** What a visitor should know before waiting: derived server-side from the live limiter and sessions. */
+  demo?: {
+    active_runs: number
+    seconds_between_requests: number | null
+  }
 }

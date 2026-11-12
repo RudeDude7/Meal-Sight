@@ -24,6 +24,7 @@ from typing import Any
 import httpx
 
 from mealsight.agent.mcp_client import EXPECTED_TOOLS, MCPClientManager
+from mealsight.api.sessions import SessionStore
 from mealsight.config.settings import settings
 from mealsight.providers.groq import BASE_URL as GROQ_BASE_URL
 from mealsight.providers.mistral import BASE_URL as MISTRAL_BASE_URL
@@ -106,7 +107,20 @@ async def _check_recipe_database(manager: MCPClientManager) -> dict[str, Any]:
     return {"status": "up" if total > 0 else "down", "recipe_count": total}
 
 
-async def build_health_report(manager: MCPClientManager, http_client: httpx.AsyncClient) -> dict[str, Any]:
+def _demo_capacity(sessions: SessionStore | None) -> dict[str, Any]:
+    """What a visitor should know before waiting: how many runs are ahead of them, and how often the
+    provider lets a request start. Derived from the live limiter spec, not a hard-coded number, so it
+    stays true if the provider's limits change again."""
+    spec = settings.get_rate_limit(settings.REASONING_MODEL)
+    return {
+        "active_runs": sessions.active_count() if sessions is not None else 0,
+        "seconds_between_requests": round(1 / spec.rps, 1) if spec.rps > 0 else None,
+    }
+
+
+async def build_health_report(
+    manager: MCPClientManager, http_client: httpx.AsyncClient, sessions: SessionStore | None = None
+) -> dict[str, Any]:
     mcp_servers, providers, recipe_database = await asyncio.gather(
         _check_mcp_servers(manager),
         _check_providers(http_client),
@@ -124,4 +138,5 @@ async def build_health_report(manager: MCPClientManager, http_client: httpx.Asyn
         "mcp_servers": mcp_servers,
         "providers": providers,
         "recipe_database": recipe_database,
+        "demo": _demo_capacity(sessions),
     }

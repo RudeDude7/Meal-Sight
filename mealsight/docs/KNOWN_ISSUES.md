@@ -69,3 +69,29 @@ after the title-match and protein-match checks both fail. That list would need i
 deliberate scoping (which staples count, and for which dishes) and its own test coverage before
 being trusted — exactly the kind of judgment call this task's "don't over-engineer" instruction
 was aimed at avoiding without first confirming the error rate justifies it.
+
+## 3. WebSocket subscriptions are not origin-checked
+
+**Where:** `backend/mealsight/api/routers/ws.py` (`/ws/{session_id}`) and the CORS setup in `backend/mealsight/api/app.py`.
+
+**Description:** `CORS_ALLOWED_ORIGINS` is enforced by Starlette's `CORSMiddleware`, which only applies to HTTP
+requests. Browsers do not apply CORS to WebSocket upgrades at all, and the backend does not look at the `Origin`
+header of the upgrade request. So the allow-list protects the REST endpoints but not the WebSocket: a page served from
+any origin can open `/ws/{session_id}` and subscribe, provided it knows the session id. (Verified against the
+deployed file set: a cross-origin upgrade with an allowed `Origin` succeeds, and nothing in the code would reject a
+disallowed one.)
+
+**Why it is not exploitable in practice:** a session id is a random UUID (version 4, from `uuid.uuid4()`), returned only
+to the client that started the run, so it cannot be guessed or enumerated, and a session only carries that one run's
+progress messages and result. There is also no authentication or per-user data in this single-user demo for the
+socket to expose beyond that. It is an inconsistency in the protection, not a known leak.
+
+**Why deferred:** low risk for a single-user demo, and the check is easy to get subtly wrong: an exact-match allow-list
+would reject non-browser clients that send no `Origin` and any preview deployment not on the list.
+
+**What a fix would involve:** read `websocket.headers.get("origin")` in the WebSocket handler before `accept()` and close
+with code 1008 (policy violation) when it is present and not in `settings.cors_allowed_origins`, reusing the same list
+so REST and WebSocket cannot drift apart. Decide explicitly what to do with a missing `Origin` (non-browser clients,
+tests) and add tests for an allowed origin, a disallowed origin and an absent one. If sessions ever carry user data,
+also bind the session id to the requesting client (for example a short-lived token returned by `POST /api/recommend`
+and required on the upgrade), since the Origin header is not a credential.

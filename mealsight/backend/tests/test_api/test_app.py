@@ -29,6 +29,7 @@ from mealsight.api.health import reset_provider_cache
 from mealsight.api.idempotency import IdempotencyStore
 from mealsight.api.rate_limit import SubmissionRateLimiter
 from mealsight.api.sessions import SessionStore
+from mealsight.config.settings import settings
 
 
 @pytest.fixture(autouse=True)
@@ -179,6 +180,25 @@ async def test_health_reports_all_servers() -> None:
     assert body["providers"]["mistral"]["status"] == "up"
     assert body["providers"]["groq"]["status"] == "up"
     assert body["recipe_database"] == {"status": "up", "recipe_count": 250}
+
+
+async def test_health_reports_demo_capacity_from_the_live_limiter_and_active_runs() -> None:
+    """A visitor is told how often the provider lets a request start and how many runs are ahead of them."""
+    manager = FakeManager(responses={("recipe_engine", "search_recipes"): _search_recipes_ok()})
+    async with running_client(manager) as (client, _manager):
+        idle = (await client.get("/health")).json()["demo"]
+        sessions = client._transport.app.state.sessions  # type: ignore[attr-defined]
+        running = sessions.create()
+        done = sessions.create()
+        sessions.mark_running(running.session_id, running.session_id)
+        sessions.mark_complete(done.session_id, {})
+        busy = (await client.get("/health")).json()["demo"]
+
+    assert idle["active_runs"] == 0
+    assert busy["active_runs"] == 1, "a finished run is not ahead of anyone"
+    assert busy["seconds_between_requests"] == round(
+        1 / settings.get_rate_limit(settings.REASONING_MODEL).rps, 1
+    )
 
 
 async def test_health_returns_503_when_a_server_is_missing_tools() -> None:

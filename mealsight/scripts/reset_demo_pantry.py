@@ -48,7 +48,10 @@ def _md5(path: Path) -> str:
 def _live_processes() -> list[str]:
     found: list[str] = []
     for pattern in ("uvicorn", "mealsight.mcp_servers"):
-        result = subprocess.run(["pgrep", "-fl", pattern], capture_output=True, text=True, check=False)
+        try:
+            result = subprocess.run(["pgrep", "-fl", pattern], capture_output=True, text=True, check=False)
+        except FileNotFoundError:  # a minimal container has no pgrep (and no other processes to guard against)
+            continue
         found.extend(line for line in result.stdout.splitlines() if "reset_demo_pantry" not in line)
     return found
 

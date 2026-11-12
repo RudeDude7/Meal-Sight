@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Response
 
-from mealsight.api.dependencies import HealthHttpClientDep, MCPManagerDep
+from mealsight.api.dependencies import HealthHttpClientDep, MCPManagerDep, SessionsDep
 from mealsight.api.health import build_health_report
 
 router = APIRouter(tags=["health"])
@@ -22,8 +22,9 @@ async def health(
     response: Response,
     manager: MCPManagerDep,
     http_client: HealthHttpClientDep,
+    sessions: SessionsDep,
 ) -> dict[str, Any]:
-    report = await build_health_report(manager, http_client)
+    report = await build_health_report(manager, http_client, sessions)
     if report["status"] != "healthy":
         response.status_code = 503
     return report

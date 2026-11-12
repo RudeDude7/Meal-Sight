@@ -52,6 +52,11 @@ class SessionStore:
     def get(self, session_id: str) -> RecommendationSession | None:
         return self._sessions.get(session_id)
 
+    def active_count(self) -> int:
+        """Runs that have been accepted and have not finished. They all share one provider rate limit, so
+        a new run waits behind these (surfaced by GET /health so the UI can say so)."""
+        return sum(1 for s in self._sessions.values() if s.status in ("pending", "running"))
+
     def mark_running(self, session_id: str, trace_id: str) -> None:
         session = self._sessions[session_id]
         session.status = "running"

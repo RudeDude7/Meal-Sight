@@ -208,6 +208,7 @@ Python 3.11, FastAPI, LangGraph, FastMCP, SQLite (aiosqlite), Pydantic; React 18
 | Document | What is in it |
 |---|---|
 | [docs/EVALUATION.md](docs/EVALUATION.md) | Methodology, full results, caveats, every bug found |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Hugging Face Space + Vercel setup, manual steps, cold start, the rate limit as a deployment constraint |
 | [docs/CI.md](docs/CI.md) | Pipeline, regression gate, preflight, rate-limit impact |
 | [docs/VISION_FINDINGS.md](docs/VISION_FINDINGS.md) | Vision model choice, the retirement, the faithfulness check |
 | [docs/vision_benchmark_report.md](docs/vision_benchmark_report.md), [docs/vision_diagnostic_report.md](docs/vision_diagnostic_report.md) | The original vision benchmark and diagnostics |

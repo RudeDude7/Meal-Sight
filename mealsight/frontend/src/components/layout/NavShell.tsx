@@ -1,4 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
+
+import { BackendWakingNotice } from '@/components/layout/BackendWakingNotice'
 import type { ComponentType } from 'react'
 
 import {
@@ -154,6 +156,7 @@ export function NavShell() {
               exactly 1024px, 240px rail + a rigid 960px block would
               overflow; this shrinks with the viewport instead. */}
           <div className="mx-auto w-full max-w-[960px]">
+            <BackendWakingNotice />
             <Outlet />
           </div>
         </main>
